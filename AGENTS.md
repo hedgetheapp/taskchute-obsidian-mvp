@@ -1,3 +1,15 @@
+# TaskChute Bridge v6.6 Routine Sync Test Guard
+
+v6.6 Routine同期の設計判断は`docs/bridge/Taskchute_Bridge_v6.6_Routine同期_仕様書_v1.md`を最優先する。
+
+- Routine定義イベントは`RoutineCreated / RoutineUpdated / RoutineDeleted / RoutineReordered`とし、`routine_id`を正とする。
+- Routine生成タスクは`routine_occurrence_key = routine:{routine_id}:date:{YYYY-MM-DD}:time:{scheduled_time_or_empty}`で冪等化する。
+- 同一occurrence keyのローカル生成と受信TaskCreatedは重複作成しない。
+- Routine削除・無効化で既存生成タスクを削除しない。
+- 未知の`section_id`を持つRoutine定義は未Ack停止せず保存し、診断を残す。
+- v6.5 RC3 FIXEDのMarkdown正、`task_id + entry_id`、保存後検証Ack、false-applied禁止、cursor飛ばし禁止、mobile hidden drain制御を弱めない。
+- `main.js`単一ファイル運用を維持する。
+
 # Taskchute Bridge v6.5 RC3 FIXED Release Guard
 
 Taskchute Bridge v6.5 RC3 FIXEDは、dev / remote / mobileの三端末起点最終スモーク通過済みの固定状態として扱う。
