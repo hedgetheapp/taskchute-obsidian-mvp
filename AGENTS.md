@@ -1581,3 +1581,21 @@ MarkdownはUTF-8で保存してください。Windows PowerShellで読む場合�
 - v0.6.12のプルダウン風UI、v0.6.13の「直前の終了時間」安定化、v0.6.14のキーボード操作対応は維持する。
 - `manifest.json` は `0.6.15`。
 - `main.js` 単一ファイル運用を継続し、配布ZIPには `data.json / src / package.json / esbuild.config.mjs / tsconfig.json` を含めない。
+
+
+<!-- TASKCHUTE_BRIDGE_RELEASE_RULES_START -->
+## Release / BRAT 配布ルール
+
+- BRAT固定版配布では、GitHub Release assetsに必ず `main.js` / `manifest.json` / `styles.css` を個別添付する。
+- ZIP添付は任意。ただしZIPのみ添付は禁止。
+- `data.json`、API token、Vault内Taskchuteデータ、`Taskchute/_system/index.json`、バックアップファイル、個人データ、実運用ログは配布物へ含めない。
+- tagは原則 `v{manifest.version}` とする。
+- release titleにはBridge世代・RC名を記載する。
+- release本文には必須assets、任意assets、禁止物、既知の注意を明記する。
+- 配布前に `node --check .\main.js` を必ず実行する。
+- `main.js` 単一ファイル運用を維持する。
+- RC3 FIXED本体の同期ロジックは固定済み。変更する場合はRC3.1またはv6.6候補として扱う。
+- 同期ロジックを変更した場合は、三端末起点スモーク、mobile BG/hidden復帰、完了済みTaskDeletedを再確認する。
+
+<!-- TASKCHUTE_BRIDGE_RELEASE_RULES_END -->
+

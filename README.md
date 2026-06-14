@@ -127,3 +127,49 @@ Bridge変更時は`Taskchute_Bridge_回帰試験チェックリスト_v6.4_RC1.m
 ```powershell
 node --check .\main.js
 ```
+
+
+<!-- TASKCHUTE_BRIDGE_BRAT_RELEASE_START -->
+## BRAT / GitHub Release 配布
+
+Taskchute Bridge は、BRAT frozen release tag での固定版配布を基本とします。
+
+GitHub Release assets には、毎回以下3ファイルを個別添付します。
+
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+ZIPは任意です。ただし、ZIPのみ添付は禁止です。BRATがRelease assetsから個別ファイルを取得できる状態を正とします。
+
+含めてはいけないもの:
+
+- `data.json`
+- API token
+- Vault内Taskchuteデータ
+- `Taskchute/_system/index.json`
+- バックアップファイル
+- 個人データ
+- 実運用ログ
+
+### tag / manifest version
+
+次回以降のtagは、`manifest.json` の `version` に寄せます。
+
+例:
+
+- manifest version: `0.6.16`
+- tag: `v0.6.16`
+- release title: `Taskchute Bridge v6.5 RC4`
+
+原則:
+
+- `manifest.json` の `version` を正とする
+- tagは `v{manifest.version}` とする
+- RC名・Bridge世代名はrelease titleとrelease本文で管理する
+- tag名に長い説明を入れない
+
+過去の成功tag `v0.6.15-bridge-v6.5-rc3-fixed-3` は履歴として維持します。改名・削除・上書きしません。
+
+<!-- TASKCHUTE_BRIDGE_BRAT_RELEASE_END -->
+
