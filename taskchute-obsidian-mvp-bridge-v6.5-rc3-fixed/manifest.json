@@ -1,0 +1,11 @@
+{
+  "id": "taskchute-obsidian-mvp",
+  "name": "Taskchute Obsidian MVP",
+  "version": "0.6.15",
+  "minAppVersion": "1.4.0",
+  "description": "TaskChute-style task execution board for Obsidian. Safe MVP with sections.",
+  "author": "Prototype",
+  "authorUrl": "",
+  "isDesktopOnly": false,
+  "main": "main.js"
+}
