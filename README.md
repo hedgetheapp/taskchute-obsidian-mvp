@@ -2,7 +2,15 @@
 
 Obsidian上でTaskChute形式のTaskBoardを運用するプラグインです。現行配布・開発では、ビルド済みの`main.js`単一ファイル運用を維持します。
 
-## TaskChute Bridge v6.6 Routine Sync Test 1
+## TaskChute Bridge v6.6 Routine Sync Test 2
+
+v0.6.17では、Bridge前の通常Routine仕様を復元し、通常Routine定義と今回のみ操作を同期します。通常Routineの無効化・条件変更では、保護対象を残しつつ当日以降の未実行生成済み行を再整合します。
+
+- 定義イベント: `RoutineCreated` / `RoutineUpdated` / `RoutineDeleted`
+- 今回のみ操作: `RoutineOccurrenceSkipped` / `RoutineOccurrenceCancelled` / `RoutineOccurrenceDeleted`
+- occurrence identity: `routine:{routine_id}:{occurrence_date}`
+- Routine定義受信apply由来のTask変更はBridgeへ再enqueueしません。
+- Rotation Routineはv6.6同期対象外で、既存ローカル挙動を維持します。
 
 v6.6候補では、v6.5 RC3 FIXEDのTask同期安全性を維持したまま、Routine定義とRoutine生成タスクのBridge同期を追加します。
 

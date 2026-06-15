@@ -1,4 +1,11 @@
-# TaskChute Bridge v6.6 Routine Sync Test Guard
+# TaskChute Bridge v6.6 Routine Sync Test 2 Guard
+
+- Bridge前`main.js`の通常Routine生成・再整合・無効化挙動を維持する。
+- 通常Routine無効化・条件変更時は、完了済み・実行済み・実行中・中断中を保護し、当日以降の未実行生成済み行を削除・再整合する。
+- occurrence keyは`routine:{routine_id}:{occurrence_date}`とし、タイトル・開始予定・section・見積を含めない。
+- 今回のみ操作は`RoutineOccurrenceSkipped` / `RoutineOccurrenceCancelled` / `RoutineOccurrenceDeleted`で同期する。
+- Routine定義受信applyから派生したTask更新・移動・削除をBridgeへ再enqueueしない。
+- Rotation Routineはv6.6同期対象外。`rotationRoutines`のローカル挙動を変更しない。
 
 v6.6 Routine同期の設計判断は`docs/bridge/Taskchute_Bridge_v6.6_Routine同期_仕様書_v1.md`を最優先する。
 
