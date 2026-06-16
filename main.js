@@ -3034,55 +3034,87 @@ function routinePassesHolidayRule(def, date, settings = DEFAULT_SETTINGS) {
   return isTaskchuteBusinessWeekday(date, settings || DEFAULT_SETTINGS);
 }
 
+function isUnsetRoutineDateValue(value) {
+  if (value == null) return true;
+  const raw = String(value).trim();
+  if (!raw) return true;
+  return ["null", "undefined", "none", "unset", "未指定", "なし", "無し"].includes(raw.toLowerCase());
+}
+
+function parseRoutineOptionalDateForMatch(value) {
+  if (isUnsetRoutineDateValue(value)) return { ok: true, value: "", raw: String(value == null ? "" : value).trim() };
+  const parsed = parseFlexibleTaskchuteDate(value, { allowEmpty: true });
+  return { ok: !!parsed.ok, value: parsed.ok ? parsed.value : "", raw: String(value == null ? "" : value).trim() };
+}
+
 // ============================================================================
 // SECTION 04: Routine rule helpers
 // Keep routine date matching separate from routine UI/modal rendering.
 // ============================================================================
 
-function routineMatchesDate(def, date, settings = DEFAULT_SETTINGS) {
-  if (!def || !isRoutineEnabled(def.routine) || isFalseLike(def.active)) return false;
+function getRoutineDateMatchDecision(def, date, settings = DEFAULT_SETTINGS) {
+  if (!def) return { match: false, reason: "missing_definition" };
+  if (!isRoutineEnabled(def.routine)) return { match: false, reason: "routine_disabled" };
+  if (isFalseLike(def.active)) return { match: false, reason: "active_false" };
   const target = normalizeTaskchuteDate(date);
-  const startDate = def.startDate ? normalizeTaskchuteDate(def.startDate) : "";
-  const endDate = def.endDate ? normalizeTaskchuteDate(def.endDate) : "";
-  if (startDate && compareDateString(target, startDate) < 0) return false;
-  if (endDate && compareDateString(target, endDate) > 0) return false;
-  if (!routinePassesHolidayRule(def, target, settings)) return false;
+  const parsedStart = parseRoutineOptionalDateForMatch(def.startDate || def.start_date || "");
+  const parsedEnd = parseRoutineOptionalDateForMatch(def.endDate || def.end_date || "");
+  const startDate = parsedStart.value || "";
+  const endDate = parsedEnd.value || "";
+  if (!parsedStart.ok) return { match: false, reason: "invalid_start_date", startDate: parsedStart.raw, endDate };
+  if (!parsedEnd.ok) return { match: false, reason: "invalid_end_date", startDate, endDate: parsedEnd.raw };
+  if (startDate && compareDateString(target, startDate) < 0) return { match: false, reason: "before_start_date", startDate, endDate };
+  if (endDate && compareDateString(target, endDate) > 0) return { match: false, reason: "after_end_date", startDate, endDate };
+  if (!routinePassesHolidayRule(def, target, settings)) return { match: false, reason: "holiday_rule_skip", startDate, endDate };
 
   const repeat = normalizeRoutineRepeat(def.repeat || "daily");
   const parts = routineDateParts(target);
-  if (!repeat || repeat === "daily") return true;
+  if (!repeat || repeat === "daily") return { match: true, reason: "matched_daily", startDate, endDate, repeat };
   if (repeat === "daily_interval") {
     const interval = normalizeRoutineDayInterval(def.interval || def.repeatInterval || def.repeat_interval, 2);
-    return isDailyIntervalTargetDay(target, startDate || def.startDate || target, interval);
+    const match = isDailyIntervalTargetDay(target, startDate || def.startDate || target, interval);
+    return { match, reason: match ? "matched_daily_interval" : "daily_interval_off_day", startDate, endDate, repeat, interval };
   }
-  if (repeat === "weekdays") return isTaskchuteBusinessWeekday(target, settings);
-  if (repeat === "holiday") return isTaskchuteCalendarHolidayDate(target, settings);
-  if (repeat === "weekends") return parts.day === 0 || parts.day === 6;
+  if (repeat === "weekdays") {
+    const match = isTaskchuteBusinessWeekday(target, settings);
+    return { match, reason: match ? "matched_weekdays" : "not_business_weekday", startDate, endDate, repeat };
+  }
+  if (repeat === "holiday") {
+    const match = isTaskchuteCalendarHolidayDate(target, settings);
+    return { match, reason: match ? "matched_holiday" : "not_holiday", startDate, endDate, repeat };
+  }
+  if (repeat === "weekends") {
+    const match = parts.day === 0 || parts.day === 6;
+    return { match, reason: match ? "matched_weekends" : "not_weekend", startDate, endDate, repeat };
+  }
   if (repeat === "weekly" || repeat === "weekly_interval") {
     const days = (def.daysOfWeek || []).map(normalizeWeekdayToken).filter(v => v != null);
     if (!days.length && def.startDate) days.push(routineDateParts(def.startDate).day);
-    if (!days.includes(parts.day)) return false;
+    if (!days.includes(parts.day)) return { match: false, reason: "weekly_day_mismatch", startDate, endDate, repeat, daysOfWeek: days };
     if (repeat === "weekly_interval") {
       const interval = normalizeRoutineInterval(def.interval || def.repeatInterval || def.repeat_interval, 2);
-      return isWeeklyIntervalTargetWeek(target, startDate || def.startDate || target, interval);
+      const match = isWeeklyIntervalTargetWeek(target, startDate || def.startDate || target, interval);
+      return { match, reason: match ? "matched_weekly_interval" : "weekly_interval_off_week", startDate, endDate, repeat, interval, daysOfWeek: days };
     }
-    return true;
+    return { match: true, reason: "matched_weekly", startDate, endDate, repeat, daysOfWeek: days };
   }
   if (repeat === "monthly_date" || repeat === "monthly" || repeat === "monthly-date" || repeat === "monthly_interval_date") {
     const days = (def.daysOfMonth || []).map(v => Number(String(v).trim())).filter(v => Number.isInteger(v) && v >= 1 && v <= 31);
     if (!days.length && def.startDate) days.push(routineDateParts(def.startDate).dayOfMonth);
-    if (!days.includes(parts.dayOfMonth)) return false;
+    if (!days.includes(parts.dayOfMonth)) return { match: false, reason: "monthly_day_mismatch", startDate, endDate, repeat, daysOfMonth: days };
     if (repeat === "monthly_interval_date") {
       const interval = normalizeRoutineMonthInterval(def.interval || def.repeatInterval || def.repeat_interval, 2);
-      return isMonthlyIntervalTargetMonth(target, startDate || def.startDate || target, interval);
+      const match = isMonthlyIntervalTargetMonth(target, startDate || def.startDate || target, interval);
+      return { match, reason: match ? "matched_monthly_interval_date" : "monthly_interval_off_month", startDate, endDate, repeat, interval, daysOfMonth: days };
     }
-    return true;
+    return { match: true, reason: "matched_monthly_date", startDate, endDate, repeat, daysOfMonth: days };
   }
   if (repeat === "month_end") {
     const lastDay = new Date(parts.year, parts.month, 0).getDate();
-    if (parts.dayOfMonth !== lastDay) return false;
+    if (parts.dayOfMonth !== lastDay) return { match: false, reason: "not_month_end", startDate, endDate, repeat };
     const interval = normalizeRoutineMonthInterval(def.interval || def.repeatInterval || def.repeat_interval, 1);
-    return isMonthlyIntervalTargetMonth(target, startDate || def.startDate || target, interval);
+    const match = isMonthlyIntervalTargetMonth(target, startDate || def.startDate || target, interval);
+    return { match, reason: match ? "matched_month_end" : "month_end_interval_off_month", startDate, endDate, repeat, interval };
   }
   if (repeat === "monthly_weekday") {
     const week = normalizeMonthWeekValue(def.weekOfMonth || def.week_of_month || 1);
@@ -3090,9 +3122,14 @@ function routineMatchesDate(def, date, settings = DEFAULT_SETTINGS) {
     const weekday = normalizeWeekdayToken(weekdayToken);
     const targetDay = nthWeekdayOfMonth(parts.year, parts.month, weekday, week);
     const lastDay = new Date(parts.year, parts.month, 0).getDate();
-    return targetDay <= lastDay && targetDay === parts.dayOfMonth;
+    const match = targetDay <= lastDay && targetDay === parts.dayOfMonth;
+    return { match, reason: match ? "matched_monthly_weekday" : "monthly_weekday_mismatch", startDate, endDate, repeat, weekOfMonth: week, dayOfWeek: weekdayToken };
   }
-  return false;
+  return { match: false, reason: "unsupported_repeat", startDate, endDate, repeat };
+}
+
+function routineMatchesDate(def, date, settings = DEFAULT_SETTINGS) {
+  return !!getRoutineDateMatchDecision(def, date, settings).match;
 }
 
 function compareRoutineDefinitions(a, b) {
@@ -21262,6 +21299,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         "---", "type: task", `task_id: ${taskId}`, `title: ${title}`, "routine: true", "---",
         "", `# ${title}`, "", "## Notes", "", "## Comments", "", "## Subtasks", ""
       ].join("\n");
+      const incomingStartDate = parseRoutineOptionalDateForMatch(payload.start_date);
+      const incomingEndDate = parseRoutineOptionalDateForMatch(payload.end_date);
       const fields = {
         routine_id: id, routine: "true", active: payload.enabled === false || payload.active === false ? "false" : "true",
         title, start_plan: String(payload.scheduled_time || payload.start_plan || "").trim(),
@@ -21271,8 +21310,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         category: String(payload.category || "").trim(), area: String(payload.area || "").trim(), client: String(payload.client || "").trim(),
         priority: String(payload.priority || "").trim(), task_links: yamlInlineArray(payload.task_links || []),
         routine_order: String(Math.max(0, Number(payload.sort_index || 0))), repeat: String(payload.repeat || "daily").trim(),
-        interval: String(Math.max(1, Number(payload.interval || 1))), start_date: String(payload.start_date || "").trim(),
-        end_date: String(payload.end_date || "").trim(), days_of_week: yamlInlineArray(payload.days_of_week || []),
+        interval: String(Math.max(1, Number(payload.interval || 1))), start_date: incomingStartDate.ok ? incomingStartDate.value : String(payload.start_date || "").trim(),
+        end_date: incomingEndDate.ok ? incomingEndDate.value : String(payload.end_date || "").trim(), days_of_week: yamlInlineArray(payload.days_of_week || []),
         days_of_month: yamlInlineArray(payload.days_of_month || []), week_of_month: String(payload.week_of_month || 1),
         day_of_week: String(payload.day_of_week || "mon").trim(), holiday_rule: String(payload.holiday_rule || "none").trim(),
         updated_at: incomingUpdatedAt || nowIso(), deleted_at: String(payload.deleted_at || "").trim()
@@ -21289,6 +21328,22 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     const appliedMatches = await this.findBridgeRoutineDefinitionFilesById(id);
     if (appliedMatches.length === 1) {
+      const appliedDefinitions = await this.getRoutineDefinitions();
+      const appliedDefinition = appliedDefinitions.find(def => String(def.routineId || def.taskId || "").trim() === id) || null;
+      this.recordBridgeRoutineDiagnostic("routine_inbound_definition_verify", {
+        routine_id: id,
+        event_type: type,
+        device_id: String(this.settings.bridgeDeviceId || "").trim(),
+        path: appliedMatches[0].path,
+        saved: true,
+        vault_definition_count: appliedDefinitions.length,
+        included_in_generate_definitions: !!appliedDefinition,
+        active: appliedDefinition ? String(appliedDefinition.active || "").trim() : String(extractYamlValue(appliedMatches[0].content, "active") || "").trim(),
+        routine: appliedDefinition ? String(appliedDefinition.routine || "").trim() : String(extractYamlValue(appliedMatches[0].content, "routine") || "").trim(),
+        repeat: appliedDefinition ? String(appliedDefinition.repeat || "").trim() : String(extractYamlValue(appliedMatches[0].content, "repeat") || "").trim(),
+        start_date: appliedDefinition ? String(appliedDefinition.startDate || "").trim() : String(extractYamlValue(appliedMatches[0].content, "start_date") || "").trim(),
+        end_date: appliedDefinition ? String(appliedDefinition.endDate || "").trim() : String(extractYamlValue(appliedMatches[0].content, "end_date") || "").trim()
+      }, "info", "verified");
       const appliedTask = {
         taskId: extractYamlValue(appliedMatches[0].content, "task_id") || id,
         routineId: id,
@@ -25292,8 +25347,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (!taskId) continue;
       const rawStartDate = extractYamlValue(content, "start_date");
       const rawEndDate = extractYamlValue(content, "end_date");
-      const parsedStartDate = parseFlexibleTaskchuteDate(rawStartDate, { allowEmpty: true });
-      const parsedEndDate = parseFlexibleTaskchuteDate(rawEndDate, { allowEmpty: true });
+      const parsedStartDate = parseRoutineOptionalDateForMatch(rawStartDate);
+      const parsedEndDate = parseRoutineOptionalDateForMatch(rawEndDate);
       const sectionId = extractYamlValue(content, "section_id");
       const sectionName = extractYamlValue(content, "section");
       const rawRepeat = extractYamlValue(content, "repeat") || "daily";
@@ -25429,8 +25484,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       const title = extractYamlValue(content, "title") || fileBase.replace(/^T-\d+_/, "");
       const rawStartDate = extractYamlValue(content, "start_date");
       const rawEndDate = extractYamlValue(content, "end_date");
-      const parsedStartDate = parseFlexibleTaskchuteDate(rawStartDate, { allowEmpty: true });
-      const parsedEndDate = parseFlexibleTaskchuteDate(rawEndDate, { allowEmpty: true });
+      const parsedStartDate = parseRoutineOptionalDateForMatch(rawStartDate);
+      const parsedEndDate = parseRoutineOptionalDateForMatch(rawEndDate);
       const rawRepeat = extractYamlValue(content, "repeat") || "daily";
       const normalizedRepeat = normalizeRoutineRepeat(rawRepeat);
       const normalizedInterval = normalizeRoutineStoredInterval(extractYamlValue(content, "interval") || extractYamlValue(content, "repeat_interval"), normalizedRepeat, defaultRoutineIntervalForRepeat(normalizedRepeat));
@@ -25483,7 +25538,36 @@ class TaskchutePlugin extends obsidian.Plugin {
       await this.waitForExternalRefreshPathsToSettle([this.getRoutineHistoryPath(targetDate)], { timeoutMs: 1200, intervalMs: 90 });
     }
     const history = await this.readRoutineHistoryMonth(targetDate);
-    const routines = (await this.getRoutineDefinitions()).filter(def => routineMatchesDate(def, targetDate, this.settings));
+    const routineDefinitions = await this.getRoutineDefinitions();
+    const routineDecisions = routineDefinitions.map(def => {
+      const decision = getRoutineDateMatchDecision(def, targetDate, this.settings);
+      return { def, decision };
+    });
+    const routines = routineDecisions.filter(item => item.decision.match).map(item => item.def);
+    const shouldRecordGenerateDiagnostics = !!(options && options.externalSync) || routines.length === 0;
+    if (shouldRecordGenerateDiagnostics) {
+      this.recordBridgeRoutineDiagnostic("routine_generate_definitions_checked", {
+        device_id: String(this.settings.bridgeDeviceId || "").trim(),
+        date: targetDate,
+        external_sync: !!(options && options.externalSync),
+        vault_definition_count: routineDefinitions.length,
+        matched_count: routines.length,
+        unmatched_count: Math.max(0, routineDefinitions.length - routines.length),
+        definitions: routineDecisions.slice(0, 30).map(item => ({
+          routine_id: String(item.def.routineId || item.def.taskId || "").trim(),
+          title: String(item.def.title || "").trim(),
+          repeat: String(item.def.repeat || "").trim(),
+          interval: item.def.interval,
+          start_date: String(item.def.startDate || "").trim(),
+          end_date: String(item.def.endDate || "").trim(),
+          active: String(item.def.active || "").trim(),
+          routine: String(item.def.routine || "").trim(),
+          path: String(item.def.path || "").trim(),
+          match: !!item.decision.match,
+          reason: String(item.decision.reason || "").trim()
+        }))
+      }, "info", "checked");
+    }
     const generatedEntries = [];
     let added = 0;
 
@@ -25491,7 +25575,16 @@ class TaskchutePlugin extends obsidian.Plugin {
       const routineId = def.routineId || def.taskId;
       const occurrenceKey = this.buildRoutineOccurrenceKey(routineId, targetDate, def.startPlan || "");
       const historyEntry = this.getRoutineHistoryEntryFrom(history, targetDate, routineId);
-      if (historyEntry && isRoutineHistoryBlockingStatus(historyEntry.status)) continue;
+      if (historyEntry && isRoutineHistoryBlockingStatus(historyEntry.status)) {
+        this.recordBridgeRoutineDiagnostic("routine_generation_skipped_by_history", {
+          device_id: String(this.settings.bridgeDeviceId || "").trim(),
+          routine_id: routineId,
+          occurrence_key: occurrenceKey,
+          date: targetDate,
+          history_status: String(historyEntry.status || "").trim()
+        }, "info", "skipped");
+        continue;
+      }
       if (existingOccurrenceKeys.has(occurrenceKey) || existingLegacyRoutineIds.has(routineId)) {
         this.recordBridgeRoutineDiagnostic("routine_occurrence_already_exists", {
           routine_id: routineId, occurrence_key: occurrenceKey, date: targetDate
@@ -25546,6 +25639,27 @@ class TaskchutePlugin extends obsidian.Plugin {
           routineGeneratedForDate: targetDate, routineScheduledTime: item.startPlan
         }, { creationSource: "routine-generated" });
         if (!created && !(this.bridgeInboundApplyInProgress || this.settings.bridgeInboundApplyInProgress)) return 0;
+      }
+    }
+    if (shouldRecordGenerateDiagnostics || added > 0) {
+      this.recordBridgeRoutineDiagnostic("routine_generate_result", {
+        device_id: String(this.settings.bridgeDeviceId || "").trim(),
+        date: targetDate,
+        external_sync: !!(options && options.externalSync),
+        vault_definition_count: routineDefinitions.length,
+        matched_count: routines.length,
+        added_count: added,
+        existing_count: generatedEntries.filter(entry => entry.existing).length
+      }, "info", added > 0 ? "generated" : "checked");
+      if (shouldRecordGenerateDiagnostics && routineDefinitions.length > 0 && routines.length === 0) {
+        try {
+          await this.savePluginData({
+            deviceWriterOperation: "routine-generate-diagnostic",
+            continueAfterDeviceReload: true
+          });
+        } catch (e) {
+          console.error("Taskchute routine generate diagnostic save error", e);
+        }
       }
     }
     for (const item of generatedEntries) {
