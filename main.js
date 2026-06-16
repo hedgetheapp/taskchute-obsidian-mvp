@@ -15934,7 +15934,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           const currentUpdatedAt = matches.length === 1 ? String(extractYamlValue(matches[0].content, "updated_at") || "").trim() : "";
           verified = matches.length === 1 && Date.parse(currentUpdatedAt) >= Date.parse(String(payload.updated_at || event && event.created_at || "").trim());
         } else if (eventType.endsWith("Deleted")) {
-          verified = matches.length === 0 || (matches.length === 1 && isFalseLike(extractYamlValue(matches[0].content, "active")));
+          verified = matches.length === 0;
         } else if (eventType === "RoutineReordered") {
           const expected = Array.isArray(payload.target_order_routine_ids) ? payload.target_order_routine_ids.map(value => String(value || "").trim()).filter(Boolean) : [];
           const definitions = await this.getAllRoutineTaskDefinitions({ includeInactive: true });
@@ -20900,6 +20900,31 @@ class TaskchutePlugin extends obsidian.Plugin {
     return matches;
   }
 
+  async findBridgeRoutineDefinitionFilesForDelete(payload = {}) {
+    const routineId = String(payload.routine_id || "").trim();
+    const taskId = String(payload.task_id || "").trim();
+    const requestedPath = safePath(payload.path || "");
+    const requestedFile = withoutMdExtension(String(payload.file || "").trim());
+    const matches = [];
+    const seen = new Set();
+    const folder = safePath(this.settings.tasksFolder || "Taskchute/Tasks");
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const path = safePath(file.path || "");
+      if (!path.startsWith(`${folder}/`)) continue;
+      let content = "";
+      try { content = await readFileText(this.app, file.path); } catch (e) { continue; }
+      const fileRoutineId = String(extractYamlValue(content, "routine_id") || "").trim();
+      const fileTaskId = String(extractYamlValue(content, "task_id") || "").trim();
+      const idMatched = (!!routineId && fileRoutineId === routineId) || (!!taskId && fileTaskId === taskId);
+      const hinted = (!!requestedPath && path === requestedPath) || (!!requestedFile && withoutMdExtension(file.name) === requestedFile);
+      if (!idMatched) continue;
+      if (seen.has(path)) continue;
+      seen.add(path);
+      matches.push({ file, path: file.path, content, hinted });
+    }
+    return matches.sort((a, b) => Number(!!b.hinted) - Number(!!a.hinted));
+  }
+
   async buildBridgeRoutinePayload(task, options = {}) {
     const def = await this.getLatestRoutineDefinitionForSync(task || {}, options || {});
     const routineId = String(def.routineId || def.taskId || "").trim();
@@ -20961,6 +20986,20 @@ class TaskchutePlugin extends obsidian.Plugin {
     const userId = String(this.settings.bridgeUserId || "").trim();
     const deviceId = String(this.settings.bridgeDeviceId || "").trim();
     if (!payload || !userId || !deviceId) return false;
+    if (type === "RoutineCreated") {
+      const pendingCreated = normalizeBridgeOutboxEvents(this.settings.bridgeOutboxEvents).some(event =>
+        ["pending", "failed"].includes(String(event && event.status || ""))
+        && String(event && event.event_type || "") === "RoutineCreated"
+        && String(event && event.payload && event.payload.routine_id || "").trim() === payload.routine_id
+      );
+      const alreadyKnown = (this.settings.bridgeRoutineDefinitionEnqueuedIds || []).includes(payload.routine_id);
+      if (pendingCreated || alreadyKnown) {
+        this.recordBridgeRoutineDiagnostic("routine_created_duplicate_enqueue_skipped", {
+          routine_id: payload.routine_id, event_type: type
+        }, "info", "skipped");
+        return true;
+      }
+    }
     const saved = await this.appendBridgeOutboxEvent({
       event_id: createBridgeEventId(), user_id: userId, device_id: deviceId, event_type: type,
       created_at: timestamp, logical_clock: this.nextBridgeLogicalClock(), payload,
@@ -21113,6 +21152,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       && String(event && event.payload && event.payload.routine_id || "").trim() === id
     );
     if (pendingDefinition) return true;
+    if ((this.settings.bridgeRoutineDefinitionEnqueuedIds || []).includes(id)) return true;
     const matches = await this.findBridgeRoutineDefinitionFilesById(id);
     if (matches.length !== 1) return false;
     return await this.enqueueBridgeRoutineEvent("RoutineCreated", {
@@ -21151,7 +21191,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     const type = String(event && event.event_type || "").trim();
     const id = String(payload.routine_id || "").trim();
     if (!id) return { ok: false, message: "Routineイベントにroutine_idがありません。" };
-    const matches = await this.findBridgeRoutineDefinitionFilesById(id);
+    const matches = type === "RoutineDeleted"
+      ? await this.findBridgeRoutineDefinitionFilesForDelete(payload)
+      : await this.findBridgeRoutineDefinitionFilesById(id);
     if (matches.length > 1) return { ok: false, message: `同一routine_idのRoutine定義が複数見つかったため停止しました。routine_id=${id}` };
     const incomingUpdatedAt = String(payload.updated_at || event && event.created_at || "").trim();
     const currentUpdatedAt = matches.length === 1 ? String(extractYamlValue(matches[0].content, "updated_at") || "").trim() : "";
@@ -21176,11 +21218,29 @@ class TaskchutePlugin extends obsidian.Plugin {
         return { ok: true, noop: true, message: "削除対象Routine定義は既に存在せず、派生タスク再整合を確認しました。" };
       }
       let content = matches[0].content;
+      content = replaceYamlValue(content, "routine", "false");
       content = replaceYamlValue(content, "active", "false");
       content = replaceYamlValue(content, "deleted_at", String(payload.deleted_at || incomingUpdatedAt || nowIso()));
       content = replaceYamlValue(content, "updated_at", incomingUpdatedAt || nowIso());
       const writeOk = await this.writeFileText(matches[0].path, content, { deviceWriterOperation: "bridge-inbound-routine-deleted" });
       if (this.isTaskchuteWriteAborted(writeOk)) return { ok: false, message: "RoutineDeleted保存が停止しました。" };
+      const verifiedContent = await readFileText(this.app, matches[0].path);
+      if (!isFalseLike(extractYamlValue(verifiedContent, "routine")) || !isFalseLike(extractYamlValue(verifiedContent, "active"))) {
+        return { ok: false, message: "RoutineDeleted保存後検証でRoutine定義が無効化されていません。" };
+      }
+      const remainingActive = await this.findBridgeRoutineDefinitionFilesById(id);
+      if (remainingActive.length !== 0) return { ok: false, message: "RoutineDeleted保存後検証で有効なRoutine定義が残っています。" };
+      const removed = await this.reconcileGeneratedRoutineInstancesForDefinition({
+        taskId: extractYamlValue(verifiedContent, "task_id") || payload.task_id || id,
+        routineId: id,
+        file: withoutMdExtension(matches[0].file.name),
+        fileBase: withoutMdExtension(matches[0].file.name),
+        path: matches[0].path
+      }, {
+        fromDate: this.getActiveViewDate(),
+        includeCurrent: true
+      });
+      if (removed === false) return { ok: false, message: "RoutineDeleted派生タスクの再整合に失敗しました。" };
     } else if (type === "RoutineReordered") {
       const orderIds = Array.isArray(payload.target_order_routine_ids) ? payload.target_order_routine_ids.map(value => String(value || "").trim()).filter(Boolean) : [];
       const definitions = await this.getAllRoutineTaskDefinitions({ includeInactive: true });
