@@ -25529,7 +25529,10 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
 
     if (added > 0) {
-      const writeOk = await this.writeFileText(notePath, md, { deviceWriterOperation: "routine-generate" });
+      const writeOk = await this.writeFileText(notePath, md, {
+        deviceWriterOperation: "routine-generate",
+        continueAfterDeviceReload: true
+      });
       if (this.isTaskchuteWriteAborted(writeOk)) return 0;
       for (const item of generatedEntries.filter(entry => !entry.existing && entry.entryId)) {
         const created = await this.enqueueBridgeTaskCreated({
@@ -34591,9 +34594,7 @@ class TaskchuteView extends obsidian.ItemView {
     let tasks = [];
     try {
       const notePath = await this.plugin.ensureTaskchuteNote(this.selectedDate);
-      if (!(options && options.externalSync)) {
-        await this.plugin.generateRoutinesForDate(this.selectedDate, { externalSync: !!(options && options.externalSync) });
-      }
+      await this.plugin.generateRoutinesForDate(this.selectedDate, { externalSync: !!(options && options.externalSync) });
       md = await readFileText(this.app, notePath);
       tasks = await this.plugin.enrichTasks(parseTasks(md), md, this.selectedDate);
       if (!isCurrentRefresh()) return;
@@ -34751,9 +34752,7 @@ class TaskchuteView extends obsidian.ItemView {
     let tasks = [];
     try {
       const notePath = await this.plugin.ensureTaskchuteNote(this.selectedDate);
-      if (!(options && options.externalSync)) {
-        await this.plugin.generateRoutinesForDate(this.selectedDate, { externalSync: !!(options && options.externalSync) });
-      }
+      await this.plugin.generateRoutinesForDate(this.selectedDate, { externalSync: !!(options && options.externalSync) });
       md = await readFileText(this.app, notePath);
       tasks = await this.plugin.enrichTasks(parseTasks(md), md, this.selectedDate);
       if (!isCurrentPatch()) return;
