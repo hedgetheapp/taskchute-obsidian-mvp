@@ -3048,6 +3048,46 @@ function parseRoutineOptionalDateForMatch(value) {
   return { ok: !!parsed.ok, value: parsed.ok ? parsed.value : "", raw: String(value == null ? "" : value).trim() };
 }
 
+function isContinuousRoutineRepeat(repeat) {
+  const normalized = normalizeRoutineRepeat(repeat || "daily");
+  return [
+    "daily", "daily_interval", "weekdays", "holiday", "weekends",
+    "weekly", "weekly_interval", "monthly", "monthly_date",
+    "monthly_interval_date", "month_end", "monthly_weekday"
+  ].includes(normalized);
+}
+
+function normalizeRoutineOptionalEndDate(value, context = {}) {
+  const raw = String(value == null ? "" : value).trim();
+  const parsed = parseRoutineOptionalDateForMatch(raw);
+  const normalized = parsed.ok ? (parsed.value || "") : raw;
+  const startDate = normalizeTaskchuteDate(context.startDate || context.start_date || "");
+  const repeat = normalizeRoutineRepeat(context.repeat || "daily");
+  const explicit = !!context.explicit;
+  const changed = normalized !== raw;
+  return {
+    ok: !!parsed.ok,
+    raw,
+    value: normalized,
+    startDate,
+    repeat,
+    explicit,
+    changed,
+    sameAsStart: !!(normalized && startDate && normalized === startDate),
+    continuous: isContinuousRoutineRepeat(repeat)
+  };
+}
+
+function shouldRepairRoutineEndDateSameAsStart(fields = {}) {
+  const repeat = normalizeRoutineRepeat(fields.repeat || "daily");
+  if (!isContinuousRoutineRepeat(repeat)) return false;
+  const start = parseRoutineOptionalDateForMatch(fields.start_date || fields.startDate || "");
+  const end = parseRoutineOptionalDateForMatch(fields.end_date || fields.endDate || "");
+  if (!start.ok || !end.ok || !start.value || !end.value || start.value !== end.value) return false;
+  const explicit = String(fields.routine_end_date_explicit || fields.end_date_explicit || "").trim().toLowerCase();
+  return !["true", "1", "yes", "on", "y"].includes(explicit);
+}
+
 // ============================================================================
 // SECTION 04: Routine rule helpers
 // Keep routine date matching separate from routine UI/modal rendering.
@@ -20980,7 +21020,13 @@ class TaskchutePlugin extends obsidian.Plugin {
     const routineId = String(def.routineId || def.taskId || "").trim();
     if (!routineId) return null;
     const updatedAt = String(options.updatedAt || task && (task.updatedAt || task.updated_at) || "").trim() || nowIso();
-    return {
+    const endDateInfo = normalizeRoutineOptionalEndDate(def.endDate || def.end_date || "", {
+      startDate: def.startDate || def.start_date || "",
+      repeat: def.repeat || "daily",
+      explicit: !!(def.routineEndDateExplicit || def.routine_end_date_explicit || def.endDateExplicit || def.end_date_explicit)
+    });
+    const payloadEndDate = endDateInfo.ok ? endDateInfo.value : "";
+    const payload = {
       source: "obsidian-plugin",
       routine_id: routineId,
       task_id: String(def.taskId || "").trim(),
@@ -21010,7 +21056,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       repeat: String(def.repeat || "daily").trim(),
       interval: Math.max(1, Number(def.interval || 1)),
       start_date: String(def.startDate || "").trim(),
-      end_date: String(def.endDate || "").trim(),
+      end_date: payloadEndDate,
       days_of_week: Array.isArray(def.daysOfWeek) ? def.daysOfWeek : [],
       days_of_month: Array.isArray(def.daysOfMonth) ? def.daysOfMonth : [],
       week_of_month: def.weekOfMonth || 1,
@@ -21022,6 +21068,19 @@ class TaskchutePlugin extends obsidian.Plugin {
       deleted_at: String(options.deletedAt || task && (task.deletedAt || task.deleted_at) || "").trim(),
       target_order_routine_ids: Array.isArray(options.targetOrderRoutineIds) ? options.targetOrderRoutineIds.slice() : undefined
     };
+    this.recordBridgeRoutineDiagnostic("routine_end_date_payload_normalized", {
+      routine_id: routineId,
+      event_type: String(options.eventType || options.event_type || "").trim(),
+      repeat: payload.repeat,
+      start_date: payload.start_date,
+      end_date_input: endDateInfo.raw,
+      end_date_normalized: endDateInfo.value,
+      end_date_saved: String(def.endDate || def.end_date || "").trim(),
+      end_date_payload: payload.end_date,
+      end_date_explicit: !!endDateInfo.explicit,
+      same_as_start: !!endDateInfo.sameAsStart
+    }, "info", "checked");
+    return payload;
   }
 
   async enqueueBridgeRoutineEvent(eventType, task, options = {}) {
@@ -21030,6 +21089,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!["RoutineCreated", "RoutineUpdated", "RoutineDeleted", "RoutineReordered"].includes(type)) return false;
     const timestamp = nowIso();
     const payload = await this.buildBridgeRoutinePayload(task, Object.assign({}, options, {
+      eventType: type,
       updatedAt: timestamp,
       deletedAt: type === "RoutineDeleted" ? timestamp : options.deletedAt
     }));
@@ -21314,6 +21374,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       ].join("\n");
       const incomingStartDate = parseRoutineOptionalDateForMatch(payload.start_date);
       const incomingEndDate = parseRoutineOptionalDateForMatch(payload.end_date);
+      const incomingEndDateInfo = normalizeRoutineOptionalEndDate(payload.end_date, {
+        startDate: incomingStartDate.ok ? incomingStartDate.value : payload.start_date,
+        repeat: payload.repeat || "daily",
+        explicit: !!String(payload.end_date || "").trim()
+      });
       const fields = {
         routine_id: id, routine: "true", active: payload.enabled === false || payload.active === false ? "false" : "true",
         title, start_plan: String(payload.scheduled_time || payload.start_plan || "").trim(),
@@ -21324,11 +21389,23 @@ class TaskchutePlugin extends obsidian.Plugin {
         priority: String(payload.priority || "").trim(), task_links: yamlInlineArray(payload.task_links || []),
         routine_order: String(Math.max(0, Number(payload.sort_index || 0))), repeat: String(payload.repeat || "daily").trim(),
         interval: String(Math.max(1, Number(payload.interval || 1))), start_date: incomingStartDate.ok ? incomingStartDate.value : String(payload.start_date || "").trim(),
-        end_date: incomingEndDate.ok ? incomingEndDate.value : String(payload.end_date || "").trim(), days_of_week: yamlInlineArray(payload.days_of_week || []),
+        end_date: incomingEndDateInfo.ok ? incomingEndDateInfo.value : (incomingEndDate.ok ? incomingEndDate.value : ""), routine_end_date_explicit: incomingEndDateInfo.value ? "true" : "false", days_of_week: yamlInlineArray(payload.days_of_week || []),
         days_of_month: yamlInlineArray(payload.days_of_month || []), week_of_month: String(payload.week_of_month || 1),
         day_of_week: String(payload.day_of_week || "mon").trim(), holiday_rule: String(payload.holiday_rule || "none").trim(),
         updated_at: incomingUpdatedAt || nowIso(), deleted_at: String(payload.deleted_at || "").trim()
       };
+      this.recordBridgeRoutineDiagnostic("routine_end_date_inbound_save_normalized", {
+        routine_id: id,
+        event_type: type,
+        repeat: fields.repeat,
+        start_date: fields.start_date,
+        end_date_input: incomingEndDateInfo.raw,
+        end_date_normalized: incomingEndDateInfo.value,
+        end_date_saved: fields.end_date,
+        end_date_payload: String(payload.end_date || "").trim(),
+        end_date_explicit: fields.routine_end_date_explicit === "true",
+        same_as_start: !!incomingEndDateInfo.sameAsStart
+      }, "info", "saved");
       Object.entries(fields).forEach(([key, value]) => { content = replaceYamlValue(content, key, value); });
       if (Array.isArray(payload.subtasks_template)) {
         content = replaceMarkdownSection(content, "Subtasks", serializeSubtaskTemplate(normalizeSubtaskTemplateItems(payload.subtasks_template)), { compact: true });
@@ -24468,6 +24545,11 @@ class TaskchutePlugin extends obsidian.Plugin {
     const interval = normalizeRoutineStoredInterval(source.interval || source.repeatInterval || source.repeat_interval, repeat, defaultRoutineIntervalForRepeat(repeat));
     const startDate = normalizeTaskchuteDate(source.startDate || source.start_date || (options && options.startDate) || this.getActiveViewDate());
     const endRaw = source.endDate || source.end_date || "";
+    const endDateInfo = normalizeRoutineOptionalEndDate(endRaw, {
+      startDate,
+      repeat,
+      explicit: !!(source.routineEndDateExplicit || source.routine_end_date_explicit || source.endDateExplicit || source.end_date_explicit)
+    });
     return {
       taskId: String(source.taskId || source.task_id || "").trim(),
       routineId: String(source.routineId || source.routine_id || source.taskId || source.task_id || "").trim(),
@@ -24479,7 +24561,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       repeat,
       interval,
       startDate,
-      endDate: endRaw ? normalizeTaskchuteDate(endRaw) : "",
+      endDate: endDateInfo.ok ? endDateInfo.value : "",
+      routineEndDateExplicit: source.routineEndDateExplicit || source.routine_end_date_explicit || "",
+      routine_end_date_explicit: source.routine_end_date_explicit || source.routineEndDateExplicit || "",
       daysOfWeek: normalizeWeekdayValues(source.daysOfWeek || source.days_of_week || []),
       daysOfMonth: normalizeMonthDayValues(source.daysOfMonth || source.days_of_month || []),
       weekOfMonth: normalizeMonthWeekValue(source.weekOfMonth || source.week_of_month || 1),
@@ -24680,6 +24764,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       start_date: readOrFallback("start_date", seed.startDate || seed.start_date),
       endDate: readOrFallback("end_date", seed.endDate || seed.end_date),
       end_date: readOrFallback("end_date", seed.endDate || seed.end_date),
+      routineEndDateExplicit: readOrFallback("routine_end_date_explicit", seed.routineEndDateExplicit || seed.routine_end_date_explicit || ""),
+      routine_end_date_explicit: readOrFallback("routine_end_date_explicit", seed.routine_end_date_explicit || seed.routineEndDateExplicit || ""),
       daysOfWeek: extractYamlArrayValues(content, "days_of_week"),
       days_of_week: extractYamlArrayValues(content, "days_of_week"),
       daysOfMonth: extractYamlArrayValues(content, "days_of_month"),
@@ -25380,6 +25466,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         interval: normalizedInterval,
         startDate: parsedStartDate.ok ? parsedStartDate.value : "",
         endDate: parsedEndDate.ok ? parsedEndDate.value : "",
+        routineEndDateExplicit: extractYamlValue(content, "routine_end_date_explicit"),
+        routine_end_date_explicit: extractYamlValue(content, "routine_end_date_explicit"),
         daysOfWeek: extractYamlArrayValues(content, "days_of_week"),
         daysOfMonth: extractYamlArrayValues(content, "days_of_month"),
         weekOfMonth: normalizeMonthWeekValue(extractYamlValue(content, "week_of_month") || 1),
@@ -25436,6 +25524,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       "repeat: daily",
       `start_date: ${normalizeTaskchuteDate(startDate)}`,
       "end_date: ",
+      "routine_end_date_explicit: false",
       "days_of_week: []",
       "days_of_month: []",
       "interval: 1",
@@ -25461,10 +25550,22 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (this.isTaskchuteWriteAborted(writeOk)) return null;
     const task = {
       taskId, routineId: taskId, title, file: base, fileBase: base, path: taskPath,
-      routine: "true", active: "false", repeat: "daily", startDate: normalizeTaskchuteDate(startDate), endDate: "",
+      routine: "true", active: "false", repeat: "daily", startDate: normalizeTaskchuteDate(startDate), endDate: "", routineEndDateExplicit: "false", routine_end_date_explicit: "false",
       daysOfWeek: [], daysOfMonth: [], interval: 1, weekOfMonth: 1, dayOfWeek: "mon", holidayRule: "none", holiday_rule: "none", routineOrder: "0", estimateMin: estimate, startPlan: "", project: "",
       sectionId: TC_NO_SECTION_ID, sectionName: TC_NO_SECTION_NAME, section: TC_NO_SECTION_NAME, mode: "", subtasks: []
     };
+    this.recordBridgeRoutineDiagnostic("routine_end_date_save_normalized", {
+      routine_id: taskId,
+      event_type: "RoutineCreated",
+      repeat: "daily",
+      start_date: task.startDate,
+      end_date_input: "",
+      end_date_normalized: "",
+      end_date_saved: "",
+      end_date_payload: "",
+      end_date_explicit: false,
+      same_as_start: false
+    }, "info", "saved");
     await this.refreshRoutineSettingsViews();
     await this.refreshViews({ preserveScroll: true });
     if (this.settings.bridgeEnabled && !(await this.enqueueBridgeRoutineEvent("RoutineCreated", task))) {
@@ -25514,6 +25615,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         interval: normalizedInterval,
         startDate: parsedStartDate.ok ? parsedStartDate.value : "",
         endDate: parsedEndDate.ok ? parsedEndDate.value : "",
+        routineEndDateExplicit: extractYamlValue(content, "routine_end_date_explicit"),
+        routine_end_date_explicit: extractYamlValue(content, "routine_end_date_explicit"),
         daysOfWeek: extractYamlArrayValues(content, "days_of_week"),
         daysOfMonth: extractYamlArrayValues(content, "days_of_month"),
         weekOfMonth: normalizeMonthWeekValue(extractYamlValue(content, "week_of_month") || 1),
@@ -26582,6 +26685,33 @@ class TaskchutePlugin extends obsidian.Plugin {
               if (normalized.ok && normalized.changed) replacements[key] = normalized.value;
               if (!normalized.ok) this.appendTaskchuteRepairEntry(report, "repair_routine_date_invalid", "report_only", { path, key, value: normalized.value });
             });
+            const routineDateFields = {
+              repeat: extractYamlValue(text, "repeat") || "daily",
+              start_date: Object.prototype.hasOwnProperty.call(replacements, "start_date") ? replacements.start_date : extractYamlValue(text, "start_date"),
+              end_date: Object.prototype.hasOwnProperty.call(replacements, "end_date") ? replacements.end_date : extractYamlValue(text, "end_date"),
+              routine_end_date_explicit: extractYamlValue(text, "routine_end_date_explicit") || extractYamlValue(text, "end_date_explicit")
+            };
+            if (routineDateFields.end_date && routineDateFields.start_date && routineDateFields.end_date === routineDateFields.start_date && isContinuousRoutineRepeat(routineDateFields.repeat)) {
+              if (shouldRepairRoutineEndDateSameAsStart(routineDateFields)) {
+                replacements.end_date = "";
+                replacements.routine_end_date_explicit = "false";
+                this.appendTaskchuteRepairEntry(report, "repair_routine_end_date_same_as_start_normalized", "auto_fixed", {
+                  path,
+                  repeat: routineDateFields.repeat,
+                  start_date: routineDateFields.start_date,
+                  previous_end_date: routineDateFields.end_date,
+                  reason: "continuous_routine_without_explicit_end_date_marker"
+                });
+              } else {
+                this.appendTaskchuteRepairEntry(report, "repair_routine_end_date_same_as_start_report_only", "report_only", {
+                  path,
+                  repeat: routineDateFields.repeat,
+                  start_date: routineDateFields.start_date,
+                  end_date: routineDateFields.end_date,
+                  reason: "explicit_end_date_marker_present_or_ambiguous"
+                });
+              }
+            }
             if (Object.keys(replacements).length && !(options && options.dryRun)) {
               await this.snapshotTaskchuteRepairFile(report, path);
               let next = text;
@@ -29196,7 +29326,14 @@ class TaskchutePlugin extends obsidian.Plugin {
     const routineOn = values.routine != null ? isRoutineEnabled(values.routine) : (keepRoutineDefinition ? true : enabled);
     const nextRepeat = normalizeRoutineRepeat(hasValue("repeat") ? values.repeat : (task.repeat || "daily"));
     const nextStartDate = hasValue("start_date") ? values.start_date : (task.startDate || this.getDateForTask(task));
-    const nextEndDate = hasValue("end_date") ? values.end_date : (task.endDate || "");
+    const rawNextEndDate = hasValue("end_date") ? values.end_date : (task.endDate || "");
+    const existingEndDateExplicit = String(extractYamlValue(content, "routine_end_date_explicit") || task.routineEndDateExplicit || task.routine_end_date_explicit || "").trim();
+    const nextEndDateInfo = normalizeRoutineOptionalEndDate(rawNextEndDate, {
+      startDate: nextStartDate || this.getDateForTask(task),
+      repeat: nextRepeat,
+      explicit: hasValue("end_date") ? !!String(values.end_date || "").trim() : ["true", "1", "yes", "on", "y"].includes(existingEndDateExplicit.toLowerCase())
+    });
+    const nextEndDate = nextEndDateInfo.ok ? nextEndDateInfo.value : "";
     const nextDaysOfWeek = normalizeWeekdayValues(hasValue("days_of_week") ? values.days_of_week : (task.daysOfWeek || []));
     const nextDaysOfMonth = normalizeMonthDayValues(hasValue("days_of_month") ? values.days_of_month : (task.daysOfMonth || []));
     const nextInterval = normalizeRoutineStoredInterval(hasValue("interval") ? values.interval : (task.interval || task.repeatInterval || task.repeat_interval), nextRepeat, defaultRoutineIntervalForRepeat(nextRepeat));
@@ -29216,7 +29353,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       active: enabled ? "true" : "false",
       repeat: nextRepeat,
       start_date: normalizeTaskchuteDate(nextStartDate || this.getDateForTask(task)),
-      end_date: nextEndDate ? normalizeTaskchuteDate(nextEndDate) : "",
+      end_date: nextEndDate,
       days_of_week: yamlInlineArray(nextDaysOfWeek),
       days_of_month: yamlInlineArray(nextDaysOfMonth),
       interval: String(nextInterval),
@@ -29230,9 +29367,22 @@ class TaskchutePlugin extends obsidian.Plugin {
       section_id: selectedSection.id || TC_NO_SECTION_ID,
       section: selectedSection.name || TC_NO_SECTION_NAME,
       routine_id: String(task.routineId || task.routine_id || task.taskId || task.task_id || "").trim(),
+      routine_end_date_explicit: nextEndDate ? "true" : "false",
       updated_at: nowIso(),
       deleted_at: bridgeRoutineDelete ? nowIso() : ""
     };
+    this.recordBridgeRoutineDiagnostic("routine_end_date_save_normalized", {
+      routine_id: fields.routine_id,
+      event_type: bridgeRoutineDelete ? "RoutineDeleted" : "RoutineUpdated",
+      repeat: fields.repeat,
+      start_date: fields.start_date,
+      end_date_input: nextEndDateInfo.raw,
+      end_date_normalized: nextEndDateInfo.value,
+      end_date_saved: fields.end_date,
+      end_date_payload: fields.end_date,
+      end_date_explicit: nextEndDate ? true : false,
+      same_as_start: !!nextEndDateInfo.sameAsStart
+    }, "info", "saved");
     Object.entries(fields).forEach(([key, value]) => {
       content = replaceYamlValue(content, key, value);
     });
@@ -29266,6 +29416,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       sectionName: fields.section,
       section: fields.section,
       routineId: fields.routine_id,
+      routineEndDateExplicit: fields.routine_end_date_explicit,
+      routine_end_date_explicit: fields.routine_end_date_explicit,
       updatedAt: fields.updated_at,
       deletedAt: fields.deleted_at
     };
@@ -45508,11 +45660,18 @@ class RoutineManagementView extends obsidian.ItemView {
     const sectionId = patch.section_id != null ? patch.section_id : (task && (task.sectionId || task.section_id));
     const sections = getBoardSections(this.plugin.settings);
     const selectedSection = sections.find(sec => sec.id === sectionId || sec.name === (patch.section || task && (task.sectionName || task.section))) || getNoSectionDefinition(this.plugin.settings);
+    const repeat = normalizeRoutineRepeat(task && task.repeat || "daily");
+    const startDate = normalizeTaskchuteDate(task && task.startDate || (this.plugin.getActiveViewDate ? this.plugin.getActiveViewDate() : todayDate()));
+    const endDateInfo = normalizeRoutineOptionalEndDate(task && task.endDate || "", {
+      startDate,
+      repeat,
+      explicit: !!(task && (task.routineEndDateExplicit || task.routine_end_date_explicit))
+    });
     return Object.assign({
       enabled: patch.enabled != null ? !!patch.enabled : isTaskRoutineActive(task),
-      repeat: normalizeRoutineRepeat(task && task.repeat || "daily"),
-      start_date: normalizeTaskchuteDate(task && task.startDate || (this.plugin.getActiveViewDate ? this.plugin.getActiveViewDate() : todayDate())),
-      end_date: task && task.endDate ? normalizeTaskchuteDate(task.endDate) : "",
+      repeat,
+      start_date: startDate,
+      end_date: endDateInfo.ok ? endDateInfo.value : "",
       days_of_week: normalizeWeekdayValues(task && task.daysOfWeek || []),
       days_of_month: normalizeMonthDayValues(task && task.daysOfMonth || []),
       interval: normalizeRoutineStoredInterval(task && (task.interval || task.repeatInterval || task.repeat_interval), normalizeRoutineRepeat(task && task.repeat || "daily"), defaultRoutineIntervalForRepeat(normalizeRoutineRepeat(task && task.repeat || "daily"))),
