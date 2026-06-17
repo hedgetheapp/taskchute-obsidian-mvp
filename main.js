@@ -10157,6 +10157,18 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.addCommand({ id: "reload-taskchute-sync-data", name: "同期データを再読み込み", callback: async () => { await this.reloadTaskchuteSyncDataFromDisk({ reason: "manual-command", force: true, notice: true, patchViews: true, preserveScroll: true }); } });
       this.addCommand({ id: "toggle-keyboard-debug", name: "キー操作デバッグON/OFF", callback: async () => { this.settings.debugKeyboard = !this.settings.debugKeyboard; await this.savePluginData(); new obsidian.Notice("キー操作デバッグ: " + (this.settings.debugKeyboard ? "ON" : "OFF")); } });
 
+      this.addCommand({ id: "one-click-repair-taskchute", name: "TaskChute\u4fee\u5fa9", callback: async () => {
+        const ok = await this.confirmAction({
+          title: "TaskChute\u4fee\u5fa9",
+          message: "TaskChute/Bridge\u306e\u72b6\u614b\u3092\u8a3a\u65ad\u3057\u3001\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u3068\u30ec\u30dd\u30fc\u30c8\u3092\u4f5c\u6210\u3057\u3066\u5b89\u5168\u306a\u81ea\u52d5\u4fee\u5fa9\u3060\u3051\u3092\u5b9f\u884c\u3057\u307e\u3059\u3002\u91cd\u8907\u3084\u7af6\u5408\u306f\u30ec\u30dd\u30fc\u30c8\u306e\u307f\u3067\u3059\u3002",
+          okText: "\u4fee\u5fa9\u3092\u5b9f\u884c",
+          cancelText: "\u30ad\u30e3\u30f3\u30bb\u30eb"
+        });
+        if (!ok) return;
+        await this.runTaskchuteOneClickRepair({ notice: true });
+        await this.activateSetupDiagnosticView();
+      } });
+
       this.setupKeyboardHandlers();
       this.setupExternalChangeWatcher();
       this.setupWakeSyncGuardWatchers();
@@ -26313,6 +26325,487 @@ class TaskchutePlugin extends obsidian.Plugin {
       warnings: list.filter(item => item && item.severity === "warning").length,
       info: list.filter(item => item && item.severity === "info").length
     };
+  }
+
+  createTaskchuteRepairRunId() {
+    const stamp = nowIso().replace(/[:]/g, "").replace("T", "-");
+    const suffix = Math.random().toString(36).slice(2, 8);
+    return `repair-${stamp}-${suffix}`;
+  }
+
+  getTaskchuteRepairRunFolder(runId) {
+    return safePath(`.taskchute/repair-reports/${String(runId || "").trim()}`);
+  }
+
+  getTaskchuteRepairBackupPath(runId, sourcePath) {
+    const source = safePath(sourcePath || "");
+    const name = source.replace(/[^A-Za-z0-9._-]+/g, "__").replace(/^_+/, "") || "unknown";
+    return safePath(`${this.getTaskchuteRepairRunFolder(runId)}/backups/${name}.bak`);
+  }
+
+  appendTaskchuteRepairEntry(report, id, status = "info", detail = {}) {
+    const item = Object.assign({
+      id: String(id || "repair_event").trim(),
+      status: String(status || "info").trim(),
+      recorded_at: nowIso()
+    }, detail && typeof detail === "object" ? detail : {});
+    if (!Array.isArray(report.diagnostics)) report.diagnostics = [];
+    report.diagnostics.push(item);
+    if (status === "auto_fixed") report.auto_fixed_count = Math.max(0, Number(report.auto_fixed_count || 0)) + 1;
+    if (status === "report_only") report.report_only_count = Math.max(0, Number(report.report_only_count || 0)) + 1;
+    if (status === "skipped") report.skipped_count = Math.max(0, Number(report.skipped_count || 0)) + 1;
+    if (status === "error") {
+      if (!Array.isArray(report.errors)) report.errors = [];
+      report.errors.push(item);
+    }
+    return item;
+  }
+
+  async snapshotTaskchuteRepairFile(report, sourcePath) {
+    const source = safePath(sourcePath || "");
+    if (!source) return "";
+    const exists = await pathExistsOnAdapter(this.app, source);
+    if (!exists) return "";
+    const backupPath = this.getTaskchuteRepairBackupPath(report.repair_run_id, source);
+    const text = await readFileText(this.app, source);
+    const writeOk = await this.writeFileText(backupPath, text, {
+      skipTaskchuteUndo: true,
+      skipBoardHistorySnapshot: true,
+      continueAfterDeviceReload: true,
+      deviceWriterOperation: "taskchute-repair-snapshot"
+    });
+    if (this.isTaskchuteWriteAborted(writeOk)) return "";
+    if (!Array.isArray(report.backup_paths)) report.backup_paths = [];
+    report.backup_paths.push(backupPath);
+    this.appendTaskchuteRepairEntry(report, "repair_snapshot_created", "info", { source_path: source, backup_path: backupPath });
+    return backupPath;
+  }
+
+  buildTaskchuteRepairMarkdownReport(report) {
+    const lines = [];
+    const summary = [
+      `repair_run_id: ${report.repair_run_id || ""}`,
+      `started_at: ${report.started_at || ""}`,
+      `completed_at: ${report.completed_at || ""}`,
+      `files_scanned: ${report.files_scanned || 0}`,
+      `files_modified: ${(report.files_modified || []).length}`,
+      `backups: ${(report.backup_paths || []).length}`,
+      `auto_fixed: ${report.auto_fixed_count || 0}`,
+      `report_only: ${report.report_only_count || 0}`,
+      `skipped: ${report.skipped_count || 0}`,
+      `errors: ${(report.errors || []).length}`
+    ];
+    lines.push("# TaskChute Repair Report", "", ...summary.map(item => `- ${item}`), "");
+    if (Array.isArray(report.files_modified) && report.files_modified.length) {
+      lines.push("## Files Modified", "", ...report.files_modified.map(path => `- ${path}`), "");
+    }
+    if (Array.isArray(report.backup_paths) && report.backup_paths.length) {
+      lines.push("## Backups", "", ...report.backup_paths.map(path => `- ${path}`), "");
+    }
+    if (Array.isArray(report.recommended_next_actions) && report.recommended_next_actions.length) {
+      lines.push("## Recommended Next Actions", "", ...report.recommended_next_actions.map(item => `- ${item}`), "");
+    }
+    lines.push("## Diagnostics", "");
+    (report.diagnostics || []).forEach(item => {
+      const detail = Object.assign({}, item || {});
+      delete detail.id;
+      delete detail.status;
+      delete detail.recorded_at;
+      lines.push(`- ${item.recorded_at || ""} [${item.status || "info"}] ${item.id || "repair_event"}`);
+      const json = JSON.stringify(detail);
+      if (json && json !== "{}") lines.push(`  - detail: ${json}`);
+    });
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  async writeTaskchuteRepairReport(report) {
+    const folder = this.getTaskchuteRepairRunFolder(report.repair_run_id);
+    const jsonPath = safePath(`${folder}/report.json`);
+    const mdPath = safePath(`${folder}/report.md`);
+    report.report_json_path = jsonPath;
+    report.report_markdown_path = mdPath;
+    await this.writeFileText(jsonPath, JSON.stringify(report, null, 2) + "\n", {
+      skipTaskchuteUndo: true,
+      skipBoardHistorySnapshot: true,
+      continueAfterDeviceReload: true,
+      deviceWriterOperation: "taskchute-repair-report-json"
+    });
+    await this.writeFileText(mdPath, this.buildTaskchuteRepairMarkdownReport(report), {
+      skipTaskchuteUndo: true,
+      skipBoardHistorySnapshot: true,
+      continueAfterDeviceReload: true,
+      deviceWriterOperation: "taskchute-repair-report-md"
+    });
+    return { jsonPath, mdPath };
+  }
+
+  isTaskchuteRepairConcurrencyActive() {
+    const bridgeActive = !!(
+      this.bridgeInboundApplyInProgress
+      || this.bridgeInboundAutoApplyAllInProgress
+      || this.bridgeInboundAutoApplyTimerInProgress
+      || this._bridgeMobileResumeInboundDrainActive
+      || this.bridgeOutboxFlushInProgress
+      || (this.settings && (this.settings.bridgeInboundApplyInProgress || this.settings.bridgeInboundAutoApplyInProgress || this.settings.bridgeOutboxFlushInProgress))
+    );
+    const refreshActive = !!(this.isApplyingExternalRefresh || this.externalRefreshTimer);
+    const busy = Math.max(0, Number(this.syncBusyCount || 0)) > 0;
+    return {
+      active: bridgeActive || refreshActive || busy,
+      bridgeActive,
+      refreshActive,
+      busy,
+      syncState: this.syncState || null
+    };
+  }
+
+  collectTaskchuteRepairRunningCandidates(boardEntries) {
+    const candidates = [];
+    (Array.isArray(boardEntries) ? boardEntries : []).forEach(task => {
+      const meta = task && task.entryMeta || {};
+      const start = String(meta.start_actual || meta.started_at || "").trim();
+      const end = String(meta.end_actual || meta.end_at || "").trim();
+      const status = String(meta.status || meta.run_state || "").trim().toLowerCase();
+      if ((start && !end) || status === "running" || status === "started") {
+        candidates.push({
+          date: task.date || "",
+          path: task.path || "",
+          task_id: task.taskId || "",
+          entry_id: task.entryId || "",
+          title: task.title || "",
+          start_actual: start,
+          end_actual: end,
+          status
+        });
+      }
+    });
+    return candidates;
+  }
+
+  normalizeTaskchuteRepairOptionalDateValue(value) {
+    const raw = String(value == null ? "" : value).trim();
+    if (!raw) return { ok: true, value: "", changed: false };
+    const lowered = raw.toLowerCase().replace(/^["']|["']$/g, "");
+    if (["null", "undefined", "none", "nan", "(null)", "nil"].includes(lowered)) {
+      return { ok: true, value: "", changed: true };
+    }
+    const parsed = parseRoutineOptionalDateForMatch(raw);
+    if (parsed.ok) return { ok: true, value: parsed.value || "", changed: parsed.value !== raw };
+    return { ok: false, value: raw, changed: false };
+  }
+
+  async runTaskchuteOneClickRepair(options = {}) {
+    if (this._taskchuteRepairInProgress) {
+      if (options && options.notice) new obsidian.Notice("TaskChute repair is already running.");
+      return { ok: false, skipped: true, reason: "repair_already_running" };
+    }
+    const runId = this.createTaskchuteRepairRunId();
+    const report = {
+      repair_run_id: runId,
+      started_at: nowIso(),
+      completed_at: "",
+      plugin_version: this.manifest && this.manifest.version || "",
+      files_scanned: 0,
+      files_modified: [],
+      backup_paths: [],
+      diagnostics: [],
+      auto_fixed_count: 0,
+      report_only_count: 0,
+      skipped_count: 0,
+      errors: [],
+      recommended_next_actions: []
+    };
+    this.appendTaskchuteRepairEntry(report, "repair_started", "info", { dry_run: !!(options && options.dryRun) });
+
+    try { this.cleanupStaleTaskchuteSyncState(); } catch (e) {}
+    const before = this.isTaskchuteRepairConcurrencyActive();
+    if (before.active) {
+      this.appendTaskchuteRepairEntry(report, "repair_skipped_concurrent_operation", "skipped", before);
+      report.completed_at = nowIso();
+      await this.writeTaskchuteRepairReport(report);
+      if (options && options.notice) new obsidian.Notice("TaskChute repair skipped: another sync/apply operation is active.");
+      return { ok: false, skipped: true, report };
+    }
+
+    this._taskchuteRepairInProgress = true;
+    const release = this.beginTaskchuteSyncState("TaskChute repair", "local");
+    try {
+      this.appendTaskchuteRepairEntry(report, "repair_lock_acquired", "info", { repair_run_id: runId });
+      if (options && options.notice) new obsidian.Notice("TaskChute repair started.");
+
+      let settingsBackup = null;
+      try {
+        settingsBackup = await this.createTaskchuteSettingsBackup("one-click-repair");
+        if (settingsBackup && settingsBackup.path) {
+          report.backup_paths.push(settingsBackup.path);
+          this.appendTaskchuteRepairEntry(report, "repair_snapshot_created", "info", { source_path: this.getPluginDataPath ? this.getPluginDataPath() : "data.json", backup_path: settingsBackup.path });
+        }
+      } catch (e) {
+        this.appendTaskchuteRepairEntry(report, "repair_snapshot_failed", "error", { target: "settings", message: e && e.message ? e.message : String(e) });
+      }
+
+      const files = this.app && this.app.vault && typeof this.app.vault.getMarkdownFiles === "function" ? this.app.vault.getMarkdownFiles() : [];
+      const tasksFolder = safePath(this.settings.tasksFolder || DEFAULT_SETTINGS.tasksFolder || "Taskchute/Tasks");
+      const taskchuteFolder = safePath(this.settings.taskchuteFolder || "Taskchute");
+      const taskNotesById = new Map();
+      const boardEntries = [];
+      const occurrenceKeys = new Map();
+      const taskOccurrences = new Map();
+      const sectionIds = new Set(normalizeSections(this.settings.sections).map(section => String(section.id || "").trim()).filter(Boolean));
+
+      for (const file of files) {
+        const path = safePath(file && file.path || "");
+        if (!path) continue;
+        const inTasks = tasksFolder && path.startsWith(`${tasksFolder}/`);
+        const date = taskchuteDateFromPath(path);
+        const inBoard = !!(date && path.startsWith(`${taskchuteFolder}/`));
+        if (!inTasks && !inBoard) continue;
+        report.files_scanned += 1;
+        let text = "";
+        try { text = await this.app.vault.read(file); }
+        catch (e) { try { text = await readFileText(this.app, path); } catch (ignored) { text = ""; } }
+
+        if (inTasks) {
+          const taskId = this.getTaskIdFromFile(file, text);
+          if (!taskId) {
+            this.appendTaskchuteRepairEntry(report, "repair_task_note_missing_required_field", "report_only", { path, field: "task_id" });
+          } else {
+            if (!taskNotesById.has(taskId)) taskNotesById.set(taskId, []);
+            taskNotesById.get(taskId).push({ path, file, content: text });
+          }
+          if (isRoutineEnabled(extractYamlValue(text, "routine"))) {
+            const replacements = {};
+            ["start_date", "end_date"].forEach(key => {
+              const normalized = this.normalizeTaskchuteRepairOptionalDateValue(extractYamlValue(text, key));
+              if (normalized.ok && normalized.changed) replacements[key] = normalized.value;
+              if (!normalized.ok) this.appendTaskchuteRepairEntry(report, "repair_routine_date_invalid", "report_only", { path, key, value: normalized.value });
+            });
+            if (Object.keys(replacements).length && !(options && options.dryRun)) {
+              await this.snapshotTaskchuteRepairFile(report, path);
+              let next = text;
+              Object.entries(replacements).forEach(([key, value]) => { next = replaceYamlValue(next, key, value); });
+              next = replaceYamlValue(next, "updated_at", nowIso());
+              const writeOk = await this.writeFileText(path, next, {
+                skipTaskchuteUndo: true,
+                continueAfterDeviceReload: true,
+                deviceWriterOperation: "taskchute-repair-routine-date-normalize",
+                undoLabel: "TaskChute repair"
+              });
+              if (!this.isTaskchuteWriteAborted(writeOk)) {
+                report.files_modified.push(path);
+                this.appendTaskchuteRepairEntry(report, "repair_routine_definition_normalized", "auto_fixed", { path, fields: Object.keys(replacements) });
+              }
+            }
+          }
+        }
+
+        if (inBoard) {
+          const parsed = parseTasks(text).map(task => Object.assign({}, task, { date, path }));
+          boardEntries.push(...parsed);
+          const seenEntryIds = new Map();
+          parsed.forEach(task => {
+            const entryId = String(task.entryId || "").trim();
+            const taskId = String(task.taskId || "").trim();
+            if (entryId) {
+              if (!seenEntryIds.has(entryId)) seenEntryIds.set(entryId, []);
+              seenEntryIds.get(entryId).push(task);
+            } else {
+              this.appendTaskchuteRepairEntry(report, "repair_entry_id_missing", "report_only", { path, date, task_id: taskId, title: task.title || "" });
+            }
+            if (taskId) {
+              if (!taskOccurrences.has(taskId)) taskOccurrences.set(taskId, []);
+              taskOccurrences.get(taskId).push({ date, path, entry_id: entryId, title: task.title || "" });
+            }
+            const notePath = task && task.file ? safePath(`${tasksFolder}/${task.file}.md`) : "";
+            if (notePath && !this.app.vault.getAbstractFileByPath(notePath)) {
+              this.appendTaskchuteRepairEntry(report, "repair_task_note_missing", "report_only", { path, date, task_id: taskId, entry_id: entryId, note_path: notePath, title: task.title || "" });
+            }
+            const sectionId = String(task.entryMeta && task.entryMeta.section_id || "").trim();
+            if (sectionId && !sectionIds.has(sectionId)) {
+              this.appendTaskchuteRepairEntry(report, "repair_unknown_section_id", "report_only", { path, date, task_id: taskId, entry_id: entryId, section_id: sectionId });
+            }
+            const occurrenceKey = String(task.entryMeta && task.entryMeta.routine_occurrence_key || "").trim();
+            if (occurrenceKey) {
+              if (!occurrenceKeys.has(occurrenceKey)) occurrenceKeys.set(occurrenceKey, []);
+              occurrenceKeys.get(occurrenceKey).push({ date, path, task_id: taskId, entry_id: entryId, title: task.title || "" });
+            }
+          });
+          seenEntryIds.forEach((items, entryId) => {
+            if (items.length > 1) this.appendTaskchuteRepairEntry(report, "repair_duplicate_entry_id", "report_only", { path, date, entry_id: entryId, count: items.length });
+          });
+        }
+      }
+
+      taskNotesById.forEach((items, taskId) => {
+        if (items.length > 1) this.appendTaskchuteRepairEntry(report, "repair_duplicate_task_id", "report_only", { task_id: taskId, paths: items.map(item => item.path) });
+        if (!taskOccurrences.has(taskId)) this.appendTaskchuteRepairEntry(report, "repair_date_line_missing", "report_only", { task_id: taskId, paths: items.map(item => item.path) });
+      });
+      taskOccurrences.forEach((items, taskId) => {
+        const dates = Array.from(new Set(items.map(item => item.date).filter(Boolean)));
+        if (dates.length > 1) this.appendTaskchuteRepairEntry(report, "repair_task_multiple_dates", "report_only", { task_id: taskId, dates, occurrences: items });
+      });
+      occurrenceKeys.forEach((items, occurrenceKey) => {
+        if (items.length > 1) this.appendTaskchuteRepairEntry(report, "repair_duplicate_routine_occurrence_key", "report_only", { routine_occurrence_key: occurrenceKey, count: items.length, occurrences: items });
+      });
+
+      const runningCandidates = this.collectTaskchuteRepairRunningCandidates(boardEntries);
+      const running = this.normalizeRuntimeSession ? this.normalizeRuntimeSession(this.runtime && this.runtime.running, false) : (this.runtime && this.runtime.running);
+      const runningKey = runtimeSessionKey(running);
+      this.appendTaskchuteRepairEntry(report, "repair_running_state_checked", "info", { runtime_running_key: runningKey, candidate_count: runningCandidates.length });
+      if (runningKey && !runningCandidates.some(item => item.entry_id === runningKey || item.task_id === runningKey)) {
+        this.runtime.running = null;
+        const saveOk = await this.savePluginData({ continueAfterDeviceReload: true, deviceWriterOperation: "taskchute-repair-runtime-running-clear" });
+        if (!this.isTaskchuteWriteAborted(saveOk)) {
+          report.files_modified.push(this.getPluginDataPath ? this.getPluginDataPath() : "data.json");
+          this.appendTaskchuteRepairEntry(report, "repair_stale_lock_cleared", "auto_fixed", { runtime_running_key: runningKey });
+        }
+      }
+      if (runningCandidates.length > 1) {
+        this.appendTaskchuteRepairEntry(report, "repair_multiple_running_candidates", "report_only", { candidates: runningCandidates.slice(0, 20) });
+      }
+
+      const routinesAll = await this.getAllRoutineTaskDefinitions({ includeInactive: true });
+      const routinesForGeneration = await this.getRoutineDefinitions();
+      const generationIds = new Set(routinesForGeneration.map(def => String(def.routineId || def.taskId || "").trim()).filter(Boolean));
+      routinesAll.forEach(def => {
+        const id = String(def.routineId || def.taskId || "").trim();
+        if (isTaskRoutineActive(def) && id && !generationIds.has(id)) {
+          this.appendTaskchuteRepairEntry(report, "repair_routine_definition_not_visible", "report_only", { routine_id: id, path: def.path || "", active: def.active, routine: def.routine, repeat: def.repeat, start_date: def.startDate || "", end_date: def.endDate || "" });
+        }
+      });
+
+      const historyUpdates = new Map();
+      const routineLineEvidence = boardEntries.filter(task => String(task.entryMeta && task.entryMeta.routine_id || "").trim() || String(task.entryMeta && task.entryMeta.routine_occurrence_key || "").trim());
+      for (const task of routineLineEvidence) {
+        const date = this.normalizeDate(task.date || "");
+        const routineId = String(task.entryMeta && task.entryMeta.routine_id || task.taskId || "").trim();
+        if (!date || !routineId) continue;
+        const history = historyUpdates.get(date) || await this.readRoutineHistoryMonth(date);
+        historyUpdates.set(date, history);
+        const existing = this.getRoutineHistoryEntryFrom(history, date, routineId);
+        if (!existing) {
+          if (!history[date] || typeof history[date] !== "object") history[date] = {};
+          history[date][routineId] = {
+            status: task.checked ? "done" : "generated",
+            routine_id: routineId,
+            task_id: task.taskId || routineId,
+            entry_id: task.entryId || "",
+            title: task.title || "",
+            routine_source: task.entryMeta && task.entryMeta.routine_source || "",
+            routine_occurrence_key: task.entryMeta && task.entryMeta.routine_occurrence_key || "",
+            date,
+            updated_at: nowIso(),
+            repaired_at: nowIso(),
+            repair_run_id: runId
+          };
+          this.appendTaskchuteRepairEntry(report, "repair_routine_history_checked", "auto_fixed", { date, routine_id: routineId, entry_id: task.entryId || "", action: "history_entry_recomputed_from_task_line" });
+        }
+      }
+      for (const [date, history] of historyUpdates.entries()) {
+        const original = await this.readRoutineHistoryMonth(date);
+        if (JSON.stringify(original) !== JSON.stringify(history) && !(options && options.dryRun)) {
+          const historyPath = this.getRoutineHistoryPath(date);
+          await this.snapshotTaskchuteRepairFile(report, historyPath);
+          const ok = await this.writeRoutineHistoryMonth(date, history);
+          if (ok) report.files_modified.push(historyPath);
+        }
+      }
+
+      const boardRoutineKeys = new Set(routineLineEvidence.map(task => `${this.normalizeDate(task.date)}::${String(task.entryMeta && task.entryMeta.routine_id || task.taskId || "").trim()}`));
+      const routineHistoryMonths = Array.from(new Set(boardEntries.map(task => String(task.date || "").slice(0, 7)).filter(Boolean)));
+      for (const month of routineHistoryMonths) {
+        const date = `${month}-01`;
+        const history = await this.readRoutineHistoryMonth(date);
+        Object.entries(history || {}).forEach(([day, entries]) => {
+          Object.entries(entries && typeof entries === "object" ? entries : {}).forEach(([routineId, value]) => {
+            const status = String(value && value.status || "").trim();
+            if (status && !isRoutineHistoryBlockingStatus(status) && !boardRoutineKeys.has(`${day}::${routineId}`)) {
+              this.appendTaskchuteRepairEntry(report, "repair_routine_history_inconsistency", "report_only", { date: day, routine_id: routineId, status, reason: "history_entry_without_matching_task_line" });
+            }
+          });
+        });
+      }
+
+      if (this.settings && this.settings.bridgeEnabled) {
+        try {
+          const pending = await this.fetchBridgeInboundDryRunEvents({ limit: 50, requestMode: "repair", runId });
+          this.appendTaskchuteRepairEntry(report, "repair_bridge_pending_checked", pending && pending.ok ? "info" : "report_only", {
+            ok: !!(pending && pending.ok),
+            count: pending && pending.count || 0,
+            error_kind: pending && pending.errorKind || "",
+            first_server_sequence: pending && pending.firstServerSequence || 0,
+            last_server_sequence: pending && pending.lastServerSequence || 0
+          });
+          (pending && Array.isArray(pending.events) ? pending.events : []).slice(0, 20).forEach(event => {
+            this.appendTaskchuteRepairEntry(report, "repair_bridge_event_report_only", "report_only", {
+              event_id: String(event && event.event_id || ""),
+              event_type: String(event && event.event_type || ""),
+              server_sequence: event && event.server_sequence || 0
+            });
+          });
+          if (pending && pending.ok && pending.count > 0 && typeof this.scheduleBridgeMobileResumePullKickSeries === "function") {
+            this.scheduleBridgeMobileResumePullKickSeries("one-click-repair");
+            this.appendTaskchuteRepairEntry(report, "repair_bridge_drain_scheduled", "info", { count: pending.count });
+          }
+        } catch (e) {
+          this.appendTaskchuteRepairEntry(report, "repair_bridge_pending_checked", "error", { message: e && e.message ? e.message : String(e) });
+        }
+      }
+
+      try {
+        await this.snapshotTaskchuteRepairFile(report, this.getTaskchuteIndexPath());
+        await this.rebuildTaskchuteIndex({ notice: false });
+        report.files_modified.push(this.getTaskchuteIndexPath());
+        this.appendTaskchuteRepairEntry(report, "repair_index_rebuilt", "auto_fixed", { path: this.getTaskchuteIndexPath() });
+      } catch (e) {
+        this.appendTaskchuteRepairEntry(report, "repair_index_rebuild_failed", "error", { message: e && e.message ? e.message : String(e) });
+      }
+
+      const staleBefore = {
+        externalSyncEditLockUntil: Number(this.externalSyncEditLockUntil || 0),
+        deviceReloadWriteAbortUntil: Number(this._tcDeviceReloadWriteAbortUntil || 0)
+      };
+      let staleCleared = false;
+      if (staleBefore.externalSyncEditLockUntil && staleBefore.externalSyncEditLockUntil < Date.now()) {
+        this.externalSyncEditLockUntil = 0;
+        staleCleared = true;
+      }
+      if (staleBefore.deviceReloadWriteAbortUntil && staleBefore.deviceReloadWriteAbortUntil < Date.now()) {
+        this._tcDeviceReloadWriteAbortUntil = 0;
+        staleCleared = true;
+      }
+      if (staleCleared) {
+        this.appendTaskchuteRepairEntry(report, "repair_stale_lock_cleared", "auto_fixed", staleBefore);
+      }
+
+      report.recommended_next_actions.push("Review report-only diagnostics before deleting or merging any task notes or task lines.");
+      report.recommended_next_actions.push("After installing the prerelease, run dev/remote/mobile Obsidian verification from BRAT.");
+      report.completed_at = nowIso();
+      await this.writeTaskchuteRepairReport(report);
+      this.appendTaskchuteRepairEntry(report, "repair_completed", "info", {
+        report_json_path: report.report_json_path,
+        report_markdown_path: report.report_markdown_path,
+        auto_fixed_count: report.auto_fixed_count || 0,
+        report_only_count: report.report_only_count || 0
+      });
+      await this.writeTaskchuteRepairReport(report);
+      try { await this.refreshViews({ preserveScroll: true }); } catch (e) {}
+      if (options && options.notice) {
+        new obsidian.Notice(`TaskChute repair completed. Auto fixed: ${report.auto_fixed_count || 0}, report-only: ${report.report_only_count || 0}`);
+      }
+      return { ok: true, report };
+    } catch (e) {
+      console.error("TaskChute one-click repair error", e);
+      this.appendTaskchuteRepairEntry(report, "repair_failed", "error", { message: e && e.message ? e.message : String(e) });
+      report.completed_at = nowIso();
+      try { await this.writeTaskchuteRepairReport(report); } catch (writeError) { console.error("TaskChute repair report write failed", writeError); }
+      if (options && options.notice) new obsidian.Notice("TaskChute repair failed: " + (e && e.message ? e.message : e));
+      throw e;
+    } finally {
+      this._taskchuteRepairInProgress = false;
+      try { release(); } catch (e) {}
+    }
   }
 
   async collectTaskchuteIntegrityReport() {
@@ -46442,6 +46935,24 @@ class SetupDiagnosticView extends obsidian.ItemView {
     titleWrap.createEl("h2", { text: "初期セットアップ/診断" });
     titleWrap.createEl("p", { text: "Taskchute関連フォルダ・設定データ・ルーティン整合性をまとめて確認します。", cls: "tc-project-settings-desc" });
     const actions = header.createDiv({ cls: "tc-project-settings-header-actions tc-setup-diagnostic-actions" });
+    const oneClickRepair = actions.createEl("button", { text: "TaskChute\u4fee\u5fa9", cls: "tc-chip-btn mod-warning", attr: { type: "button", title: "TaskChute/Bridge one-click repair" } });
+    oneClickRepair.onclick = async evt => {
+      evt.preventDefault();
+      const ok = await this.plugin.confirmAction({
+        title: "TaskChute\u4fee\u5fa9",
+        message: "TaskChute/Bridge\u306e\u72b6\u614b\u3092\u8a3a\u65ad\u3057\u3001\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u3068\u30ec\u30dd\u30fc\u30c8\u3092\u4f5c\u6210\u3057\u3066\u5b89\u5168\u306a\u81ea\u52d5\u4fee\u5fa9\u3060\u3051\u3092\u5b9f\u884c\u3057\u307e\u3059\u3002\u5371\u967a\u306a\u4fee\u5fa9\u306f\u30ec\u30dd\u30fc\u30c8\u306e\u307f\u306b\u7559\u3081\u307e\u3059\u3002",
+        okText: "\u4fee\u5fa9\u3092\u5b9f\u884c",
+        cancelText: "\u30ad\u30e3\u30f3\u30bb\u30eb"
+      });
+      if (!ok) return;
+      oneClickRepair.disabled = true;
+      try {
+        await this.plugin.runTaskchuteOneClickRepair({ notice: true });
+        await this.refresh();
+      } finally {
+        oneClickRepair.disabled = false;
+      }
+    };
     actions.createEl("button", { text: "Task Boardを開く", attr: { type: "button" } }).onclick = () => this.plugin.activateView(this.leaf);
     actions.createEl("button", { text: "バックアップ/復元", cls: "tc-chip-btn", attr: { type: "button" } }).onclick = () => this.plugin.activateSettingsBackupView(this.leaf);
     actions.createEl("button", { text: "再チェック", cls: "tc-chip-btn", attr: { type: "button" } }).onclick = () => this.refresh();
