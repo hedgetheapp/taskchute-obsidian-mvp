@@ -70,6 +70,7 @@ const DEFAULT_SETTINGS = {
   errorLogAutoDeleteEnabled: false,
   errorLogRetentionDays: 30,
   debugKeyboard: false,
+  settingsShowDeveloperDebug: false,
   columnWidths: null,
   routineColumnWidths: null,
   routineColumnOrder: null,
@@ -10157,7 +10158,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.addCommand({ id: "reload-taskchute-sync-data", name: "同期データを再読み込み", callback: async () => { await this.reloadTaskchuteSyncDataFromDisk({ reason: "manual-command", force: true, notice: true, patchViews: true, preserveScroll: true }); } });
       this.addCommand({ id: "toggle-keyboard-debug", name: "キー操作デバッグON/OFF", callback: async () => { this.settings.debugKeyboard = !this.settings.debugKeyboard; await this.savePluginData(); new obsidian.Notice("キー操作デバッグ: " + (this.settings.debugKeyboard ? "ON" : "OFF")); } });
 
-      this.addCommand({ id: "one-click-repair-taskchute", name: "TaskChute\u4fee\u5fa9", callback: async () => {
+      this.addCommand({ id: "taskchute-one-click-repair", name: "TaskChute: \u4fee\u5fa9\u3092\u5b9f\u884c / Repair TaskChute", callback: async () => {
         const ok = await this.confirmAction({
           title: "TaskChute\u4fee\u5fa9",
           message: "TaskChute/Bridge\u306e\u72b6\u614b\u3092\u8a3a\u65ad\u3057\u3001\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u3068\u30ec\u30dd\u30fc\u30c8\u3092\u4f5c\u6210\u3057\u3066\u5b89\u5168\u306a\u81ea\u52d5\u4fee\u5fa9\u3060\u3051\u3092\u5b9f\u884c\u3057\u307e\u3059\u3002\u91cd\u8907\u3084\u7af6\u5408\u306f\u30ec\u30dd\u30fc\u30c8\u306e\u307f\u3067\u3059\u3002",
@@ -47457,9 +47458,25 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
     this.plugin = plugin;
   }
   display() {
-    const el = this.containerEl;
-    el.empty();
-    el.createEl("h2", { text: "Taskchute Obsidian MVP" });
+    const root = this.containerEl;
+    root.empty();
+    root.createEl("h2", { text: "Taskchute Obsidian MVP" });
+    root.createEl("p", { text: "よく使う設定を上に、低レベルな同期・診断操作を開発者向け領域へ整理しています。既存の保存済み設定値は変更しません。", cls: "setting-item-description" });
+
+    const basicSection = this.createSettingsSection(root, "基本設定 / Basic", "起動時の開き方、Vault 内フォルダ、主要な管理画面への入口です。");
+    const displaySection = this.createSettingsSection(root, "表示・操作 / Display and Interaction", "TaskBoard の表示や操作に関係する設定です。");
+    const bridgeSection = this.createSettingsSection(root, "クラウド同期 / Bridge", "Bridge API 接続と端末識別の基本設定です。device_id は端末ごとに安定・一意にしてください。");
+    const repairSection = this.createSettingsSection(root, "修復・診断", "安全な修復、index 再構築、受信 pending の確認、診断画面への入口です。");
+    const advancedSection = this.createSettingsSection(root, "詳細設定 / Advanced", "通常は変更不要な動作パラメータです。意味が分かる場合だけ変更してください。", { collapsed: true });
+    const developerEnabled = !!this.plugin.settings.settingsShowDeveloperDebug;
+    const developerSection = this.createSettingsSection(root, "開発者・デバッグ設定 / Developer and Debug", "低レベル Bridge 操作、手動 apply/ack、診断 JSON、テストイベントなどをまとめています。通常は非表示です。", { collapsed: true });
+    developerSection.style.display = developerEnabled ? "" : "none";
+    const legacySection = this.createSettingsSection(root, "Legacy / Compatibility", "互換性維持のため残している項目です。", { collapsed: true });
+    legacySection.style.display = "none";
+
+    let el = basicSection;
+    this._settingsTargetEl = el;
+    this.renderSettingsRepairSection(repairSection);
 
     new obsidian.Setting(el)
       .setName("Obsidian起動時にTaskBoardを開く")
@@ -49283,10 +49300,162 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
         this.plugin.activateSettingsBackupView();
       }));
 
+    this.organizeSettingsCleanupSections({
+      basicSection,
+      displaySection,
+      bridgeSection,
+      repairSection,
+      advancedSection,
+      developerSection,
+      legacySection,
+      developerEnabled
+    });
+
+  }
+
+  createSettingsSection(parent, title, desc, options = {}) {
+    const collapsed = !!(options && options.collapsed);
+    const wrapper = collapsed ? parent.createEl("details", { cls: "tc-settings-cleanup-section" }) : parent.createDiv({ cls: "tc-settings-cleanup-section" });
+    if (collapsed) wrapper.createEl("summary", { text: title });
+    else wrapper.createEl("h3", { text: title });
+    if (desc) wrapper.createEl("p", { text: desc, cls: "setting-item-description" });
+    const body = wrapper.createDiv({ cls: "tc-settings-cleanup-section-body" });
+    return body;
+  }
+
+  async confirmRunSettingsOneClickRepair() {
+    const ok = await this.plugin.confirmAction({
+      title: "TaskChute\u4fee\u5fa9",
+      message: "TaskChute/Bridge\u306e\u72b6\u614b\u3092\u8a3a\u65ad\u3057\u3001\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u3068\u30ec\u30dd\u30fc\u30c8\u3092\u4f5c\u6210\u3057\u3066\u5b89\u5168\u306a\u81ea\u52d5\u4fee\u5fa9\u3060\u3051\u3092\u5b9f\u884c\u3057\u307e\u3059\u3002\u5371\u967a\u306a\u4fee\u5fa9\u306f\u30ec\u30dd\u30fc\u30c8\u306e\u307f\u306b\u7559\u3081\u307e\u3059\u3002",
+      okText: "\u4fee\u5fa9\u3092\u5b9f\u884c",
+      cancelText: "\u30ad\u30e3\u30f3\u30bb\u30eb"
+    });
+    if (!ok) return;
+    await this.plugin.runTaskchuteOneClickRepair({ notice: true });
+    this.display();
+  }
+
+  renderSettingsRepairSection(parent) {
+    new obsidian.Setting(parent)
+      .setName("TaskChute\u4fee\u5fa9")
+      .setDesc("\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u3068\u30ec\u30dd\u30fc\u30c8\u3092\u4f5c\u6210\u3057\u3001\u5b89\u5168\u306a\u4fee\u5fa9\u3060\u3051\u3092\u5b9f\u884c\u3057\u307e\u3059\u3002\u91cd\u8907\u3084\u7af6\u5408\u306f\u30ec\u30dd\u30fc\u30c8\u306e\u307f\u3067\u3059\u3002")
+      .addButton(btn => btn
+        .setButtonText("\u4fee\u5fa9\u3092\u5b9f\u884c")
+        .setCta()
+        .onClick(async () => {
+          btn.setDisabled(true);
+          try { await this.confirmRunSettingsOneClickRepair(); }
+          finally { btn.setDisabled(false); }
+        }));
+    new obsidian.Setting(parent)
+      .setName("Taskchute index\u3092\u518d\u69cb\u7bc9")
+      .setDesc("Vault Markdown \u304b\u3089 Taskchute/_system/index.json \u3092\u518d\u751f\u6210\u3057\u307e\u3059\u3002")
+      .addButton(btn => btn
+        .setButtonText("\u518d\u69cb\u7bc9")
+        .onClick(async () => {
+          btn.setDisabled(true);
+          try {
+            await this.plugin.rebuildTaskchuteIndex({ notice: true });
+            this.display();
+          } finally {
+            btn.setDisabled(false);
+          }
+        }));
+    new obsidian.Setting(parent)
+      .setName("Bridge pending dry-run")
+      .setDesc("pending \u3092\u53d6\u5f97\u3057\u3066\u72b6\u614b\u3060\u3051\u3092\u78ba\u8a8d\u3057\u307e\u3059\u3002\u30ed\u30fc\u30ab\u30eb\u53cd\u6620\u3084 ack \u306f\u884c\u3044\u307e\u305b\u3093\u3002")
+      .addButton(btn => btn
+        .setButtonText("\u78ba\u8a8d")
+        .onClick(async () => {
+          btn.setDisabled(true);
+          try {
+            const result = await this.plugin.fetchBridgeInboundDryRunEvents({ limit: 100, requestMode: "settings-repair" });
+            new obsidian.Notice(result.message);
+            this.display();
+          } finally {
+            btn.setDisabled(false);
+          }
+        }));
+    new obsidian.Setting(parent)
+      .setName("\u521d\u671f\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7 / \u8a3a\u65ad")
+      .setDesc("\u30d5\u30a9\u30eb\u30c0\u3001\u6574\u5408\u6027\u3001\u30a8\u30e9\u30fc\u30ed\u30b0\u3001\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u3092\u78ba\u8a8d\u3057\u307e\u3059\u3002")
+      .addButton(btn => btn.setButtonText("\u958b\u304f").onClick(() => this.plugin.activateSetupDiagnosticView()));
+    new obsidian.Setting(parent)
+      .setName("\u8a2d\u5b9a\u30d0\u30c3\u30af\u30a2\u30c3\u30d7 / \u5fa9\u5143")
+      .setDesc("\u8a2d\u5b9a\u3068 Routine \u5b9a\u7fa9\u306e\u30d0\u30c3\u30af\u30a2\u30c3\u30d7\u30fb\u5fa9\u5143\u753b\u9762\u3092\u958b\u304d\u307e\u3059\u3002")
+      .addButton(btn => btn.setButtonText("\u958b\u304f").onClick(() => this.plugin.activateSettingsBackupView()));
+  }
+
+  organizeSettingsCleanupSections(sections) {
+    const basic = sections.basicSection;
+    const bridge = sections.bridgeSection;
+    const repair = sections.repairSection;
+    const advanced = sections.advancedSection;
+    const developer = sections.developerSection;
+    if (!basic || !bridge || !repair || !advanced || !developer) return;
+    let target = basic;
+    const nodes = Array.from(basic.children || []);
+    const textOf = node => String(node && node.textContent || "");
+    const isSetting = node => node && node.classList && node.classList.contains("setting-item");
+    const settingName = node => {
+      const nameEl = node && node.querySelector ? node.querySelector(".setting-item-name") : null;
+      return String(nameEl && nameEl.textContent || textOf(node));
+    };
+    const moveTo = (node, next) => {
+      target = next || target;
+      target.appendChild(node);
+    };
+    nodes.forEach(node => {
+      const text = textOf(node);
+      const name = settingName(node);
+      if (/Bridge/.test(text) && /^H[34]$/i.test(node.tagName || "")) {
+        moveTo(node, bridge);
+        target = bridge;
+        return;
+      }
+      if (/手動送信|pending取得|ack|dry-run|全イベント|Inbound auto apply|Mobile診断|diagnostics|TaskCreated|TaskMoved|TaskUpdated|TaskDeleted|TaskStarted|TaskStopped|TaskCompleted|TaskCommentAdded|outbox|logical clock|D1|payload|coalesce|enqueue/.test(name)) {
+        moveTo(node, developer);
+        target = developer;
+        return;
+      }
+      if (/ユーザー属性|日付またぎ|auto flush|retry|batch|drain最大|自動flush|起動時自動flush/.test(name)) {
+        moveTo(node, advanced);
+        target = advanced;
+        return;
+      }
+      if (/エラーログ|診断|バックアップ|index|修復|再読み込み|受信を1回だけ/.test(name) || /エラーログ/.test(text)) {
+        moveTo(node, repair);
+        target = repair;
+        return;
+      }
+      if (/プロジェクト設定|セクション設定|モード設定|ルーティン設定|履歴管理|休日カレンダー|初期セットアップ|設定バックアップ/.test(name)) {
+        moveTo(node, basic);
+        target = basic;
+        return;
+      }
+      if (target !== basic && isSetting(node)) {
+        moveTo(node, target);
+        return;
+      }
+    });
+    new obsidian.Setting(advanced)
+      .setName("\u958b\u767a\u8005\u30fb\u30c7\u30d0\u30c3\u30b0\u9805\u76ee\u3092\u8868\u793a")
+      .setDesc("\u4f4e\u30ec\u30d9\u30eb Bridge \u64cd\u4f5c\u3001\u624b\u52d5 apply/ack\u3001\u30c6\u30b9\u30c8\u30a4\u30d9\u30f3\u30c8\u3001\u8a3a\u65ad JSON \u3092\u8868\u793a\u3057\u307e\u3059\u3002\u901a\u5e38\u306f\u5909\u66f4\u4e0d\u8981\u3067\u3059\u3002")
+      .addToggle(toggle => toggle
+        .setValue(!!this.plugin.settings.settingsShowDeveloperDebug)
+        .onChange(async value => {
+          this.plugin.settings.settingsShowDeveloperDebug = !!value;
+          await this.plugin.savePluginData({ deviceWriterOperation: "settings-developer-debug-toggle" });
+          this.display();
+        }));
+    if (!sections.developerEnabled && developer.parentElement) {
+      developer.parentElement.style.display = "none";
+    }
   }
 
   textSetting(name, key) {
-    new obsidian.Setting(this.containerEl).setName(name).addText(t => t
+    const parent = this._settingsTargetEl || this.containerEl;
+    new obsidian.Setting(parent).setName(name).addText(t => t
       .setValue(this.plugin.settings[key] || "")
       .onChange(async v => {
         this.plugin.settings[key] = v.trim();
