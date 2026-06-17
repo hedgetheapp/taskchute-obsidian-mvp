@@ -15066,6 +15066,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     const to = payload.to && typeof payload.to === "object" ? payload.to : {};
     const taskId = String(payload.task_id || "").trim();
     const entryId = String(payload.entry_id || to.entry_id || from.entry_id || "").trim();
+    const occurrenceKey = String(payload.routine_occurrence_key || to.routine_occurrence_key || from.routine_occurrence_key || "").trim();
+    if (!entryId && occurrenceKey) return `routine-occurrence\u0000${occurrenceKey}`;
     return taskId && entryId ? `${taskId}\u0000${entryId}` : "";
   }
 
@@ -16744,9 +16746,12 @@ class TaskchutePlugin extends obsidian.Plugin {
     return taskLine(link.file, link.alias, checked, entryId, meta);
   }
 
-  async findBridgeLocalTaskMoveOccurrence(taskId, preferredDates = [], entryId = "") {
+  async findBridgeLocalTaskMoveOccurrence(taskId, preferredDates = [], entryId = "", options = {}) {
     const id = String(taskId || "").trim();
     if (!id) return null;
+    const routineOccurrenceKey = String(options && (options.routineOccurrenceKey || options.routine_occurrence_key) || "").trim();
+    const routineGeneratedForDate = this.normalizeDate(String(options && (options.routineGeneratedForDate || options.routine_generated_for_date || options.routineDate || options.routine_date) || "").trim());
+    const routineId = String(options && (options.routineId || options.routine_id || options.generated_by_routine_id) || "").trim();
     const taskchuteFolder = safePath(this.settings && this.settings.taskchuteFolder || DEFAULT_SETTINGS.taskchuteFolder || "Taskchute");
     const boardRe = new RegExp(`^${taskchuteFolder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/(\\d{4}-\\d{2}-\\d{2})\\s+Taskchute\\.md$`);
     const preferred = (Array.isArray(preferredDates) ? preferredDates : [])
@@ -16781,18 +16786,46 @@ class TaskchutePlugin extends obsidian.Plugin {
         const currentIndex = sectionTaskIndex;
         sectionTaskIndex += 1;
         if (taskIdFromTaskLine(line) !== id) continue;
-        candidates.push({ date, path, markdown, line, lineIndex: i, section, index: currentIndex });
+        const entryMeta = tcMetaFromTaskLine(line);
+        candidates.push({ date, path, markdown, line, lineIndex: i, section, index: currentIndex, entryMeta });
       }
     }
+    const filterRoutineCandidates = source => {
+      let next = Array.isArray(source) ? source.slice() : [];
+      if (routineOccurrenceKey) {
+        const byOccurrence = next.filter(item => String(item && item.entryMeta && item.entryMeta.routine_occurrence_key || "").trim() === routineOccurrenceKey);
+        if (byOccurrence.length) next = byOccurrence;
+      }
+      if (routineGeneratedForDate) {
+        const byDate = next.filter(item => this.normalizeDate(String(item && item.entryMeta && (item.entryMeta.routine_generated_for_date || item.entryMeta.routine_date) || item && item.date || "").trim()) === routineGeneratedForDate);
+        if (byDate.length) next = byDate;
+      }
+      if (routineId) {
+        const byRoutine = next.filter(item => {
+          const meta = item && item.entryMeta || {};
+          return String(meta.routine_id || meta.generated_by_routine_id || taskIdFromTaskLine(item && item.line || "") || "").trim() === routineId;
+        });
+        if (byRoutine.length) next = byRoutine;
+      }
+      return next;
+    };
     const requestedEntryId = String(entryId || "").trim();
     const eligible = requestedEntryId
       ? candidates.filter(item => taskKeyFromTaskLine(item && item.line || "") === requestedEntryId)
       : candidates;
     if (requestedEntryId && eligible.length !== 1) {
-      return { bridgeOccurrenceResolutionError: true, ambiguous: eligible.length > 1 };
+      const routineFallback = filterRoutineCandidates(candidates);
+      if (routineFallback.length === 1) return routineFallback[0];
+      for (const date of preferred) {
+        const found = routineFallback.find(item => item.date === date);
+        if (found && routineFallback.filter(item => item.date === date).length === 1) return found;
+      }
+      return { bridgeOccurrenceResolutionError: true, ambiguous: eligible.length > 1 || routineFallback.length > 1 };
     }
+    const scoped = filterRoutineCandidates(eligible);
+    if (scoped.length === 1) return scoped[0];
     for (const date of preferred) {
-      const found = eligible.find(item => item.date === date);
+      const found = scoped.find(item => item.date === date) || eligible.find(item => item.date === date);
       if (found) return found;
     }
     return eligible[0] || null;
@@ -17079,7 +17112,12 @@ class TaskchutePlugin extends obsidian.Plugin {
     const occurrence = await this.findBridgeLocalTaskMoveOccurrence(
       taskId,
       dateChange ? [fromDate] : [from.date, to.date],
-      dateChange ? fromEntryId : payload.entry_id
+      dateChange ? fromEntryId : payload.entry_id,
+      {
+        routineOccurrenceKey: payload.routine_occurrence_key,
+        routineGeneratedForDate: payload.routine_generated_for_date,
+        routineId: payload.routine_id || payload.generated_by_routine_id
+      }
     );
     if (occurrence && occurrence.bridgeOccurrenceResolutionError) {
       if (dateChange && !occurrence.ambiguous) {
@@ -17499,14 +17537,63 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!occurrences.length) return { ok: false, skipped: true, message: "対象task_idのTaskBoard行が見つかりません。" };
     const src = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
     const entryId = String(src.entry_id || "").trim();
+    const routineOccurrenceKey = String(src.routine_occurrence_key || "").trim();
+    const routineGeneratedForDate = this.normalizeDate(String(src.routine_generated_for_date || src.routine_date || src.date || src.source_date || src.target_date || src.to && src.to.date || src.from && src.from.date || "").trim());
+    const routineId = String(src.routine_id || src.generated_by_routine_id || "").trim();
+    const hasRoutineOccurrenceIdentity = !!(routineOccurrenceKey || routineGeneratedForDate && routineId);
+    const recordRoutineApplyResolution = (reason, detail, level, status) => {
+      if (!hasRoutineOccurrenceIdentity) return;
+      this.recordRoutineOccurrenceSyncDiagnostic(reason, Object.assign({
+        operation: "apply",
+        event_type: String(options && options.eventType || "").trim(),
+        task_id: String(src.task_id || "").trim(),
+        entry_id: entryId,
+        routine_id: routineId,
+        generated_by_routine_id: routineId,
+        routine_occurrence_key: routineOccurrenceKey,
+        routine_generated_for_date: routineGeneratedForDate
+      }, detail || {}), level || "info", status || "");
+    };
+    const filterByRoutineOccurrence = source => {
+      let candidates = Array.isArray(source) ? source.slice() : [];
+      if (routineOccurrenceKey) {
+        const filtered = candidates.filter(item => String(tcMetaFromTaskLine(item && item.line || "").routine_occurrence_key || "").trim() === routineOccurrenceKey);
+        if (filtered.length) candidates = filtered;
+      }
+      if (routineGeneratedForDate) {
+        const filtered = candidates.filter(item => {
+          const meta = tcMetaFromTaskLine(item && item.line || "");
+          return this.normalizeDate(String(meta.routine_generated_for_date || meta.routine_date || item && item.date || "").trim()) === routineGeneratedForDate;
+        });
+        if (filtered.length) candidates = filtered;
+      }
+      if (routineId) {
+        const filtered = candidates.filter(item => {
+          const meta = tcMetaFromTaskLine(item && item.line || "");
+          return String(meta.routine_id || meta.generated_by_routine_id || "").trim() === routineId;
+        });
+        if (filtered.length) candidates = filtered;
+      }
+      return candidates;
+    };
+    recordRoutineApplyResolution("routine_occurrence_apply_started", {}, "info", "started");
     if (entryId) {
       const matches = occurrences.filter(item => taskKeyFromTaskLine(item && item.line || "") === entryId);
-      if (matches.length === 1) return { ok: true, occurrence: matches[0], matchedBy: "entry_id" };
+      if (matches.length === 1) {
+        recordRoutineApplyResolution("routine_occurrence_apply_verified", { matched_by: "entry_id" }, "info", "verified");
+        return { ok: true, occurrence: matches[0], matchedBy: "entry_id" };
+      }
+      const routineFallback = filterByRoutineOccurrence(occurrences);
+      if (routineFallback.length === 1) {
+        recordRoutineApplyResolution("routine_occurrence_apply_verified", { matched_by: "routine_occurrence_key" }, "info", "verified");
+        return { ok: true, occurrence: routineFallback[0], matchedBy: "routine_occurrence_key" };
+      }
+      recordRoutineApplyResolution("routine_occurrence_apply_missing_target", { matched_by: "", reason: matches.length ? "entry_id_ambiguous" : "entry_id_not_found" }, "warn", "missing_target");
       if (!matches.length) return { ok: false, skipped: true, message: "payload.entry_idに一致するTaskBoard行が見つかりません。" };
       return { ok: false, skipped: true, message: "payload.entry_idに一致するTaskBoard行が複数見つかったため、安全のため反映をスキップしました。" };
     }
 
-    let candidates = occurrences;
+    let candidates = hasRoutineOccurrenceIdentity ? filterByRoutineOccurrence(occurrences) : occurrences;
     const dateValue = String(src.date || src.source_date || src.target_date || src.to && src.to.date || src.from && src.from.date || "").trim();
     if (dateValue) {
       const date = this.normalizeDate(dateValue);
@@ -17544,7 +17631,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       const filtered = candidates.filter(item => activeKeys.has(taskKeyFromTaskLine(item && item.line || "")));
       if (filtered.length) candidates = filtered;
     }
-    if (candidates.length === 1) return { ok: true, occurrence: candidates[0], matchedBy: "task_id-fallback" };
+    if (candidates.length === 1) {
+      recordRoutineApplyResolution("routine_occurrence_apply_verified", { matched_by: hasRoutineOccurrenceIdentity ? "routine_occurrence_key" : "task_id-fallback" }, "info", "verified");
+      return { ok: true, occurrence: candidates[0], matchedBy: hasRoutineOccurrenceIdentity ? "routine_occurrence_key" : "task_id-fallback" };
+    }
+    recordRoutineApplyResolution("routine_occurrence_apply_missing_target", { matched_by: "", reason: candidates.length ? "ambiguous" : "not_found" }, "warn", "missing_target");
     return {
       ok: false,
       skipped: true,
@@ -17878,7 +17969,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         return { ok: false, message: `TaskUpdated対象のTaskBoard行を補修しましたが再検出できません。task_id=${taskId}` };
       }
     }
-    const resolvedOccurrence = this.resolveBridgeInboundTaskOccurrence(target, payload);
+    const resolvedOccurrence = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskUpdated" });
     if (!resolvedOccurrence.ok) return resolvedOccurrence;
     const resolvedEntryId = taskKeyFromTaskLine(resolvedOccurrence.occurrence.line);
     const beforeProject = String(tcMetaFromTaskLine(resolvedOccurrence.occurrence.line).project || "").trim();
@@ -19085,7 +19176,7 @@ class TaskchutePlugin extends obsidian.Plugin {
 
     let deleteOccurrences = target.occurrences;
     if (String(payload.entry_id || "").trim()) {
-      const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload);
+      const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskDeleted" });
       if (!resolved.ok) return resolved;
       deleteOccurrences = [resolved.occurrence];
     }
@@ -19336,7 +19427,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     try {
       const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
       if (target && target.task) {
-        const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { preferUnchecked: true, preferActiveSession: true });
+        const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskStarted", preferUnchecked: true, preferActiveSession: true });
         if (resolved && resolved.ok) occurrence = resolved.occurrence;
       }
       if (occurrence) {
@@ -19392,7 +19483,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!taskId) return { ok: false, skipped: true, message: "TaskStarted payloadにtask_idがありません。" };
     const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
     if (!target || !target.task) return { ok: false, skipped: true, message: "対象task_idのローカルタスクが見つかりません。" };
-    const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { preferUnchecked: true, preferActiveSession: true });
+    const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskStarted", preferUnchecked: true, preferActiveSession: true });
     if (!resolved.ok) return resolved;
     const occurrence = resolved.occurrence;
 
@@ -19691,7 +19782,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
     if (!target || !target.task) return { ok: false, skipped: true, message: "対象task_idのローカルタスクが見つかりません。" };
     const payloadEntryId = String(payload.entry_id || "").trim();
-    const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { preferUnchecked: true, preferActiveSession: true });
+    const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskStopped", preferUnchecked: true, preferActiveSession: true });
     if (!resolved.ok) return resolved;
     const occurrence = resolved.occurrence;
 
@@ -19946,7 +20037,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!taskId) return { ok: false, skipped: true, message: "TaskCompleted payloadにtask_idがありません。" };
     const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
     if (!target || !target.task) return { ok: false, skipped: true, message: "対象task_idのローカルタスクが見つかりません。" };
-    const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { preferUnchecked: true, preferActiveSession: true });
+    const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskCompleted", preferUnchecked: true, preferActiveSession: true });
     if (!resolved.ok) return resolved;
     const occurrence = resolved.occurrence;
 
@@ -20207,7 +20298,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
     if (!target || !target.task) return { ok: false, skipped: true, message: "対象task_idのローカルタスクが見つかりません。" };
-    const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload);
+    const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskCommentAdded" });
     if (!resolved.ok) return resolved;
     const commentedAt = normalizeBridgeUtcIso(payload.commented_at || event && event.created_at) || nowIso();
     const commentedDate = new Date(commentedAt);
@@ -20972,6 +21063,50 @@ class TaskchutePlugin extends obsidian.Plugin {
         occurrence_key: String(detail && detail.occurrence_key || "").trim()
       }
     });
+  }
+
+  getRoutineOccurrenceBridgeFields(task, overrides = {}) {
+    const src = task && typeof task === "object" ? task : {};
+    const meta = src.entryMeta && typeof src.entryMeta === "object" ? src.entryMeta : {};
+    const pick = (...keys) => {
+      for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(overrides || {}, key) && overrides[key] != null) return overrides[key];
+        if (Object.prototype.hasOwnProperty.call(src, key) && src[key] != null) return src[key];
+        if (Object.prototype.hasOwnProperty.call(meta, key) && meta[key] != null) return meta[key];
+      }
+      return "";
+    };
+    const taskId = String(pick("task_id", "taskId") || "").trim();
+    const routineId = String(pick("routine_id", "routineId", "generated_by_routine_id", "generatedByRoutineId") || "").trim();
+    const generatedForDate = this.normalizeDate(String(pick("routine_generated_for_date", "routineGeneratedForDate", "routine_date", "routineDate", "sourceDate", "date") || "").trim());
+    const scheduledTime = String(pick("routine_scheduled_time", "routineScheduledTime", "start_plan", "startPlan") || "").trim();
+    let occurrenceKey = String(pick("routine_occurrence_key", "routineOccurrenceKey") || "").trim();
+    if (!occurrenceKey && routineId && generatedForDate) occurrenceKey = this.buildRoutineOccurrenceKey(routineId, generatedForDate, scheduledTime);
+    const isRoutine = isRoutineHistoryTarget(src) || !!routineId || !!occurrenceKey;
+    if (!isRoutine) return {};
+    return {
+      is_routine: "true",
+      routine_id: routineId || taskId,
+      generated_by_routine_id: routineId || taskId,
+      routine_occurrence_key: occurrenceKey,
+      routine_generated_for_date: generatedForDate,
+      routine_scheduled_time: scheduledTime
+    };
+  }
+
+  recordRoutineOccurrenceSyncDiagnostic(reason, detail = {}, level = "info", status = "") {
+    const fields = this.getRoutineOccurrenceBridgeFields(detail && detail.task ? detail.task : {}, detail || {});
+    const clean = Object.assign({}, detail || {});
+    delete clean.task;
+    this.recordBridgeRoutineDiagnostic(reason, Object.assign({
+      device_id: String(this.settings && this.settings.bridgeDeviceId || "").trim(),
+      operation: String(detail && detail.operation || "").trim(),
+      choice: String(detail && detail.choice || "").trim(),
+      event_type: String(detail && detail.event_type || "").trim(),
+      reason: String(detail && detail.reason || "").trim(),
+      task_id: String(detail && detail.task_id || "").trim(),
+      entry_id: String(detail && detail.entry_id || "").trim()
+    }, fields, clean), level, status);
   }
 
   async findBridgeRoutineDefinitionFilesById(routineId) {
@@ -21841,6 +21976,17 @@ class TaskchutePlugin extends obsidian.Plugin {
     const taskId = String(task && (task.taskId || task.task_id) || "").trim();
     const entryId = String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim();
     const eventId = createBridgeEventId();
+    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(task, afterOverrides);
+    if (routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key) {
+      this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_update_enqueue_started", Object.assign({
+        task,
+        operation: "update",
+        choice: String(afterOverrides && afterOverrides.routine_occurrence_choice || afterOverrides && afterOverrides.choice || "").trim(),
+        event_type: "TaskUpdated",
+        task_id: taskId,
+        entry_id: entryId
+      }, routineOccurrenceFields), "info", "started");
+    }
 
     const recordFailure = async message => {
       this.settings.bridgeLastTaskUpdatedEnqueueAt = nowIso();
@@ -21848,6 +21994,17 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.settings.bridgeLastTaskUpdatedEnqueueMessage = String(message || "TaskUpdatedをoutboxへ追加できませんでした。");
       this.settings.bridgeLastTaskUpdatedEventId = eventId;
       this.settings.bridgeLastTaskUpdatedChangedFields = fields;
+      if (routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key) {
+        this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_update_enqueue_skipped", Object.assign({
+          task,
+          operation: "update",
+          choice: String(afterOverrides && afterOverrides.routine_occurrence_choice || afterOverrides && afterOverrides.choice || "").trim(),
+          event_type: "TaskUpdated",
+          task_id: taskId,
+          entry_id: entryId,
+          reason: message
+        }, routineOccurrenceFields), "warn", "skipped");
+      }
       try { await this.savePluginData({ deviceWriterOperation: "bridge-task-updated-enqueue-failed" }); } catch (e) {}
       return false;
     };
@@ -21867,6 +22024,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       payload: {
         task_id: taskId,
         entry_id: String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim(),
+        ...routineOccurrenceFields,
         changed_fields: fields,
         after: this.getBridgeTaskUpdatedAfter(task, afterOverrides),
         source: String(afterOverrides && afterOverrides.bridge_source || "obsidian-plugin").trim() || "obsidian-plugin"
@@ -21907,6 +22065,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const source = String(options && options.source || (deleteType === "bulk" ? "bulk-delete" : "single-delete")).trim();
     const isCompleted = !!(options && options.isCompleted != null ? options.isCompleted : task && task.checked);
     const deleteContext = String(options && options.deleteContext || (isCompleted ? "completed-task-delete" : "task-delete")).trim();
+    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(task, { date });
     const outboxBeforeCount = normalizeBridgeOutboxEvents(this.settings && this.settings.bridgeOutboxEvents).length;
     this.recordBridgeTaskDeletedSendDiagnostic("bridge_taskdeleted_enqueue_started", {
       task_id: taskId,
@@ -21986,6 +22145,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       payload: {
         task_id: taskId,
         entry_id: entryId,
+        ...routineOccurrenceFields,
         title: String(task && task.title || "").trim(),
         date,
         deleted_at: timestamp,
@@ -22140,11 +22300,13 @@ class TaskchutePlugin extends obsidian.Plugin {
   async enqueueBridgeTaskMoved(task, movement = {}) {
     if (Array.isArray(task)) {
       let ok = true;
-      const seenTaskIds = new Set();
+      const seenTaskEntries = new Set();
       for (const item of task) {
         const itemTaskId = String(item && item.task && (item.task.taskId || item.task.task_id) || "").trim();
-        if (!itemTaskId || seenTaskIds.has(itemTaskId)) continue;
-        seenTaskIds.add(itemTaskId);
+        const itemEntryId = String(item && item.task && (item.task.entryId || item.task.entry_id || item.task.taskKey) || item && item.movement && (item.movement.toEntryId || item.movement.fromEntryId) || "").trim();
+        const seenKey = `${itemTaskId}\u0000${itemEntryId}`;
+        if (!itemTaskId || seenTaskEntries.has(seenKey)) continue;
+        seenTaskEntries.add(seenKey);
         const saved = await this.enqueueBridgeTaskMoved(item && item.task, item && item.movement || {});
         if (!saved) ok = false;
       }
@@ -22156,6 +22318,11 @@ class TaskchutePlugin extends obsidian.Plugin {
     const deviceId = String(this.settings.bridgeDeviceId || "").trim();
     const taskId = String(task && (task.taskId || task.task_id) || "").trim();
     const eventId = createBridgeEventId();
+    const timestamp = new Date().toISOString();
+    const taskDate = String(task && (task.sourceDate || task.date) || "").trim();
+    const taskSection = String(task && (task.sectionId || task.section) || "").trim();
+    const entryId = String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim();
+    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(task, Object.assign({}, movement || {}, { date: taskDate }));
     const normalizePoint = (value, fallbackDate, fallbackSection) => {
       const rawDate = String(value && value.date || fallbackDate || "").trim();
       const date = rawDate ? this.normalizeDate(rawDate) : "";
@@ -22176,6 +22343,17 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.settings.bridgeLastTaskMovedEnqueueMessage = String(message || "TaskMovedをoutboxへ追加できませんでした。");
       this.settings.bridgeLastTaskMovedEventId = eventId;
       this.settings.bridgeLastTaskMovedTaskId = taskId;
+      if (routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key) {
+        this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_move_enqueue_skipped", Object.assign({
+          task,
+          operation: "move",
+          choice: String(movement && movement.routine_occurrence_choice || movement && movement.choice || "").trim(),
+          event_type: "TaskMoved",
+          task_id: taskId,
+          entry_id: entryId,
+          reason: message
+        }, routineOccurrenceFields), "warn", "skipped");
+      }
       try { await this.savePluginData({ deviceWriterOperation: "bridge-task-moved-enqueue-failed" }); } catch (e) {}
       return false;
     };
@@ -22184,11 +22362,17 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!deviceId) return await recordFailure("Device IDが未設定のため、TaskMovedをoutboxへ追加できませんでした。");
     if (!taskId) return await recordFailure("task_idがないため、TaskMovedをoutboxへ追加できませんでした。");
 
-    const timestamp = new Date().toISOString();
-    const taskDate = String(task && (task.sourceDate || task.date) || "").trim();
-    const taskSection = String(task && (task.sectionId || task.section) || "").trim();
-    const entryId = String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim();
     if (!entryId) return await recordFailure("entry_idがないため、TaskMovedをoutboxへ追加できませんでした。");
+    if (routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key) {
+      this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_move_enqueue_started", Object.assign({
+        task,
+        operation: "move",
+        choice: String(movement && movement.routine_occurrence_choice || movement && movement.choice || "").trim(),
+        event_type: "TaskMoved",
+        task_id: taskId,
+        entry_id: entryId
+      }, routineOccurrenceFields), "info", "started");
+    }
     const from = normalizePoint(movement && movement.from, taskDate, taskSection);
     const to = normalizePoint(movement && movement.to, taskDate, taskSection);
     from.entry_id = from.entry_id || String(movement && movement.fromEntryId || entryId).trim();
@@ -22250,6 +22434,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       payload: {
         task_id: taskId,
         entry_id: to.entry_id || entryId,
+        ...routineOccurrenceFields,
         title: String(task && task.title || "").trim(),
         date: to.date || taskDate,
         from,
@@ -22309,6 +22494,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const eventId = createBridgeEventId();
     const phasePrefix = String(eventType || "").toLowerCase();
     const outboxCount = normalizeBridgeOutboxEvents(this.settings && this.settings.bridgeOutboxEvents).length;
+    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(task, { date: requestedDate });
 
     this.recordBridgeExecutionEventDiagnostic(`bridge_${phasePrefix}_enqueue_started`, {
       event_type: eventType,
@@ -22323,6 +22509,15 @@ class TaskchutePlugin extends obsidian.Plugin {
       reason_code: "execution_event_enqueue_started",
       decision: "started"
     });
+    if (routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key) {
+      this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_start_end_enqueue_started", Object.assign({
+        task,
+        operation: "start_end",
+        event_type: eventType,
+        task_id: taskId,
+        entry_id: entryId
+      }, routineOccurrenceFields), "info", "started");
+    }
 
     const recordFailure = async message => {
       this.settings.bridgeLastLifecycleEnqueueAt = nowIso();
@@ -22344,6 +22539,16 @@ class TaskchutePlugin extends obsidian.Plugin {
         reason_code: "execution_event_enqueue_failed",
         decision: "skipped"
       });
+      if (routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key) {
+        this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_start_end_enqueue_skipped", Object.assign({
+          task,
+          operation: "start_end",
+          event_type: eventType,
+          task_id: taskId,
+          entry_id: entryId,
+          reason: message
+        }, routineOccurrenceFields), "warn", "skipped");
+      }
       try { await this.savePluginData({ deviceWriterOperation: "bridge-lifecycle-enqueue-failed" }); } catch (e) {}
       return false;
     };
@@ -22353,7 +22558,11 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!deviceId) return await recordFailure("Device IDが未設定のため、実行系イベントをoutboxへ追加できませんでした。");
     if (!taskId) return await recordFailure("task_idがないため、実行系イベントをoutboxへ追加できませんでした。");
     if (!entryId) return await recordFailure("entry_idがないため、実行系イベントをoutboxへ追加できませんでした。");
-    const occurrence = await this.findBridgeLocalTaskMoveOccurrence(taskId, requestedDate ? [requestedDate] : [], entryId);
+    const occurrence = await this.findBridgeLocalTaskMoveOccurrence(taskId, requestedDate ? [requestedDate] : [], entryId, {
+      routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key,
+      routineGeneratedForDate: routineOccurrenceFields.routine_generated_for_date,
+      routineId: routineOccurrenceFields.routine_id || routineOccurrenceFields.generated_by_routine_id
+    });
     if (!occurrence || occurrence.bridgeOccurrenceResolutionError) {
       return await recordFailure("保存後Markdownから実行系イベント対象entryを一意に確認できませんでした。");
     }
@@ -22397,6 +22606,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const payload = {
       task_id: taskId,
       entry_id: entryId,
+      ...routineOccurrenceFields,
       exec_id: String(task && (task.execId || task.exec_id) || "").trim(),
       title: normalizedTitle,
       date: normalizedDate,
@@ -26779,6 +26989,47 @@ class TaskchutePlugin extends obsidian.Plugin {
       occurrenceKeys.forEach((items, occurrenceKey) => {
         if (items.length > 1) this.appendTaskchuteRepairEntry(report, "repair_duplicate_routine_occurrence_key", "report_only", { routine_occurrence_key: occurrenceKey, count: items.length, occurrences: items });
       });
+      const routineOccurrenceOutboundKeys = new Set();
+      const routineOccurrenceOutboundEntryIds = new Set();
+      normalizeBridgeOutboxEvents(this.settings && this.settings.bridgeOutboxEvents).forEach(event => {
+        const eventType = String(event && event.event_type || "").trim();
+        if (!["TaskUpdated", "TaskMoved", "TaskDeleted", "TaskStarted", "TaskStopped", "TaskCompleted"].includes(eventType)) return;
+        const payload = event && event.payload && typeof event.payload === "object" ? event.payload : {};
+        const key = String(payload.routine_occurrence_key || "").trim();
+        const entryId = String(payload.entry_id || "").trim();
+        if (key) routineOccurrenceOutboundKeys.add(key);
+        if (entryId) routineOccurrenceOutboundEntryIds.add(entryId);
+      });
+      const localOverrideFields = ["start_plan", "end_plan", "project", "project_id", "project_name", "mode", "category", "area", "client", "estimate_min"];
+      boardEntries.forEach(task => {
+        const meta = task && task.entryMeta || {};
+        const occurrenceKey = String(meta.routine_occurrence_key || "").trim();
+        const entryId = String(task && task.entryId || meta.entry_id || "").trim();
+        if (!occurrenceKey && !entryId) return;
+        const noteContent = (taskNotesById.get(String(task && task.taskId || "").trim()) || [])[0];
+        const noteText = String(noteContent && noteContent.content || "");
+        if (!noteText) return;
+        const changedFields = localOverrideFields.filter(key => {
+          const metaValue = String(meta[key] == null ? "" : meta[key]).trim();
+          if (!metaValue) return false;
+          const noteValue = String(extractYamlValue(noteText, key) || "").trim();
+          return metaValue !== noteValue;
+        });
+        const hasMatchingOutbound = occurrenceKey && routineOccurrenceOutboundKeys.has(occurrenceKey)
+          || entryId && routineOccurrenceOutboundEntryIds.has(entryId);
+        if (changedFields.length && !hasMatchingOutbound) {
+          this.appendTaskchuteRepairEntry(report, "repair_routine_occurrence_outbound_event_missing_report_only", "report_only", {
+            date: task.date || "",
+            path: task.path || "",
+            task_id: task.taskId || "",
+            entry_id: entryId,
+            routine_id: String(meta.routine_id || meta.generated_by_routine_id || task.taskId || "").trim(),
+            routine_occurrence_key: occurrenceKey,
+            checked_fields: changedFields,
+            reason: "routine_occurrence_has_local_override_but_no_matching_pending_outbound_event"
+          });
+        }
+      });
 
       const runningCandidates = this.collectTaskchuteRepairRunningCandidates(boardEntries);
       const running = this.normalizeRuntimeSession ? this.normalizeRuntimeSession(this.runtime && this.runtime.running, false) : (this.runtime && this.runtime.running);
@@ -28770,6 +29021,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
       if (key === "project") overrides.project = value;
       if (key === "mode") overrides.mode = value;
+      if (task && task._lastRoutineOccurrenceChoice) overrides.routine_occurrence_choice = String(task._lastRoutineOccurrenceChoice || "").trim();
       const enqueued = await this.enqueueBridgeTaskUpdated(task, [bridgeFieldName], overrides);
       await recordStartPlanDecision(enqueued ? "enqueued" : "not-enqueued", enqueued
         ? (result === false
@@ -28794,12 +29046,32 @@ class TaskchutePlugin extends obsidian.Plugin {
         return false;
       }
       if (scope === "today") {
+        this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_edit_choice", {
+          task,
+          operation: "edit",
+          choice: "today",
+          event_type: "TaskUpdated",
+          task_id: String(task && (task.taskId || task.task_id) || "").trim(),
+          entry_id: String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim(),
+          field: key
+        }, "info", "selected");
+        task._lastRoutineOccurrenceChoice = "today";
         if (task.entryId || task.taskKey) {
           const entryOk = await this.updateTaskEntryMetaField(task, key, value);
           return await enqueueUpdated(entryOk !== false);
         }
         // entry_id が無い古い行では、今日だけの保存先を持てないため通常更新へフォールバックする。
       } else if (scope === "master") {
+        this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_edit_choice", {
+          task,
+          operation: "edit",
+          choice: "master",
+          event_type: "RoutineUpdated",
+          task_id: String(task && (task.taskId || task.task_id) || "").trim(),
+          entry_id: String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim(),
+          field: key
+        }, "info", "selected");
+        task._lastRoutineOccurrenceChoice = "master";
         if (task.entryId || task.taskKey) {
           const entryOk = await this.updateTaskEntryMetaField(task, key, value);
           if (entryOk === false) return await enqueueUpdated(false);
@@ -28817,7 +29089,8 @@ class TaskchutePlugin extends obsidian.Plugin {
           });
           await this.refreshViews({ preserveScroll: true });
         }
-        return await enqueueUpdated(true);
+        if (this.settings.bridgeEnabled && !(await this.enqueueBridgeRoutineEvent("RoutineUpdated", task))) return false;
+        return true;
       }
     }
 
@@ -33001,6 +33274,26 @@ class TaskchutePlugin extends obsidian.Plugin {
         if (this.isTaskchuteWriteAborted(saveOk)) return false;
         this.removeTaskRowsInViews([result.key], { focusTaskId: result.focusKey });
         if (result.focusKey) this.selectTask(result.focusKey);
+        if (action !== "master") {
+          const taskDeleteSnapshot = Object.assign({}, task, {
+            entryId: result.key,
+            entry_id: result.key,
+            taskKey: result.key,
+            sourceDate: date,
+            date
+          });
+          const bridgeTaskDeleted = await this.enqueueBridgeTaskDeleted(taskDeleteSnapshot, {
+            deletedAt: nowIso(),
+            deleteType: "single",
+            source: "routine-occurrence-delete",
+            deleteContext: "routine-occurrence-delete",
+            isCompleted: !!task.checked
+          });
+          if (!bridgeTaskDeleted && this.settings && this.settings.bridgeEnabled) {
+            new obsidian.Notice("繝ｭ繝ｼ繧ｫ繝ｫ蜑企勁縺ｯ螳御ｺ・＠縺ｾ縺励◆縺後ゝaskDeleted繧達ridge outbox縺ｸ菫晏ｭ倥〒縺阪∪縺帙ｓ縺ｧ縺励◆");
+            return false;
+          }
+        }
         const bridgeDeleted = await this.enqueueBridgeRoutineOccurrenceEvent("RoutineOccurrenceDeleted", task, {
           occurrenceDate: date,
           reason: "user_delete_once",
