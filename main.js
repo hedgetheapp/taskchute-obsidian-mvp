@@ -279,7 +279,8 @@ const DEFAULT_SETTINGS = {
   bridgeInboundAutoApplyFailedCount: 0,
   bridgeInboundAutoApplyAppliedEventIds: [],
   bridgeInboundAutoApplyStoppedReason: "",
-  bridgeInboundAutoApplyEnabled: false,
+  bridgeInboundAutoApplyEnabled: true,
+  bridgeInboundAutoApplyDefaultMigratedAt: "",
   bridgeInboundAutoApplyIntervalSec: 5,
   bridgeInboundAutoApplyInProgress: false,
   bridgeInboundAutoApplyLastRunAt: "",
@@ -10107,6 +10108,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.bridgeOutboxMutationQueue = Promise.resolve();
       this.bridgeTaskTitleCommitQueues = new Map();
       this.pluginDataSaveQueue = Promise.resolve();
+      if (this.bridgeInboundAutoApplyDefaultMigrationPending) {
+        window.setTimeout(() => {
+          this.savePluginData({ deviceWriterOperation: "bridge-inbound-auto-apply-default-migration" }).catch(() => {});
+        }, 0);
+      }
       this.bridgeDiagnosticsLastPruneCheckAt = 0;
       this.bridgeInboundAutoApplyLastTickAt = 0;
       this.isRestoringTaskchuteUndo = false;
@@ -10379,7 +10385,18 @@ class TaskchutePlugin extends obsidian.Plugin {
 
   applyLoadedData(loaded = {}) {
     this.legacyProjectNotePaths = collectLegacyProjectNotePaths(loaded && loaded.projectNoteMeta);
+    const loadedObject = loaded && typeof loaded === "object" && !Array.isArray(loaded) ? loaded : {};
+    const inboundAutoApplyKeyPresent = Object.prototype.hasOwnProperty.call(loadedObject, "bridgeInboundAutoApplyEnabled");
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded || {});
+    if (!inboundAutoApplyKeyPresent && this.settings.bridgeEnabled) {
+      this.settings.bridgeInboundAutoApplyEnabled = true;
+      this.settings.bridgeInboundAutoApplyDefaultMigratedAt = this.settings.bridgeInboundAutoApplyDefaultMigratedAt || nowIso();
+      this.bridgeInboundAutoApplyDefaultMigrationPending = true;
+      if (String(this.settings.bridgeInboundAutoApplyRuntimeStatus || "").trim() === "disabled") {
+        this.settings.bridgeInboundAutoApplyRuntimeStatus = "enabled";
+        this.settings.bridgeInboundAutoApplyRuntimeReason = "";
+      }
+    }
     this.settings.taskchuteFolder = this.settings.taskchuteFolder || "Taskchute";
     this.settings.tasksFolder = this.settings.tasksFolder || "Taskchute/Tasks";
     this.settings.calendarsFolder = this.settings.calendarsFolder || "Taskchute/Calendars";
@@ -10732,6 +10749,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       .filter(Boolean))).slice(-50);
     this.settings.bridgeInboundAutoApplyStoppedReason = String(this.settings.bridgeInboundAutoApplyStoppedReason || "").trim();
     this.settings.bridgeInboundAutoApplyEnabled = !!this.settings.bridgeInboundAutoApplyEnabled;
+    this.settings.bridgeInboundAutoApplyDefaultMigratedAt = String(this.settings.bridgeInboundAutoApplyDefaultMigratedAt || "").trim();
     this.settings.bridgeInboundAutoApplyIntervalSec = Math.max(3, Math.min(300, Math.floor(Number(this.settings.bridgeInboundAutoApplyIntervalSec || 5))));
     this.settings.bridgeInboundAutoApplyInProgress = false;
     this.settings.bridgeInboundAutoApplyLastRunAt = String(this.settings.bridgeInboundAutoApplyLastRunAt || "").trim();
@@ -10749,6 +10767,18 @@ class TaskchutePlugin extends obsidian.Plugin {
       ? String(this.settings.bridgeInboundAutoApplyRuntimeStatus)
       : (this.settings.bridgeInboundAutoApplyEnabled ? "enabled" : "disabled");
     this.settings.bridgeInboundAutoApplyRuntimeReason = String(this.settings.bridgeInboundAutoApplyRuntimeReason || "").trim();
+    if (this.settings.bridgeInboundAutoApplyEnabled
+      && this.settings.bridgeInboundAutoApplyRuntimeStatus === "disabled"
+      && this.settings.bridgeInboundAutoApplyRuntimeReason === "inbound_auto_apply_setting_disabled") {
+      this.settings.bridgeInboundAutoApplyRuntimeStatus = "enabled";
+      this.settings.bridgeInboundAutoApplyRuntimeReason = "";
+    }
+    if (!this.settings.bridgeInboundAutoApplyEnabled) {
+      this.settings.bridgeInboundAutoApplyRuntimeStatus = "disabled";
+      if (!this.settings.bridgeInboundAutoApplyRuntimeReason) {
+        this.settings.bridgeInboundAutoApplyRuntimeReason = "inbound_auto_apply_setting_disabled";
+      }
+    }
     this.settings.bridgeInboundAutoApplyBlockedEventId = String(this.settings.bridgeInboundAutoApplyBlockedEventId || "").trim();
     this.settings.bridgeInboundAutoApplyBlockedServerSequence = Math.max(0, Math.floor(Number(this.settings.bridgeInboundAutoApplyBlockedServerSequence || 0)));
     this.settings.bridgeInboundAutoApplyRuntimeDiagnostics = limitBridgeDiagnosticArrayProtectedAware(this.settings.bridgeInboundAutoApplyRuntimeDiagnostics, "bridgeInboundAutoApplyRuntimeDiagnostics", this.settings);
@@ -48167,23 +48197,23 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
           }
         }));
 
-    el.createEl("h4", { text: "受信イベント 全イベント自動反映" });
+    el.createEl("h4", { text: "自動受信 / Auto receive inbound cloud changes" });
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映")
-      .setDesc("ユーザー設定のON/OFFです。安全停止時も設定値はONのまま保持し、runtime状態と停止理由を別表示します。")
+      .setName("自動受信・自動反映（クラウド変更をこの端末へ反映）")
+      .setDesc("ONにすると、D1/クラウド側の未反映イベントを定期実行・復帰・focus/visible復帰時に取得し、この端末へ保存後検証つきで反映します。送信の自動flushとは別設定です。")
       .addToggle(toggle => toggle
         .setValue(!!this.plugin.settings.bridgeInboundAutoApplyEnabled)
         .onChange(async value => {
           this.plugin.settings.bridgeInboundAutoApplyEnabled = !!value;
-          this.plugin.setBridgeInboundAutoApplyRuntimeState(value ? "enabled" : "disabled", value ? "" : "ユーザー操作により全イベント自動反映をOFFにしました。", "settings-toggle");
+          this.plugin.setBridgeInboundAutoApplyRuntimeState(value ? "enabled" : "disabled", value ? "" : "ユーザー操作により自動受信・自動反映をOFFにしました。", "settings-toggle");
           this.plugin.bridgeInboundAutoApplyLastTickAt = 0;
           await this.plugin.savePluginData({ deviceWriterOperation: "bridge-inbound-auto-apply-toggle" });
           this.display();
         }));
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 実行間隔（秒）")
+      .setName("自動受信・自動反映 実行間隔（秒）")
       .setDesc(`現在 ${this.plugin.settings.bridgeInboundAutoApplyIntervalSec || 5}秒 / 3〜300秒 / 既定値は5秒です。`)
       .addText(text => {
         text.inputEl.setAttribute("type", "number");
@@ -48198,7 +48228,7 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
       });
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 対象イベント")
+      .setName("自動受信・自動反映 対象イベント")
       .setDesc((Array.isArray(this.plugin.settings.bridgeInboundAutoApplyEventTypes)
         ? this.plugin.settings.bridgeInboundAutoApplyEventTypes
         : []).join(" / ") || "未設定");
@@ -48208,9 +48238,14 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
     const inboundDiagnostic = {
       bridge_user_id: String(this.plugin.settings.bridgeUserId || "").trim(),
       bridge_device_id: String(this.plugin.settings.bridgeDeviceId || "").trim(),
+      bridge_enabled: !!this.plugin.settings.bridgeEnabled,
+      outbound_auto_flush_enabled: !!this.plugin.settings.bridgeAutoFlushEnabled,
+      outbound_auto_flush_on_startup: !!this.plugin.settings.bridgeAutoFlushOnStartup,
+      bridge_auto_flush_enabled: !!this.plugin.settings.bridgeAutoFlushEnabled,
       inbound_auto_apply_enabled: !!this.plugin.settings.bridgeInboundAutoApplyEnabled,
       inbound_auto_apply_runtime_status: String(this.plugin.settings.bridgeInboundAutoApplyRuntimeStatus || "").trim(),
       inbound_auto_apply_runtime_reason: String(this.plugin.settings.bridgeInboundAutoApplyRuntimeReason || "").trim(),
+      inbound_auto_apply_default_migrated_at: String(this.plugin.settings.bridgeInboundAutoApplyDefaultMigratedAt || "").trim(),
       inbound_auto_apply_runtime_diagnostics: (Array.isArray(this.plugin.settings.bridgeInboundAutoApplyRuntimeDiagnostics)
         ? this.plugin.settings.bridgeInboundAutoApplyRuntimeDiagnostics
         : []).slice(-10),
@@ -48276,6 +48311,27 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(el)
       .setName("Inbound auto apply runtime状態")
       .setDesc(`${inboundRuntimeLabels[inboundDiagnostic.inbound_auto_apply_runtime_status] || inboundDiagnostic.inbound_auto_apply_runtime_status || "不明"} / 理由: ${inboundDiagnostic.inbound_auto_apply_runtime_reason || "なし"}`);
+
+    if (this.plugin.isTaskchuteMobileEnvironment()
+      && this.plugin.settings.bridgeEnabled
+      && !this.plugin.settings.bridgeInboundAutoApplyEnabled) {
+      new obsidian.Setting(el)
+        .setName("警告: mobileの自動受信がOFFです")
+        .setDesc("自動受信がOFFです。dev/remoteの変更は、手動受信するまでmobileへ反映されません。")
+        .addButton(btn => btn
+          .setButtonText("自動受信をONにする")
+          .setCta()
+          .onClick(async () => {
+            this.plugin.settings.bridgeInboundAutoApplyEnabled = true;
+            this.plugin.setBridgeInboundAutoApplyRuntimeState("enabled", "", "mobile-warning-enable-inbound-auto-apply");
+            this.plugin.bridgeInboundAutoApplyLastTickAt = 0;
+            await this.plugin.savePluginData({ deviceWriterOperation: "bridge-inbound-mobile-warning-enable" });
+            if (typeof this.plugin.scheduleMobileResumeInboundDrain === "function") {
+              this.plugin.scheduleMobileResumeInboundDrain("settings-mobile-warning-enable", { immediate: true });
+            }
+            this.display();
+          }));
+    }
 
     new obsidian.Setting(el)
       .setName("LastOk / LastFailedCount")
@@ -48500,7 +48556,7 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
         }));
 
     new obsidian.Setting(el)
-      .setName("Inbound auto apply")
+      .setName("自動受信・自動反映")
       .setDesc("設定状態だけを切り替えます。切り替え操作ではイベントを反映・ackしません。")
       .addButton(btn => btn
         .setButtonText("有効化")
@@ -49194,7 +49250,7 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
     el.createEl("h4", { text: "Bridge送信診断" });
 
     new obsidian.Setting(el)
-      .setName("Bridge / auto flush")
+      .setName("Bridge / 自動送信（Auto flush local changes）")
       .setDesc(`bridgeEnabled ${this.plugin.settings.bridgeEnabled ? "true" : "false"} / bridgeAutoFlushEnabled ${this.plugin.settings.bridgeAutoFlushEnabled ? "true" : "false"}`);
 
     new obsidian.Setting(el)
@@ -49428,8 +49484,8 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
       });
 
     new obsidian.Setting(el)
-      .setName("自動flush有効")
-      .setDesc("ONの場合のみ、outboxへの新規pending追加後に安全条件を確認して自動flushします。")
+      .setName("自動送信・自動flush（ローカル変更をクラウドへ送信）")
+      .setDesc("ONの場合のみ、この端末で作られたoutbox pendingを安全条件確認後にD1/クラウドへ送信します。自動受信・自動反映とは別設定です。")
       .addToggle(t => t
         .setValue(!!this.plugin.settings.bridgeAutoFlushEnabled)
         .onChange(async v => {
@@ -49443,8 +49499,8 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
         }));
 
     new obsidian.Setting(el)
-      .setName("起動時自動flush有効")
-      .setDesc("自動flush有効時、Obsidian起動後に指定delayを待って安全条件を確認します。")
+      .setName("起動時自動送信・自動flush")
+      .setDesc("自動送信ON時、Obsidian起動後に指定delayを待って送信安全条件を確認します。")
       .addToggle(t => t
         .setValue(!!this.plugin.settings.bridgeAutoFlushOnStartup)
         .onChange(async v => {
