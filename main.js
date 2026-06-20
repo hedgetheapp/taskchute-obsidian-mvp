@@ -21622,7 +21622,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         const synced = await this.syncGeneratedRoutineInstancesForDefinition(appliedTask, {
           fromDate: this.getActiveViewDate(),
           includeCurrent: true,
-          eventId: String(event && event.event_id || "").trim()
+          eventId: String(event && event.event_id || "").trim(),
+          reason: "inbound-routine-updated-apply",
+          sourceDeviceId: String(event && event.device_id || payload.source_device_id || "").trim(),
+          targetDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim()
         });
         if (synced === false) return { ok: false, message: "Routine派生タスクの同期に失敗しました。" };
         const generated = await this.generateRoutinesForDate(this.getActiveViewDate(), {
@@ -25201,6 +25204,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     this.recordBridgeRoutineDiagnostic("routine_definition_update_existing_occurrences", {
       phase: "routine_definition_update_existing_occurrences",
+      reason: String(options && options.reason || "routine-definition-sync").trim(),
+      source_device_id: String(options && (options.sourceDeviceId || options.source_device_id) || this.settings && this.settings.bridgeDeviceId || "").trim(),
+      target_device_id: String(options && (options.targetDeviceId || options.target_device_id) || this.settings && this.settings.bridgeDeviceId || "").trim(),
       routine_id: routineId || taskId,
       event_id: eventId,
       scanned_date_count: result.scanned_date_count,
@@ -29186,7 +29192,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         if (isTaskRoutineActive(task) || isRoutineHistoryTarget(task)) {
           await this.syncGeneratedRoutineInstancesForDefinition(task, {
             fromDate: this.getActiveViewDate(),
-            includeCurrent: true
+            includeCurrent: true,
+            reason: "local-routine-master-field-save",
+            sourceDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim(),
+            targetDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim()
           });
           await this.refreshViews({ preserveScroll: true });
         }
@@ -29212,7 +29221,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       Object.assign(task, patch);
       await this.syncGeneratedRoutineInstancesForDefinition(task, {
         fromDate: this.getActiveViewDate(),
-        includeCurrent: true
+        includeCurrent: true,
+        reason: "local-routine-board-field-save",
+        sourceDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim(),
+        targetDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim()
       });
       await this.refreshViews({ preserveScroll: true });
     }
@@ -29630,11 +29642,26 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (enabled) {
         syncedGenerated = await this.syncGeneratedRoutineInstancesForDefinition(task, {
           fromDate: this.getActiveViewDate(),
-          includeCurrent: true
+          includeCurrent: true,
+          reason: "local-routine-save",
+          sourceDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim(),
+          targetDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim()
         });
       }
     }
     if (this.settings.bridgeEnabled && !(await this.enqueueBridgeRoutineEvent("RoutineUpdated", task))) return false;
+    if (enabled) {
+      const postEnqueueSynced = await this.syncGeneratedRoutineInstancesForDefinition(task, {
+        fromDate: this.getActiveViewDate(),
+        includeCurrent: true,
+        reason: "local-routine-toggle-save-post-enqueue",
+        sourceDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim(),
+        targetDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim()
+      });
+      if (postEnqueueSynced && Number(postEnqueueSynced.updated_occurrence_count || postEnqueueSynced.rows || 0) > Number(syncedGenerated && (syncedGenerated.updated_occurrence_count || syncedGenerated.rows) || 0)) {
+        syncedGenerated = postEnqueueSynced;
+      }
+    }
     await this.refreshRoutineSettingsViews();
     new obsidian.Notice(enabled
       ? (Number(syncedGenerated && syncedGenerated.rows || 0) > 0 ? `ルーティン化し、生成済みタスクを${syncedGenerated.rows}行同期しました` : "ルーティン化しました")
@@ -29829,7 +29856,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (enabled) {
         syncedGenerated = await this.syncGeneratedRoutineInstancesForDefinition(task, {
           fromDate: this.getActiveViewDate(),
-          includeCurrent: true
+          includeCurrent: true,
+          reason: "local-routine-save",
+          sourceDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim(),
+          targetDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim()
         });
       }
     }
@@ -29838,6 +29868,19 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (!(await this.enqueueBridgeRoutineEvent(routineEventType, task, { deletedAt: fields.deleted_at }))) {
         new obsidian.Notice(`${routineEventType}のBridge enqueueに失敗しました`);
         return false;
+      }
+    }
+
+    if (enabled) {
+      const postEnqueueSynced = await this.syncGeneratedRoutineInstancesForDefinition(task, {
+        fromDate: this.getActiveViewDate(),
+        includeCurrent: true,
+        reason: "local-routine-save-post-enqueue",
+        sourceDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim(),
+        targetDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim()
+      });
+      if (postEnqueueSynced && Number(postEnqueueSynced.updated_occurrence_count || postEnqueueSynced.rows || 0) > Number(syncedGenerated && (syncedGenerated.updated_occurrence_count || syncedGenerated.rows) || 0)) {
+        syncedGenerated = postEnqueueSynced;
       }
     }
 
@@ -34639,7 +34682,10 @@ class TaskchutePlugin extends obsidian.Plugin {
             fileBase: newBase
           }), {
             fromDate: this.getActiveViewDate(),
-            includeCurrent: true
+            includeCurrent: true,
+            reason: "local-routine-title-save",
+            sourceDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim(),
+            targetDeviceId: String(this.settings && this.settings.bridgeDeviceId || "").trim()
           });
         } catch (syncGeneratedError) {
           console.error("Taskchute generated routine title sync error", syncGeneratedError);
