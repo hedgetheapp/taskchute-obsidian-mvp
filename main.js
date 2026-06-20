@@ -1460,6 +1460,13 @@ function isFalseLike(value) {
   const normalized = String(value).trim().toLowerCase();
   return ["false", "0", "no", "off", "n"].includes(normalized);
 }
+function isTrueLike(value) {
+  if (value === true) return true;
+  if (value === 1) return true;
+  if (value === false || value == null || value === "") return false;
+  const normalized = String(value).trim().toLowerCase();
+  return ["true", "1", "yes", "on", "enabled", "y"].includes(normalized);
+}
 function isTaskRoutineActive(task) {
   if (!task) return false;
   const routineValue = task.routine != null && task.routine !== "" ? task.routine : task.isRoutine;
