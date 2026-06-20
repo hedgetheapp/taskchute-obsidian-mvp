@@ -21614,7 +21614,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (type !== "RoutineDeleted" && payload.enabled !== false && payload.active !== false) {
         const synced = await this.syncGeneratedRoutineInstancesForDefinition(appliedTask, {
           fromDate: this.getActiveViewDate(),
-          includeCurrent: true
+          includeCurrent: true,
+          eventId: String(event && event.event_id || "").trim()
         });
         if (synced === false) return { ok: false, message: "Routine派生タスクの同期に失敗しました。" };
         const generated = await this.generateRoutinesForDate(this.getActiveViewDate(), {
@@ -25051,7 +25052,7 @@ class TaskchutePlugin extends obsidian.Plugin {
 
     const baseDate = this.normalizeDate((options && options.fromDate) || this.getActiveViewDate());
     const includeCurrent = !(options && options.includeCurrent === false);
-    const includeCompletedPast = !(options && options.includeCompletedPast === false);
+    const includeCompletedPast = !!(options && options.includeCompletedPast);
     const folder = safePath(this.settings.taskchuteFolder || "Taskchute");
     const protectedKeys = new Set(collectRuntimeTopProtectedKeys(this.runtime || {}));
     const files = this.app.vault.getMarkdownFiles().filter(file => {
@@ -25064,9 +25065,25 @@ class TaskchutePlugin extends obsidian.Plugin {
       return includeCurrent ? cmp >= 0 : cmp > 0;
     }).sort((a, b) => compareDateString(taskchuteDateFromPath(a.path), taskchuteDateFromPath(b.path)));
 
-    const result = { boards: 0, rows: 0, moved: 0 };
+    const eventId = String(options && (options.eventId || options.event_id) || "").trim();
+    const result = {
+      boards: 0,
+      rows: 0,
+      moved: 0,
+      scanned_date_count: 0,
+      scanned_occurrence_count: 0,
+      updated_occurrence_count: 0,
+      skipped_override_count: 0,
+      skipped_started_count: 0,
+      skipped_completed_count: 0,
+      skipped_deleted_count: 0,
+      skipped_not_matching_count: 0,
+      updated_dates: [],
+      updated_entry_ids: []
+    };
     for (const file of files) {
       const date = taskchuteDateFromPath(file.path);
+      result.scanned_date_count += 1;
       let md = "";
       try { md = await this.app.vault.read(file); }
       catch (e) { try { md = await readFileText(this.app, file.path); } catch (ignored) { md = ""; } }
@@ -25079,7 +25096,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       const metaPatch = this.buildGeneratedRoutineEntryMetaPatch(def, date);
       const desiredSection = this.getGeneratedRoutineSectionFromDefinition(def);
       const desiredSectionName = desiredSection && desiredSection.name ? desiredSection.name : "";
-      const isPastBoard = compareDateString(date, baseDate) < 0;
+      const shouldExistOnDate = routineMatchesDate(def, date, this.settings);
 
       for (const line of lines) {
         const sectionMatch = line.match(/^###\s+(.+?)\s*$/);
@@ -25100,25 +25117,52 @@ class TaskchutePlugin extends obsidian.Plugin {
           continue;
         }
 
+        result.scanned_occurrence_count += 1;
+        const entryId = String(meta.entry_id || taskKeyFromTaskLine(line) || "").trim();
+        if (!shouldExistOnDate) {
+          result.skipped_not_matching_count += 1;
+          kept.push(line);
+          continue;
+        }
+        if (String(meta.deleted_at || meta.delete_type || "").trim()) {
+          result.skipped_deleted_count += 1;
+          kept.push(line);
+          continue;
+        }
+        const isCompletedLine = isTaskLineCompletedForDefaultOrder(line, md);
+        if (isCompletedLine || String(meta.completed_at || "").trim()) {
+          result.skipped_completed_count += 1;
+          kept.push(line);
+          continue;
+        }
+        const key = taskKeyFromTaskLine(line);
+        const hasActualMeta = ["start_actual", "end_actual", "started_at", "end_at", "actual", "status"].some(k => {
+          const value = meta[k];
+          return value != null && String(value).trim() !== "";
+        });
+        if ((key && protectedKeys.has(key)) || hasActualMeta) {
+          result.skipped_started_count += 1;
+          kept.push(line);
+          continue;
+        }
+        const hasOccurrenceOverride = ["routine_occurrence_override", "once_edit", "this_occurrence_only"].some(k => isTrueLike(meta[k]))
+          || ["today", "today_only", "this_occurrence_only"].includes(String(meta.routine_occurrence_choice || meta.occurrence_scope || "").trim());
+        if (hasOccurrenceOverride) {
+          result.skipped_override_count += 1;
+          kept.push(line);
+          continue;
+        }
+
         let nextLine = line;
         if (def.fileBase || def.file) {
           const nextAlias = def.title || taskTitleFromFileBase(def.fileBase || def.file);
           nextLine = replaceTaskLineLinkTargetAndAlias(nextLine, def.fileBase || def.file, nextAlias);
         }
         nextLine = setTaskLineTcMeta(nextLine, metaPatch);
-        const key = taskKeyFromTaskLine(nextLine);
-        const isCompletedLine = isTaskLineCompletedForDefaultOrder(line, md);
-        // 過去日の未完了行まで現在のルーティン定義で勝手に変えると、古い計画の履歴が壊れる。
-        // ただし完了済み行の表示名・リンク・プロジェクトなどのマスター情報は、過去日でも同期する。
-        if (isPastBoard && !isCompletedLine) {
-          kept.push(line);
-          continue;
-        }
-        // 完了済み行も、表示名・リンク・プロジェクトなどのマスター情報は同期する。
-        // ただし、実績保護のためセクション移動やLog/LogDailyの書き換えは行わない。
+        // Only unstarted, non-overridden generated occurrences are updated.
+        // Completed/running/deleted/this-occurrence-only rows are left untouched.
         const canMove = desiredSectionName
           && (currentSection || "") !== desiredSectionName
-          && !isCompletedLine
           && !(key && protectedKeys.has(key));
         if (nextLine !== line || canMove) changed = true;
         result.rows += nextLine !== line || canMove ? 1 : 0;
@@ -25127,6 +25171,11 @@ class TaskchutePlugin extends obsidian.Plugin {
           result.moved += 1;
         } else {
           kept.push(nextLine);
+        }
+        if (nextLine !== line || canMove) {
+          result.updated_occurrence_count += 1;
+          if (!result.updated_dates.includes(date)) result.updated_dates.push(date);
+          if (entryId && !result.updated_entry_ids.includes(entryId)) result.updated_entry_ids.push(entryId);
         }
       }
       if (!changed) continue;
@@ -25143,6 +25192,21 @@ class TaskchutePlugin extends obsidian.Plugin {
         result.boards += 1;
       }
     }
+    this.recordBridgeRoutineDiagnostic("routine_definition_update_existing_occurrences", {
+      phase: "routine_definition_update_existing_occurrences",
+      routine_id: routineId || taskId,
+      event_id: eventId,
+      scanned_date_count: result.scanned_date_count,
+      scanned_occurrence_count: result.scanned_occurrence_count,
+      updated_occurrence_count: result.updated_occurrence_count,
+      skipped_override_count: result.skipped_override_count,
+      skipped_started_count: result.skipped_started_count,
+      skipped_completed_count: result.skipped_completed_count,
+      skipped_deleted_count: result.skipped_deleted_count,
+      skipped_not_matching_count: result.skipped_not_matching_count,
+      updated_dates: result.updated_dates.slice(0, 30),
+      updated_entry_ids: result.updated_entry_ids.slice(0, 30)
+    }, "info", "checked");
     return result;
   }
 
@@ -29797,6 +29861,14 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
       value = normalized.value;
     }
+    const routineOccurrenceOverridePatch = isRoutineHistoryTarget(task)
+      && String(task && task._lastRoutineOccurrenceChoice || "").trim() === "today"
+      ? {
+        routine_occurrence_override: "true",
+        this_occurrence_only: "true",
+        routine_occurrence_choice: "today"
+      }
+      : {};
 
     const notePath = this.getTaskchutePath(this.getDateForTask(task));
     let md = await readFileText(this.app, notePath);
@@ -29911,6 +29983,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           const sectionChanged = !!destinationSection && destinationSectionId !== oldSectionId;
           movedLine = setTaskLineTcMeta(line, Object.assign(
             { [key]: value },
+            routineOccurrenceOverridePatch,
             destinationSection
               ? { section: destinationSection.name, section_id: destinationSection.id }
               : {}
@@ -29955,7 +30028,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       const updated = lines.map(line => {
         if (!changed && isTaskLine(line) && taskMatchesLine(line, task)) {
           changed = true;
-          return setTaskLineTcMeta(line, { [key]: value });
+          return setTaskLineTcMeta(line, Object.assign({ [key]: value }, routineOccurrenceOverridePatch));
         }
         return line;
       });
@@ -34595,7 +34668,11 @@ class TaskchutePlugin extends obsidian.Plugin {
         if (!changed && isTaskLine(line) && taskMatchesLine(line, task)) {
           const checkedMatch = line.match(/^\s*-\s+\[([ xX])\]/);
           const checked = checkedMatch ? checkedMatch[1].toLowerCase() === "x" : false;
-          const entryMeta = tcMetaFromTaskLine(line);
+          const entryMeta = Object.assign({}, tcMetaFromTaskLine(line), {
+            routine_occurrence_override: "true",
+            this_occurrence_only: "true",
+            routine_occurrence_choice: "today"
+          });
           const entryId = entryMeta.entry_id || task.entryId || task.taskKey || nextEntryIdFromMarkdown(md, this.getDateForTask(task));
           changed = true;
           return taskLine(task.file, title, checked, entryId, entryMeta);
