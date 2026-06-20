@@ -19009,19 +19009,19 @@ class TaskchutePlugin extends obsidian.Plugin {
         message = "mobile hidden中のためvisible復帰まで受信反映を延期しました。";
       } else if (failedCount > 0) {
         this.setBridgeInboundAutoApplyRuntimeState(this.classifyBridgeInboundAutoApplyStopStatus(stoppedReason), stoppedReason || "受信イベント反映に失敗したため安全停止しました。", "auto-apply-failed");
-        message = `全イベント自動反映は設定ONのまま安全停止しました。反映 ${appliedCount}件 / スキップ ${skippedCount}件 / 失敗 ${failedCount}件。`;
+        message = `自動受信・自動反映は設定ONのまま安全停止しました。反映 ${appliedCount}件 / スキップ ${skippedCount}件 / 失敗 ${failedCount}件。`;
       } else if (appliedCount > 0) {
         this.setBridgeInboundAutoApplyRuntimeState(this.settings.bridgeInboundAutoApplyEnabled ? "enabled" : "disabled", "", "auto-apply-success");
-        message = `全イベント自動反映で古い順に${appliedCount}件反映してackしました。スキップ ${skippedCount}件。`;
+        message = `自動受信・自動反映で古い順に${appliedCount}件反映してackしました。スキップ ${skippedCount}件。`;
       } else {
         this.setBridgeInboundAutoApplyRuntimeState(this.settings.bridgeInboundAutoApplyEnabled ? "enabled" : "disabled", "", "auto-apply-no-events");
-        message = `全イベント自動反映の対象はありません。スキップ ${skippedCount}件。`;
+        message = `自動受信・自動反映の対象はありません。スキップ ${skippedCount}件。`;
       }
     } catch (e) {
       failedCount++;
       stoppedReason = "自動反映中に想定外エラーが発生したため停止しました。";
       this.setBridgeInboundAutoApplyRuntimeState(this.classifyBridgeInboundAutoApplyStopStatus(stoppedReason), stoppedReason, "auto-apply-exception");
-      message = `全イベント自動反映は設定ONのまま安全停止しました。反映 ${appliedCount}件 / スキップ ${skippedCount}件 / 失敗 ${failedCount}件。`;
+      message = `自動受信・自動反映は設定ONのまま安全停止しました。反映 ${appliedCount}件 / スキップ ${skippedCount}件 / 失敗 ${failedCount}件。`;
     } finally {
       this.settings.bridgeInboundAutoApplyInProgress = false;
       this.bridgeInboundApplyInProgress = false;
@@ -48297,7 +48297,7 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
       .setDesc(inboundDiagnostic.bridge_device_id || "未設定");
 
     new obsidian.Setting(el)
-      .setName("Inbound auto apply enabled")
+      .setName("自動受信・自動反映 enabled")
       .setDesc(inboundDiagnostic.inbound_auto_apply_enabled ? "有効" : "無効");
 
     const inboundRuntimeLabels = {
@@ -48557,22 +48557,14 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(el)
       .setName("自動受信・自動反映")
-      .setDesc("設定状態だけを切り替えます。切り替え操作ではイベントを反映・ackしません。")
-      .addButton(btn => btn
-        .setButtonText("有効化")
-        .onClick(async () => {
-          this.plugin.settings.bridgeInboundAutoApplyEnabled = true;
-          this.plugin.setBridgeInboundAutoApplyRuntimeState("enabled", "", "diagnostic-enable");
+      .setDesc("他端末で作成・編集された変更を、この端末に自動で取り込んで反映します。切り替え操作ではイベントを反映・ackしません。")
+      .addToggle(toggle => toggle
+        .setValue(!!this.plugin.settings.bridgeInboundAutoApplyEnabled)
+        .onChange(async value => {
+          this.plugin.settings.bridgeInboundAutoApplyEnabled = !!value;
+          this.plugin.setBridgeInboundAutoApplyRuntimeState(value ? "enabled" : "disabled", value ? "" : "ユーザー操作により自動受信・自動反映をOFFにしました。", "diagnostic-toggle");
           this.plugin.bridgeInboundAutoApplyLastTickAt = 0;
-          await this.plugin.savePluginData({ deviceWriterOperation: "bridge-inbound-diagnostic-enable" });
-          this.display();
-        }))
-      .addButton(btn => btn
-        .setButtonText("無効化")
-        .onClick(async () => {
-          this.plugin.settings.bridgeInboundAutoApplyEnabled = false;
-          this.plugin.setBridgeInboundAutoApplyRuntimeState("disabled", "ユーザー操作により全イベント自動反映をOFFにしました。", "diagnostic-disable");
-          await this.plugin.savePluginData({ deviceWriterOperation: "bridge-inbound-diagnostic-disable" });
+          await this.plugin.savePluginData({ deviceWriterOperation: "bridge-inbound-diagnostic-toggle" });
           this.display();
         }));
 
@@ -48912,31 +48904,31 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
       .setDesc(`API raw ${bridgeInboundDryRunRawCount}件 / 正規化後 ${bridgeInboundDryRunNormalizedCount}件 / 表示対象 ${bridgeInboundDryRunDisplayCount}件 / 先頭type ${bridgeInboundDryRunFirstEventType || "-"} / 先頭sourceDeviceId ${bridgeInboundDryRunFirstEventSourceDeviceId || "-"}`);
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 最終実行日時")
+      .setName("自動受信・自動反映 最終実行日時")
       .setDesc(bridgeInboundAutoApplyLastRunAt ? formatDateTimeForDisplay(bridgeInboundAutoApplyLastRunAt) : "未実施");
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 設定 / runtime状態")
+      .setName("自動受信・自動反映 設定 / runtime状態")
       .setDesc(`設定: ${this.plugin.settings.bridgeInboundAutoApplyEnabled ? "ON" : "OFF"} / 状態: ${bridgeInboundAutoApplyRuntimeLabels[bridgeInboundAutoApplyRuntimeStatus] || bridgeInboundAutoApplyRuntimeStatus || "不明"} / 理由: ${bridgeInboundAutoApplyRuntimeReason || "なし"}`);
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 最終結果")
+      .setName("自動受信・自動反映 最終結果")
       .setDesc(bridgeInboundAutoApplyLastRunAt ? (this.plugin.settings.bridgeInboundAutoApplyLastOk ? "成功" : "失敗") : "未実施");
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 メッセージ")
+      .setName("自動受信・自動反映 メッセージ")
       .setDesc(bridgeInboundAutoApplyLastMessage || "未実施");
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 件数")
+      .setName("自動受信・自動反映 件数")
       .setDesc(`反映 ${bridgeInboundAutoApplyLastAppliedCount}件 / スキップ ${bridgeInboundAutoApplyLastSkippedCount}件 / 失敗 ${bridgeInboundAutoApplyLastFailedCount}件`);
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 停止理由")
+      .setName("自動受信・自動反映 停止理由")
       .setDesc(bridgeInboundAutoApplyLastStoppedReason || "停止なし");
 
     new obsidian.Setting(el)
-      .setName("全イベント自動反映 event_id（最大10件）")
+      .setName("自動受信・自動反映 event_id（最大10件）")
       .setDesc(bridgeInboundAutoApplyLastAppliedEventIds.length ? bridgeInboundAutoApplyLastAppliedEventIds.join(" / ") : "未反映");
 
     new obsidian.Setting(el)
