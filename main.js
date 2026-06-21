@@ -183,6 +183,7 @@ const DEFAULT_SETTINGS = {
   bridgeRoutineSyncLastResult: "",
   bridgeRoutineSyncDiagnostics: [],
   bridgeRoutineDefinitionEnqueuedIds: [],
+  bridgeInboundKnownRoutineDefinitionIds: [],
   bridgeOutboxClockAudit: [],
   taskCreatedOrderDiagnostics: [],
   taskMovedOrderDiagnostics: [],
@@ -17860,8 +17861,15 @@ class TaskchutePlugin extends obsidian.Plugin {
       routine_occurrence_choice: "today"
     });
     const entryId = String(meta.entry_id || payload.entry_id || taskKeyFromTaskLine(beforeLine) || "").trim();
-    if (!String(meta.routine_source || "").trim()) meta.routine_source = String(link.file || "").trim();
-    const afterLine = taskLine(link.file, nextTitle, checked, entryId, meta);
+    const routineId = String(meta.routine_id || payload.routine_id || payload.generated_by_routine_id || "").trim();
+    const definitionMatches = routineId ? await this.findBridgeRoutineDefinitionFilesById(routineId) : [];
+    const definitionSource = definitionMatches.length === 1
+      ? withoutMdExtension(definitionMatches[0].file && definitionMatches[0].file.name || "")
+      : "";
+    const payloadSource = String(payload.routine_source || payload.routineSource || "").trim();
+    const canonicalSource = definitionSource || payloadSource || String(meta.routine_source || "").trim() || String(link.file || "").trim();
+    meta.routine_source = canonicalSource;
+    const afterLine = taskLine(canonicalSource, nextTitle, checked, entryId, meta);
     if (afterLine !== beforeLine) {
       lines[occurrence.lineIndex] = afterLine;
       const writeOk = await this.writeFileText(occurrence.path, lines.join("\n"), {
@@ -17888,17 +17896,17 @@ class TaskchutePlugin extends obsidian.Plugin {
       const verifiedMeta = tcMetaFromTaskLine(verifiedLine);
       verified = !!verifiedLine
         && String(verifiedLink && verifiedLink.alias || "").trim() === nextTitle
-        && String(verifiedLink && verifiedLink.file || "").trim() === String(link.file || "").trim()
+        && String(verifiedLink && verifiedLink.file || "").trim() === canonicalSource
         && isTrueLike(verifiedMeta.routine_occurrence_override)
         && isTrueLike(verifiedMeta.this_occurrence_only)
-        && String(verifiedMeta.routine_source || "").trim() === String(link.file || "").trim();
+        && String(verifiedMeta.routine_source || "").trim() === canonicalSource;
     } catch (e) {}
     this.recordRoutineOccurrenceSyncDiagnostic(verified ? "routine_occurrence_title_apply_verified" : "routine_occurrence_title_apply_verify_failed", Object.assign({
       operation: "update",
       event_type: "TaskUpdated",
       task_id: String(payload && payload.task_id || "").trim(),
       entry_id: entryId,
-      routine_id: String(meta.routine_id || payload.routine_id || payload.generated_by_routine_id || "").trim(),
+      routine_id: routineId,
       routine_occurrence_key: String(meta.routine_occurrence_key || payload.routine_occurrence_key || "").trim(),
       before_title: String(link.alias || "").trim(),
       after_title: nextTitle,
@@ -17906,9 +17914,24 @@ class TaskchutePlugin extends obsidian.Plugin {
       after_line: afterLine,
       verified_line: verifiedLine,
       routine_source: String(meta.routine_source || "").trim(),
+      definition_match_count: definitionMatches.length,
+      definition_source: definitionSource,
+      payload_routine_source: payloadSource,
       reason: "inbound-taskupdated-routine-occurrence-title-only"
     }, diagnostic || {}), verified ? "info" : "error", verified ? "verified" : "failed_unacked");
     if (!verified) return { ok: false, message: "Routine occurrence title update verification failed." };
+    this.setBridgeInboundKnownRoutineDefinition(routineId, true);
+    this.recordBridgeRoutineDiagnostic("routine_occurrence_inbound_no_outbound_guard_armed", {
+      routine_id: routineId,
+      task_id: String(payload && payload.task_id || "").trim(),
+      entry_id: entryId,
+      routine_occurrence_key: String(meta.routine_occurrence_key || payload.routine_occurrence_key || "").trim(),
+      routine_source: canonicalSource,
+      source_device_id: String(diagnostic && diagnostic.source_device_id || "").trim(),
+      target_device_id: String(diagnostic && diagnostic.target_device_id || "").trim(),
+      blocks: ["RoutineCreated", "TaskCreated"],
+      reason: "inbound-occurrence-only-update"
+    }, "info", "armed");
     try { await this.rebuildTaskchuteIndex({ notice: false }); } catch (e) {
       return { ok: false, message: "Routine occurrence title update index rebuild failed." };
     }
@@ -21438,6 +21461,15 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!this.settings.bridgeEnabled || this.bridgeInboundApplyInProgress || this.settings.bridgeInboundApplyInProgress) return false;
     const type = String(eventType || "").trim();
     if (!["RoutineCreated", "RoutineUpdated", "RoutineDeleted", "RoutineReordered"].includes(type)) return false;
+    const requestedRoutineId = String(task && (task.routineId || task.routine_id || task.taskId || task.task_id) || "").trim();
+    if (type === "RoutineCreated" && this.isBridgeInboundKnownRoutineDefinition(requestedRoutineId)) {
+      this.recordBridgeRoutineDiagnostic("routine_created_inbound_echo_blocked", {
+        routine_id: requestedRoutineId,
+        event_type: type,
+        reason: "definition-was-received-from-bridge"
+      }, "info", "skipped");
+      return true;
+    }
     const meta = task && task.entryMeta && typeof task.entryMeta === "object" ? task.entryMeta : {};
     const occurrenceChoice = String((options && (options.routine_occurrence_choice || options.occurrence_scope))
       || task && (task.routine_occurrence_choice || task.occurrence_scope)
@@ -21501,6 +21533,26 @@ class TaskchutePlugin extends obsidian.Plugin {
     await this.savePluginData({ deviceWriterOperation: "bridge-routine-event-diagnostic" });
     this.scheduleBridgeAutoFlush({ reason: `${type.toLowerCase()}-enqueued` });
     return true;
+  }
+
+  getBridgeInboundKnownRoutineDefinitionIds() {
+    return Array.from(new Set((Array.isArray(this.settings && this.settings.bridgeInboundKnownRoutineDefinitionIds)
+      ? this.settings.bridgeInboundKnownRoutineDefinitionIds
+      : []).map(value => String(value || "").trim()).filter(Boolean)));
+  }
+
+  isBridgeInboundKnownRoutineDefinition(routineId) {
+    const id = String(routineId || "").trim();
+    return !!id && this.getBridgeInboundKnownRoutineDefinitionIds().includes(id);
+  }
+
+  setBridgeInboundKnownRoutineDefinition(routineId, known = true) {
+    const id = String(routineId || "").trim();
+    if (!id) return;
+    const ids = this.getBridgeInboundKnownRoutineDefinitionIds();
+    this.settings.bridgeInboundKnownRoutineDefinitionIds = known
+      ? Array.from(new Set(ids.concat(id))).slice(-1000)
+      : ids.filter(value => value !== id);
   }
 
   async enqueueBridgeRoutineOccurrenceEvent(eventType, task, options = {}) {
@@ -21628,6 +21680,14 @@ class TaskchutePlugin extends obsidian.Plugin {
   async ensureBridgeRoutineDefinitionBeforeGeneratedTask(task) {
     const id = String(task && (task.generatedByRoutineId || task.generated_by_routine_id || task.routineId || task.routine_id) || "").trim();
     if (!id) return true;
+    if (this.isBridgeInboundKnownRoutineDefinition(id)) {
+      this.recordBridgeRoutineDiagnostic("routine_created_inbound_echo_blocked", {
+        routine_id: id,
+        event_type: "RoutineCreated",
+        reason: "definition-was-received-from-bridge"
+      }, "info", "skipped");
+      return true;
+    }
     const pendingDefinition = normalizeBridgeOutboxEvents(this.settings.bridgeOutboxEvents).some(event =>
       ["pending", "failed"].includes(String(event && event.status || ""))
       && ["RoutineCreated", "RoutineUpdated"].includes(String(event && event.event_type || ""))
@@ -21844,6 +21904,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.settings.bridgeRoutineSyncLastEventType = type;
     this.settings.bridgeRoutineSyncLastResult = "受信反映成功";
     this.recordBridgeRoutineDiagnostic(`${type.replace(/^Routine/, "routine_").toLowerCase()}_applied`, { routine_id: id, event_type: type }, "info", "applied");
+    this.setBridgeInboundKnownRoutineDefinition(id, type !== "RoutineDeleted");
     await this.savePluginData({ deviceWriterOperation: "bridge-inbound-routine-diagnostic" });
     return { ok: true, routineId: id };
   }
@@ -22043,6 +22104,19 @@ class TaskchutePlugin extends obsidian.Plugin {
     const deviceId = String(this.settings.bridgeDeviceId || "").trim();
     const taskId = String(task && (task.taskId || task.task_id) || "").trim();
     const entryId = String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim();
+    const generatedRoutineId = String(task && (task.generatedByRoutineId || task.generated_by_routine_id || task.routineId || task.routine_id) || "").trim();
+    if (generatedRoutineId && this.isBridgeInboundKnownRoutineDefinition(generatedRoutineId)) {
+      this.recordBridgeRoutineDiagnostic("routine_taskcreated_inbound_echo_blocked", {
+        routine_id: generatedRoutineId,
+        task_id: taskId,
+        entry_id: entryId,
+        routine_occurrence_key: String(task && (task.routineOccurrenceKey || task.routine_occurrence_key) || "").trim(),
+        routine_source: String(task && (task.routineSource || task.routine_source || task.fileBase || task.file) || "").trim(),
+        event_type: "TaskCreated",
+        reason: "generated-from-inbound-routine-definition"
+      }, "info", "skipped");
+      return true;
+    }
     if (taskId && entryId) this.setBridgeTaskCreatedPending(taskId, entryId, true);
     if (!userId || !deviceId || !taskId || !entryId) return false;
     if (!(await this.ensureBridgeProjectDefinitionBeforeTaskCreated(task))) return false;
@@ -25162,6 +25236,7 @@ class TaskchutePlugin extends obsidian.Plugin {
   async getLatestRoutineDefinitionForSync(task, options = {}) {
     const seed = Object.assign({}, task || {});
     const taskId = String(seed.taskId || seed.task_id || "").trim();
+    const routineId = String(seed.routineId || seed.routine_id || taskId).trim();
     const tasksFolder = safePath(this.settings.tasksFolder || DEFAULT_SETTINGS.tasksFolder || "Taskchute/Tasks");
     const candidates = [];
     const addCandidate = value => {
@@ -25170,23 +25245,36 @@ class TaskchutePlugin extends obsidian.Plugin {
       const path = safePath(`${tasksFolder}/${base}.md`);
       if (!candidates.includes(path)) candidates.push(path);
     };
+    addCandidate(seed.routineSource || seed.routine_source);
     addCandidate(seed.fileBase || seed.file);
 
     let taskFile = null;
     for (const path of candidates) {
       const file = this.app && this.app.vault ? this.app.vault.getAbstractFileByPath(path) : null;
-      if (file && file instanceof obsidian.TFile) { taskFile = file; break; }
+      if (!(file && file instanceof obsidian.TFile)) continue;
+      let candidateContent = "";
+      try { candidateContent = await this.app.vault.read(file); }
+      catch (e) { try { candidateContent = await readFileText(this.app, file.path); } catch (ignored) { candidateContent = ""; } }
+      const candidateRoutineId = String(extractYamlValue(candidateContent, "routine_id") || extractYamlValue(candidateContent, "task_id") || "").trim();
+      if (isRoutineEnabled(extractYamlValue(candidateContent, "routine")) && (!routineId || candidateRoutineId === routineId)) {
+        taskFile = file;
+        break;
+      }
     }
     if (!taskFile && taskId && this.app && this.app.vault && typeof this.app.vault.getMarkdownFiles === "function") {
       const prefix = `${tasksFolder}/${taskId}_`;
-      taskFile = this.app.vault.getMarkdownFiles().find(file => safePath(file && file.path || "").startsWith(prefix)) || null;
-      if (!taskFile) {
-        const files = this.app.vault.getMarkdownFiles().filter(file => safePath(file && file.path || "").startsWith(`${tasksFolder}/`));
-        for (const file of files) {
-          let text = "";
-          try { text = await this.app.vault.read(file); }
-          catch (e) { try { text = await readFileText(this.app, file.path); } catch (ignored) { text = ""; } }
-          if (String(extractYamlValue(text, "task_id") || "").trim() === taskId) { taskFile = file; break; }
+      const files = this.app.vault.getMarkdownFiles().filter(file => {
+        const path = safePath(file && file.path || "");
+        return path.startsWith(prefix) || path.startsWith(`${tasksFolder}/`);
+      });
+      for (const file of files) {
+        let text = "";
+        try { text = await this.app.vault.read(file); }
+        catch (e) { try { text = await readFileText(this.app, file.path); } catch (ignored) { text = ""; } }
+        const fileRoutineId = String(extractYamlValue(text, "routine_id") || extractYamlValue(text, "task_id") || "").trim();
+        if (isRoutineEnabled(extractYamlValue(text, "routine")) && fileRoutineId === routineId) {
+          taskFile = file;
+          break;
         }
       }
     }
@@ -26333,7 +26421,8 @@ class TaskchutePlugin extends obsidian.Plugin {
           estimateMin: item.def.estimateMin, startPlan: item.startPlan, project: item.def.project,
           mode: item.def.mode, category: item.def.category, area: item.def.area, client: item.def.client,
           generatedByRoutineId: item.routineId, routineOccurrenceKey: item.occurrenceKey,
-          routineGeneratedForDate: targetDate, routineScheduledTime: item.startPlan
+          routineGeneratedForDate: targetDate, routineScheduledTime: item.startPlan,
+          routineSource: item.def.fileBase
         }, { creationSource: "routine-generated" });
         if (!created && !(this.bridgeInboundApplyInProgress || this.settings.bridgeInboundApplyInProgress)) return 0;
       }
@@ -29215,7 +29304,9 @@ class TaskchutePlugin extends obsidian.Plugin {
   }
 
   async readTaskMeta(task) {
-    const path = safePath(`${this.settings.tasksFolder}/${task.file}.md`);
+    const routineSource = String(task && (task.routineSource || task.routine_source || task.entryMeta && task.entryMeta.routine_source) || "").trim();
+    const taskSource = isRoutineHistoryTarget(task) && routineSource ? routineSource : task.file;
+    const path = safePath(`${this.settings.tasksFolder}/${taskSource}.md`);
     let content = "";
     try {
       content = await readFileText(this.app, path);
