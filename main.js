@@ -25076,20 +25076,59 @@ class TaskchutePlugin extends obsidian.Plugin {
     }).sort((a, b) => compareDateString(taskchuteDateFromPath(a.path), taskchuteDateFromPath(b.path)));
 
     const eventId = String(options && (options.eventId || options.event_id) || "").trim();
+    const diagnosticBase = {
+      reason: String(options && options.reason || "routine-definition-sync").trim(),
+      source_device_id: String(options && (options.sourceDeviceId || options.source_device_id) || this.settings && this.settings.bridgeDeviceId || "").trim(),
+      target_device_id: String(options && (options.targetDeviceId || options.target_device_id) || this.settings && this.settings.bridgeDeviceId || "").trim(),
+      routine_id: routineId || taskId,
+      event_id: eventId
+    };
     const result = {
       boards: 0,
       rows: 0,
       moved: 0,
       scanned_date_count: 0,
       scanned_occurrence_count: 0,
+      candidate_occurrence_count: 0,
       updated_occurrence_count: 0,
+      updated_count: 0,
+      skipped_count: 0,
       skipped_override_count: 0,
       skipped_started_count: 0,
       skipped_completed_count: 0,
       skipped_deleted_count: 0,
       skipped_not_matching_count: 0,
+      skip_reason_counts: {},
+      saved_file_count: 0,
       updated_dates: [],
-      updated_entry_ids: []
+      updated_entry_ids: [],
+      targets: []
+    };
+    this.recordBridgeRoutineDiagnostic("routine_definition_update_existing_occurrences_started", Object.assign({
+      phase: "routine_definition_update_existing_occurrences_started",
+      scanned_date_count: 0,
+      candidate_occurrence_count: 0,
+      updated_count: 0,
+      skipped_count: 0,
+      saved_file_count: 0
+    }, diagnosticBase), "info", "started");
+    const pushMaterializeTarget = detail => {
+      if (result.targets.length >= 30) return;
+      result.targets.push(Object.assign({
+        routine_id: routineId || taskId,
+        entry_id: "",
+        routine_occurrence_key: "",
+        before_title: "",
+        after_title: "",
+        before_line: "",
+        after_line: ""
+      }, detail || {}));
+    };
+    const markMaterializeSkip = (reason, detail = {}) => {
+      const key = String(reason || "unknown").trim() || "unknown";
+      result.skipped_count += 1;
+      result.skip_reason_counts[key] = Number(result.skip_reason_counts[key] || 0) + 1;
+      pushMaterializeTarget(Object.assign({ status: "skipped", skip_reason: key }, detail || {}));
     };
     for (const file of files) {
       const date = taskchuteDateFromPath(file.path);
@@ -25128,20 +25167,34 @@ class TaskchutePlugin extends obsidian.Plugin {
         }
 
         result.scanned_occurrence_count += 1;
+        result.candidate_occurrence_count += 1;
         const entryId = String(meta.entry_id || taskKeyFromTaskLine(line) || "").trim();
+        const occurrenceKey = String(meta.routine_occurrence_key || meta.occurrence_key || "").trim();
+        const beforeTitle = lineLink && lineLink.alias ? String(lineLink.alias || "").trim() : "";
+        const afterTitle = def.title || taskTitleFromFileBase(def.fileBase || def.file);
+        const targetDetail = {
+          entry_id: entryId,
+          routine_occurrence_key: occurrenceKey,
+          before_title: beforeTitle,
+          after_title: afterTitle,
+          before_line: line
+        };
         if (!shouldExistOnDate) {
           result.skipped_not_matching_count += 1;
+          markMaterializeSkip("not_matching_date", targetDetail);
           kept.push(line);
           continue;
         }
         if (String(meta.deleted_at || meta.delete_type || "").trim()) {
           result.skipped_deleted_count += 1;
+          markMaterializeSkip("deleted", targetDetail);
           kept.push(line);
           continue;
         }
         const isCompletedLine = isTaskLineCompletedForDefaultOrder(line, md);
         if (isCompletedLine || String(meta.completed_at || "").trim()) {
           result.skipped_completed_count += 1;
+          markMaterializeSkip("completed", targetDetail);
           kept.push(line);
           continue;
         }
@@ -25152,6 +25205,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         });
         if ((key && protectedKeys.has(key)) || hasActualMeta) {
           result.skipped_started_count += 1;
+          markMaterializeSkip(key && protectedKeys.has(key) ? "runtime_protected" : "actual_present", targetDetail);
           kept.push(line);
           continue;
         }
@@ -25159,13 +25213,14 @@ class TaskchutePlugin extends obsidian.Plugin {
           || ["today", "today_only", "this_occurrence_only"].includes(String(meta.routine_occurrence_choice || meta.occurrence_scope || "").trim());
         if (hasOccurrenceOverride) {
           result.skipped_override_count += 1;
+          markMaterializeSkip("occurrence_override", targetDetail);
           kept.push(line);
           continue;
         }
 
         let nextLine = line;
         if (def.fileBase || def.file) {
-          const nextAlias = def.title || taskTitleFromFileBase(def.fileBase || def.file);
+          const nextAlias = afterTitle;
           nextLine = replaceTaskLineLinkTargetAndAlias(nextLine, def.fileBase || def.file, nextAlias);
         }
         nextLine = setTaskLineTcMeta(nextLine, metaPatch);
@@ -25184,6 +25239,11 @@ class TaskchutePlugin extends obsidian.Plugin {
         }
         if (nextLine !== line || canMove) {
           result.updated_occurrence_count += 1;
+          result.updated_count += 1;
+          pushMaterializeTarget(Object.assign({}, targetDetail, {
+            status: "updated",
+            after_line: nextLine
+          }));
           if (!result.updated_dates.includes(date)) result.updated_dates.push(date);
           if (entryId && !result.updated_entry_ids.includes(entryId)) result.updated_entry_ids.push(entryId);
         }
@@ -25200,26 +25260,28 @@ class TaskchutePlugin extends obsidian.Plugin {
           undoLabel: "生成済みルーティン同期"
         });
         result.boards += 1;
+        result.saved_file_count += 1;
       }
     }
-    this.recordBridgeRoutineDiagnostic("routine_definition_update_existing_occurrences", {
-      phase: "routine_definition_update_existing_occurrences",
-      reason: String(options && options.reason || "routine-definition-sync").trim(),
-      source_device_id: String(options && (options.sourceDeviceId || options.source_device_id) || this.settings && this.settings.bridgeDeviceId || "").trim(),
-      target_device_id: String(options && (options.targetDeviceId || options.target_device_id) || this.settings && this.settings.bridgeDeviceId || "").trim(),
-      routine_id: routineId || taskId,
-      event_id: eventId,
+    this.recordBridgeRoutineDiagnostic("routine_definition_update_existing_occurrences_finished", Object.assign({
+      phase: "routine_definition_update_existing_occurrences_finished",
       scanned_date_count: result.scanned_date_count,
       scanned_occurrence_count: result.scanned_occurrence_count,
+      candidate_occurrence_count: result.candidate_occurrence_count,
       updated_occurrence_count: result.updated_occurrence_count,
+      updated_count: result.updated_count,
+      skipped_count: result.skipped_count,
       skipped_override_count: result.skipped_override_count,
       skipped_started_count: result.skipped_started_count,
       skipped_completed_count: result.skipped_completed_count,
       skipped_deleted_count: result.skipped_deleted_count,
       skipped_not_matching_count: result.skipped_not_matching_count,
+      skip_reason_counts: result.skip_reason_counts,
+      saved_file_count: result.saved_file_count,
       updated_dates: result.updated_dates.slice(0, 30),
-      updated_entry_ids: result.updated_entry_ids.slice(0, 30)
-    }, "info", "checked");
+      updated_entry_ids: result.updated_entry_ids.slice(0, 30),
+      targets: result.targets.slice(0, 30)
+    }, diagnosticBase), "info", "finished");
     return result;
   }
 
@@ -46836,6 +46898,12 @@ class RoutineManagementView extends obsidian.ItemView {
         new obsidian.Notice(firstTaskchuteRoutineValidationError(validation));
         return false;
       }
+      const oldTitle = String(task.title || task.file || "").trim();
+      const titleChanged = !!(nextTitle && nextTitle !== oldTitle);
+      if (titleChanged) {
+        const titleOk = await this.updateRoutineTaskTitle(task, nextTitle);
+        if (!titleOk) return false;
+      }
       const ok = await this.plugin.updateTaskRoutineSettings(task, {
         enabled: !!(refs.enabledInput && refs.enabledInput.checked),
         repeat,
@@ -46857,11 +46925,6 @@ class RoutineManagementView extends obsidian.ItemView {
         _skipRoutineSettingsRefresh: !!options.skipRoutineSettingsRefresh
       });
       if (ok) {
-        const oldTitle = String(task.title || task.file || "").trim();
-        if (nextTitle && nextTitle !== oldTitle) {
-          const titleOk = await this.updateRoutineTaskTitle(task, nextTitle);
-          if (!titleOk) return false;
-        }
         return true;
       }
       return false;
