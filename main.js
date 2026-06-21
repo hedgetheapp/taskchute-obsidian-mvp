@@ -16182,7 +16182,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!this.isBridgeRoutineOccurrenceOnlyTaskUpdatedEvent(event)) return { ok: true, notOccurrenceOverride: true };
     const payload = parseBridgeEventPayload(event);
     const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
-    const titleValue = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
+    const titleValue = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
     const expectedTitle = String(titleValue && titleValue.value || "").trim();
     const stage = String(options && options.stage || "before_ack_guard").trim();
     const baseDetail = {
@@ -16200,6 +16200,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       target_date: identity.targetDate,
       target_path: identity.targetDate ? this.getTaskchutePath(identity.targetDate) : "",
       desired_alias: expectedTitle,
+      desired_alias_source: String(titleValue && titleValue.source || "").trim(),
       after_alias: expectedTitle,
       pending_override_saved: true,
       local_applied_record_allowed: false,
@@ -17682,6 +17683,18 @@ class TaskchutePlugin extends obsidian.Plugin {
     return { has: false, value: undefined };
   }
 
+  getBridgeRoutineOccurrenceDesiredAlias(payload) {
+    const src = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+    const after = src.after && typeof src.after === "object" && !Array.isArray(src.after) ? src.after : {};
+    if (Object.prototype.hasOwnProperty.call(after, "title") && after.title != null && String(after.title).trim()) {
+      return { has: true, value: String(after.title).trim(), source: "payload.after.title" };
+    }
+    if (Object.prototype.hasOwnProperty.call(src, "title") && src.title != null && String(src.title).trim()) {
+      return { has: true, value: String(src.title).trim(), source: "payload.title" };
+    }
+    return { has: false, value: "", source: "" };
+  }
+
   async findBridgeLocalTaskNoteCandidatesByTaskId(taskId) {
     const id = String(taskId || "").trim();
     if (!id) return [];
@@ -18038,7 +18051,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!fields.includes("title")) return false;
     const nonTitleFields = fields.filter(field => field !== "title");
     if (nonTitleFields.length) return false;
-    const title = String(changes && changes.title || this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]).value || "").trim();
+    const desiredAlias = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
+    const title = String(desiredAlias.value || changes && changes.title || "").trim();
     if (!title) return false;
     const meta = tcMetaFromTaskLine(occurrence && occurrence.line || "");
     const payloadOccurrenceKey = String(payload && payload.routine_occurrence_key || payload && payload.after && payload.after.routine_occurrence_key || "").trim();
@@ -18257,9 +18271,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       const entryId = String(target.lineEntryId || override.entry_id || "").trim();
       const checked = /^\s*-\s+\[[xX]\]/.test(target.line);
       const nextLine = taskLine(link.file, override.title, checked, entryId, meta);
+      const changedLine = nextLine !== target.line;
       targetResult.after_line = nextLine;
       targetResult.after_alias = override.title;
-      if (nextLine !== target.line) {
+      if (changedLine) {
         lines[target.lineIndex] = nextLine;
         const writeOk = await this.writeFileText(path, lines.join("\n"), {
           deviceWriterOperation: "routine-occurrence-override-overlay",
@@ -18294,12 +18309,12 @@ class TaskchutePlugin extends obsidian.Plugin {
         targetResult.failure_reason = failure.reason;
         continue;
       }
-      targetResult.updated_row_count = 1;
+      targetResult.updated_row_count = changedLine ? 1 : 0;
       targetResult.post_save_alias_verified = true;
       targetResult.verified = true;
-      targetResult.ack_allowed = true;
-      targetResult.d1_ack_allowed = true;
-      result.updated += 1;
+      targetResult.ack_allowed = changedLine;
+      targetResult.d1_ack_allowed = changedLine;
+      if (changedLine) result.updated += 1;
       result.verified += 1;
     }
     result.ok = result.failures.length === 0;
@@ -18314,9 +18329,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       || isTrueLike(after.routine_occurrence_override)
       || isTrueLike(after.this_occurrence_only)
       || ["today", "today_only", "this_occurrence_only"].includes(String(source.routine_occurrence_choice || source.occurrence_scope || after.routine_occurrence_choice || after.occurrence_scope || "").trim());
-    const titleValue = this.getBridgeTaskUpdatedPayloadValue(source, ["title"]);
+    const desiredAlias = this.getBridgeRoutineOccurrenceDesiredAlias(source);
     return !!(identity.payloadEntryId || identity.effectiveOccurrenceKey || identity.routineId && identity.targetDate)
-      && occurrenceOnly && titleValue.has && !!String(titleValue.value || "").trim();
+      && occurrenceOnly && desiredAlias.has && !!desiredAlias.value;
   }
 
   async findBridgeInboundRoutineOccurrenceOnlyTarget(payload) {
@@ -18724,7 +18739,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const taskId = String(payload.task_id || event && event.task_id || "").trim();
     if (!taskId) return { ok: false, skipped: true, message: "TaskUpdated payloadにtask_idがありません。" };
     const occurrenceIdentityPrecheck = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
-    const occurrenceTitlePrecheck = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
+    const occurrenceTitlePrecheck = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
     const occurrenceOnlyPrecheck = isTrueLike(payload.routine_occurrence_override)
       || isTrueLike(payload.this_occurrence_only)
       || isTrueLike(occurrenceIdentityPrecheck.after && occurrenceIdentityPrecheck.after.routine_occurrence_override)
@@ -18744,6 +18759,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         routine_occurrence_key: "",
         target_date: occurrenceIdentityPrecheck.targetDate,
         desired_alias: String(occurrenceTitlePrecheck.value || "").trim(),
+        desired_alias_source: String(occurrenceTitlePrecheck.source || "").trim(),
         updated_row_count: 0,
         post_save_alias_verified: false,
         d1_ack_allowed: false,
@@ -18759,7 +18775,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (this.isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload)) {
       const occurrenceTarget = await this.findBridgeInboundRoutineOccurrenceOnlyTarget(payload);
       const occurrenceIdentity = occurrenceTarget.identity || this.getBridgeInboundRoutineOccurrenceIdentity(payload);
-      const titleValue = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
+      const titleValue = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
       this.recordRoutineOccurrenceSyncDiagnostic(occurrenceTarget.ok ? "occurrence_only_taskupdated_detected" : "override_target_not_found", {
         operation: "update",
         event_type: "TaskUpdated",
@@ -18788,6 +18804,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         before_alias: occurrenceTarget.ok ? String(linkTitleFromLine(occurrenceTarget.occurrence.line) && linkTitleFromLine(occurrenceTarget.occurrence.line).alias || "").trim() : "",
         after_alias: String(titleValue.value || "").trim(),
         desired_alias: String(titleValue.value || "").trim(),
+        desired_alias_source: String(titleValue.source || "").trim(),
         post_save_alias_verified: false,
         d1_ack_allowed: false,
         ack_allowed: false,
@@ -18808,6 +18825,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         entry_id_match: !!occurrenceTarget.entryIdMatch,
         occurrence_key_match: !!occurrenceTarget.occurrenceKeyMatch,
         event_id: String(event && event.event_id || "").trim(),
+        desired_alias_source: String(titleValue.source || "").trim(),
         source_device_id: String(event && (event.source_device_id || event.device_id) || "").trim(),
         target_device_id: String(this.settings && this.settings.bridgeDeviceId || "").trim()
       });
@@ -18867,8 +18885,10 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     const inboundTitleValue = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
     if (this.isBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, resolvedOccurrence.occurrence, changes, built.changedFields)) {
-      return await this.applyBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, resolvedOccurrence.occurrence, changes.title || inboundTitleValue.value, {
+      const desiredAlias = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
+      return await this.applyBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, resolvedOccurrence.occurrence, desiredAlias.value || changes.title || inboundTitleValue.value, {
         matched_by: String(resolvedOccurrence.matchedBy || "").trim(),
+        desired_alias_source: String(desiredAlias.source || "").trim(),
         source_device_id: String(event && (event.source_device_id || event.device_id) || "").trim(),
         target_device_id: String(this.settings && this.settings.bridgeDeviceId || "").trim()
       });
