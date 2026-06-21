@@ -182,6 +182,7 @@ const DEFAULT_SETTINGS = {
   bridgeRoutineSyncLastEventType: "",
   bridgeRoutineSyncLastResult: "",
   bridgeRoutineSyncDiagnostics: [],
+  bridgeRoutineOccurrenceOverrides: [],
   bridgeRoutineDefinitionEnqueuedIds: [],
   bridgeInboundKnownRoutineDefinitionIds: [],
   bridgeOutboxClockAudit: [],
@@ -10396,6 +10397,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     const loadedObject = loaded && typeof loaded === "object" && !Array.isArray(loaded) ? loaded : {};
     const inboundAutoApplyKeyPresent = Object.prototype.hasOwnProperty.call(loadedObject, "bridgeInboundAutoApplyEnabled");
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded || {});
+    this.settings.bridgeRoutineOccurrenceOverrides = (Array.isArray(this.settings.bridgeRoutineOccurrenceOverrides)
+      ? this.settings.bridgeRoutineOccurrenceOverrides : [])
+      .map(value => this.normalizeBridgeRoutineOccurrenceOverride(value)).filter(Boolean);
     if (!inboundAutoApplyKeyPresent && this.settings.bridgeEnabled) {
       this.settings.bridgeInboundAutoApplyEnabled = true;
       this.settings.bridgeInboundAutoApplyDefaultMigratedAt = this.settings.bridgeInboundAutoApplyDefaultMigratedAt || nowIso();
@@ -17843,7 +17847,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const explicitOccurrenceOnly = isTrueLike(payload && payload.routine_occurrence_override)
       || isTrueLike(payload && payload.this_occurrence_only)
       || ["today", "today_only", "this_occurrence_only"].includes(String(payload && (payload.routine_occurrence_choice || payload.occurrence_scope) || "").trim());
-    return explicitOccurrenceOnly || !!(payloadOccurrenceKey || lineOccurrenceKey);
+    return explicitOccurrenceOnly;
   }
 
   getBridgeInboundRoutineOccurrenceIdentity(payload) {
@@ -17868,6 +17872,160 @@ class TaskchutePlugin extends obsidian.Plugin {
       routineId,
       targetDate
     };
+  }
+
+  normalizeBridgeRoutineOccurrenceOverride(value = {}) {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const routineId = String(source.routine_id || source.routineId || "").trim();
+    const dateMatch = String(source.routine_occurrence_key || source.occurrence_key || "").match(/(\d{4}-\d{2}-\d{2})/);
+    const rawDate = String(source.date || source.routine_generated_for_date || dateMatch && dateMatch[1] || "").trim();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? this.normalizeDate(rawDate) : "";
+    const occurrenceKey = String(source.routine_occurrence_key || source.occurrence_key || (routineId && date ? `routine:${routineId}:${date}` : "")).trim();
+    const title = String(source.title || source.after_title || "").trim();
+    if (!routineId || !date || !occurrenceKey || !title) return null;
+    return {
+      type: "RoutineOccurrenceOverride",
+      routine_occurrence_key: occurrenceKey,
+      routine_id: routineId,
+      date,
+      title,
+      entry_id: String(source.entry_id || "").trim(),
+      routine_source: String(source.routine_source || "").trim(),
+      source_event_id: String(source.source_event_id || source.event_id || "").trim(),
+      updated_at: String(source.updated_at || nowIso()).trim()
+    };
+  }
+
+  getBridgeRoutineOccurrenceOverrides() {
+    const values = Array.isArray(this.settings && this.settings.bridgeRoutineOccurrenceOverrides)
+      ? this.settings.bridgeRoutineOccurrenceOverrides : [];
+    const byKey = new Map();
+    for (const value of values) {
+      const normalized = this.normalizeBridgeRoutineOccurrenceOverride(value);
+      if (normalized) byKey.set(normalized.routine_occurrence_key, normalized);
+    }
+    return Array.from(byKey.values());
+  }
+
+  async saveBridgeRoutineOccurrenceOverride(value = {}) {
+    const normalized = this.normalizeBridgeRoutineOccurrenceOverride(value);
+    if (!normalized) return { ok: false, message: "Routine occurrence override identity is incomplete." };
+    const previousValues = this.getBridgeRoutineOccurrenceOverrides();
+    const values = previousValues.filter(item => item.routine_occurrence_key !== normalized.routine_occurrence_key);
+    this.settings.bridgeRoutineOccurrenceOverrides = values.concat(normalized);
+    let saved = false;
+    try {
+      saved = await this.savePluginData({ deviceWriterOperation: "bridge-inbound-routine-occurrence-override" });
+    } catch (e) {
+      saved = false;
+    }
+    let persistedValues = [];
+    if (saved === true) {
+      try {
+        const persisted = await this.loadData();
+        persistedValues = Array.isArray(persisted && persisted.bridgeRoutineOccurrenceOverrides)
+          ? persisted.bridgeRoutineOccurrenceOverrides.map(item => this.normalizeBridgeRoutineOccurrenceOverride(item)).filter(Boolean) : [];
+      } catch (e) {}
+    }
+    const verified = saved === true && persistedValues.some(item =>
+      item.routine_occurrence_key === normalized.routine_occurrence_key
+      && item.routine_id === normalized.routine_id
+      && item.date === normalized.date
+      && item.title === normalized.title
+    );
+    if (!verified) this.settings.bridgeRoutineOccurrenceOverrides = previousValues;
+    return verified
+      ? { ok: true, override: normalized }
+      : { ok: false, message: "Routine occurrence override persistence failed." };
+  }
+
+  async applyBridgeRoutineOccurrenceOverrides(options = {}) {
+    const rawRequestedDate = String(options && options.date || "").trim();
+    const requestedDate = /^\d{4}-\d{2}-\d{2}$/.test(rawRequestedDate) ? this.normalizeDate(rawRequestedDate) : "";
+    const requestedKey = String(options && options.routineOccurrenceKey || "").trim();
+    const overrides = this.getBridgeRoutineOccurrenceOverrides().filter(item =>
+      (!requestedDate || item.date === requestedDate) && (!requestedKey || item.routine_occurrence_key === requestedKey)
+    );
+    const result = { ok: true, matched: 0, updated: 0, pending: 0, failures: [] };
+    for (const override of overrides) {
+      const path = this.getTaskchutePath(override.date);
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file && file instanceof obsidian.TFile)) {
+        result.pending += 1;
+        continue;
+      }
+      let markdown = "";
+      try { markdown = await readFileText(this.app, path); }
+      catch (e) { result.failures.push({ routine_occurrence_key: override.routine_occurrence_key, reason: "read_failed" }); continue; }
+      const lines = String(markdown || "").split(/\r?\n/);
+      const candidates = [];
+      lines.forEach((line, lineIndex) => {
+        if (!isTaskLine(line)) return;
+        const meta = tcMetaFromTaskLine(line);
+        const lineKey = String(meta.routine_occurrence_key || "").trim();
+        const lineEntryId = String(meta.entry_id || taskKeyFromTaskLine(line) || "").trim();
+        const lineRoutineId = String(meta.routine_id || meta.generated_by_routine_id || "").trim();
+        const lineDate = String(meta.routine_generated_for_date || meta.routine_date || override.date).trim();
+        candidates.push({ line, lineIndex, meta, lineKey, lineEntryId, lineRoutineId, lineDate });
+      });
+      const stages = [
+        candidates.filter(item => item.lineKey === override.routine_occurrence_key),
+        override.entry_id ? candidates.filter(item => item.lineEntryId === override.entry_id) : [],
+        candidates.filter(item => item.lineRoutineId === override.routine_id && item.lineDate === override.date)
+      ];
+      const matches = stages.find(items => items.length === 1) || [];
+      if (matches.length !== 1) {
+        result.pending += 1;
+        continue;
+      }
+      const target = matches[0];
+      const link = linkTitleFromLine(target.line);
+      if (!link || !String(link.file || "").trim()) {
+        result.failures.push({ routine_occurrence_key: override.routine_occurrence_key, reason: "link_missing" });
+        continue;
+      }
+      result.matched += 1;
+      const meta = Object.assign({}, target.meta, {
+        routine_occurrence_override: "true",
+        this_occurrence_only: "true",
+        routine_occurrence_choice: "today",
+        routine_source: String(override.routine_source || target.meta.routine_source || link.file || "").trim()
+      });
+      const entryId = String(target.lineEntryId || override.entry_id || "").trim();
+      const checked = /^\s*-\s+\[[xX]\]/.test(target.line);
+      const nextLine = taskLine(link.file, override.title, checked, entryId, meta);
+      if (nextLine !== target.line) {
+        lines[target.lineIndex] = nextLine;
+        const writeOk = await this.writeFileText(path, lines.join("\n"), {
+          deviceWriterOperation: "routine-occurrence-override-overlay",
+          skipTaskchuteUndo: true,
+          skipBoardHistorySnapshot: true
+        });
+        if (this.isTaskchuteWriteAborted(writeOk)) {
+          result.failures.push({ routine_occurrence_key: override.routine_occurrence_key, reason: "write_stopped" });
+          continue;
+        }
+        result.updated += 1;
+      }
+      let verified = false;
+      try {
+        const latest = await readFileText(this.app, path);
+        const verifiedLines = String(latest || "").split(/\r?\n/).filter(line => {
+          if (!isTaskLine(line)) return false;
+          const lineMeta = tcMetaFromTaskLine(line);
+          return String(lineMeta.routine_occurrence_key || "").trim() === override.routine_occurrence_key
+            || (entryId && String(lineMeta.entry_id || taskKeyFromTaskLine(line) || "").trim() === entryId)
+            || (String(lineMeta.routine_id || lineMeta.generated_by_routine_id || "").trim() === override.routine_id
+              && String(lineMeta.routine_generated_for_date || lineMeta.routine_date || override.date).trim() === override.date);
+        });
+        verified = verifiedLines.length === 1
+          && String(linkTitleFromLine(verifiedLines[0]) && linkTitleFromLine(verifiedLines[0]).alias || "").trim() === override.title
+          && isTrueLike(tcMetaFromTaskLine(verifiedLines[0]).routine_occurrence_override);
+      } catch (e) {}
+      if (!verified) result.failures.push({ routine_occurrence_key: override.routine_occurrence_key, reason: "verify_failed" });
+    }
+    result.ok = result.failures.length === 0;
+    return result;
   }
 
   isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload) {
@@ -17954,107 +18112,80 @@ class TaskchutePlugin extends obsidian.Plugin {
   }
 
   async applyBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, occurrence, title, diagnostic = {}) {
+    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
     const nextTitle = String(title || "").trim();
-    if (!nextTitle || !occurrence) return { ok: false, message: "Routine occurrence title update target is missing." };
-    const lines = String(occurrence.markdown || "").split(/\r?\n/);
-    if (occurrence.lineIndex < 0 || occurrence.lineIndex >= lines.length) return { ok: false, message: "Routine occurrence title update line index is invalid." };
-    const beforeLine = String(lines[occurrence.lineIndex] || "");
-    const link = linkTitleFromLine(beforeLine);
-    if (!link || !String(link.file || "").trim()) return { ok: false, message: "Routine occurrence title update link target is missing." };
-    const checked = /^\s*-\s+\[[xX]\]/.test(beforeLine);
-    const meta = Object.assign({}, tcMetaFromTaskLine(beforeLine), {
-      routine_occurrence_override: "true",
-      this_occurrence_only: "true",
-      routine_occurrence_choice: "today"
-    });
-    const entryId = String(meta.entry_id || payload.entry_id || taskKeyFromTaskLine(beforeLine) || "").trim();
-    const routineId = String(meta.routine_id || payload.routine_id || payload.generated_by_routine_id || "").trim();
-    const definitionMatches = routineId ? await this.findBridgeRoutineDefinitionFilesById(routineId) : [];
-    const definitionSource = definitionMatches.length === 1
-      ? withoutMdExtension(definitionMatches[0].file && definitionMatches[0].file.name || "")
-      : "";
-    const payloadSource = String(payload.routine_source || payload.routineSource || "").trim();
-    const canonicalSource = String(meta.routine_source || "").trim() || payloadSource || definitionSource || String(link.file || "").trim();
-    meta.routine_source = canonicalSource;
-    const afterLine = taskLine(link.file, nextTitle, checked, entryId, meta);
-    if (afterLine !== beforeLine) {
-      lines[occurrence.lineIndex] = afterLine;
-      const writeOk = await this.writeFileText(occurrence.path, lines.join("\n"), {
-        deviceWriterOperation: "bridge-inbound-routine-occurrence-title",
-        skipTaskchuteUndo: true,
-        skipBoardHistorySnapshot: true
-      });
-      if (this.isTaskchuteWriteAborted(writeOk)) return { ok: false, message: "Routine occurrence title update save was stopped." };
+    if (!nextTitle || !identity.routineId || !identity.targetDate || !identity.effectiveOccurrenceKey) {
+      return { ok: false, message: "Routine occurrence override identity is incomplete." };
     }
-    let verified = false;
-    let verifiedLine = "";
-    try {
-      const latest = await readFileText(this.app, occurrence.path);
-      const latestLines = String(latest || "").split(/\r?\n/);
-      const expectedKey = String(meta.routine_occurrence_key || payload.routine_occurrence_key || "").trim();
-      verifiedLine = latestLines.find(line => {
-        if (!isTaskLine(line)) return false;
-        const lineMeta = tcMetaFromTaskLine(line);
-        const lineEntryId = String(lineMeta.entry_id || taskKeyFromTaskLine(line) || "").trim();
-        const lineOccurrenceKey = String(lineMeta.routine_occurrence_key || "").trim();
-        return (entryId && lineEntryId === entryId) || (expectedKey && lineOccurrenceKey === expectedKey);
-      }) || "";
-      const verifiedLink = linkTitleFromLine(verifiedLine);
-      const verifiedMeta = tcMetaFromTaskLine(verifiedLine);
-      verified = !!verifiedLine
-        && String(verifiedLink && verifiedLink.alias || "").trim() === nextTitle
-        && String(verifiedLink && verifiedLink.file || "").trim() === String(link.file || "").trim()
-        && isTrueLike(verifiedMeta.routine_occurrence_override)
-        && isTrueLike(verifiedMeta.this_occurrence_only)
-        && String(verifiedMeta.routine_source || "").trim() === canonicalSource;
-    } catch (e) {}
-    this.recordRoutineOccurrenceSyncDiagnostic(verified ? "routine_occurrence_title_apply_verified" : "routine_occurrence_title_apply_verify_failed", Object.assign({
-      operation: "update",
-      event_type: "TaskUpdated",
-      task_id: String(payload && payload.task_id || "").trim(),
+    const definitionMatches = await this.findBridgeRoutineDefinitionFilesById(identity.routineId);
+    const definitionSource = definitionMatches.length === 1
+      ? withoutMdExtension(definitionMatches[0].file && definitionMatches[0].file.name || "") : "";
+    const occurrenceMeta = tcMetaFromTaskLine(occurrence && occurrence.line || "");
+    const routineSource = String(definitionSource || payload.routine_source || occurrenceMeta.routine_source || "").trim();
+    const entryId = String(occurrenceMeta.entry_id || identity.payloadEntryId || "").trim();
+    const beforeAlias = String(linkTitleFromLine(occurrence && occurrence.line || "") && linkTitleFromLine(occurrence.line).alias || "").trim();
+    const saved = await this.saveBridgeRoutineOccurrenceOverride({
+      routine_occurrence_key: identity.effectiveOccurrenceKey,
+      routine_id: identity.routineId,
+      date: identity.targetDate,
+      title: nextTitle,
       entry_id: entryId,
-      routine_id: routineId,
-      routine_occurrence_key: String(meta.routine_occurrence_key || payload.routine_occurrence_key || "").trim(),
-      before_title: String(link.alias || "").trim(),
-      after_title: nextTitle,
-      before_line: beforeLine,
-      after_line: afterLine,
-      verified_line: verifiedLine,
-      routine_source: String(meta.routine_source || "").trim(),
-      definition_match_count: definitionMatches.length,
-      definition_source: definitionSource,
-      payload_routine_source: payloadSource,
-      occurrence_only_taskupdated_detected: true,
-      matched_daily_note_path: String(occurrence.path || "").trim(),
+      routine_source: routineSource,
+      source_event_id: String(diagnostic.event_id || "").trim(),
+      updated_at: nowIso()
+    });
+    if (!saved.ok) {
+      this.recordRoutineOccurrenceSyncDiagnostic("pending_override_save_failed", Object.assign({
+        override_event_detected: true,
+        payload_occurrence_key: identity.payloadOccurrenceKey,
+        derived_occurrence_key: identity.derivedOccurrenceKey,
+        payload_entry_id: identity.payloadEntryId,
+        matched_entry_id: entryId,
+        matched_occurrence_key: identity.effectiveOccurrenceKey,
+        entry_id_mismatch: !!(identity.payloadEntryId && entryId && identity.payloadEntryId !== entryId),
+        matched_by: String(diagnostic.matched_by || "pending").trim(),
+        updated_row_count: 0,
+        pending_override_saved: false,
+        ack_allowed: false,
+        before_alias: beforeAlias,
+        after_alias: nextTitle,
+        routine_definition_updated: false,
+        task_note_updated: false,
+        file_renamed: false,
+        outbound_enqueue_suppressed: true
+      }, diagnostic || {}), "error", "failed_unacked");
+      return { ok: false, message: saved.message || "Routine occurrence override persistence failed." };
+    }
+    const applied = await this.applyBridgeRoutineOccurrenceOverrides({
+      date: identity.targetDate,
+      routineOccurrenceKey: identity.effectiveOccurrenceKey
+    });
+    const targetExists = !!occurrence;
+    const ackAllowed = applied.ok && (!targetExists || applied.matched === 1);
+    this.recordRoutineOccurrenceSyncDiagnostic(targetExists ? "routine_occurrence_override_applied" : "routine_occurrence_override_pending", Object.assign({
+      override_event_detected: true,
+      payload_occurrence_key: identity.payloadOccurrenceKey,
+      derived_occurrence_key: identity.derivedOccurrenceKey,
+      payload_entry_id: identity.payloadEntryId,
       matched_entry_id: entryId,
-      matched_occurrence_key: String(meta.routine_occurrence_key || payload.routine_occurrence_key || "").trim(),
-      before_alias: String(link.alias || "").trim(),
+      matched_occurrence_key: identity.effectiveOccurrenceKey,
+      entry_id_mismatch: !!(identity.payloadEntryId && entryId && identity.payloadEntryId !== entryId),
+      matched_by: String(diagnostic.matched_by || (targetExists ? "resolved_target" : "pending")).trim(),
+      updated_row_count: Number(applied.updated || 0),
+      pending_override_saved: true,
+      ack_allowed: ackAllowed,
+      before_alias: beforeAlias,
       after_alias: nextTitle,
-      updated_row_count: afterLine !== beforeLine ? 1 : 0,
       routine_definition_updated: false,
       task_note_updated: false,
       file_renamed: false,
-      outbound_enqueue_suppressed: true,
-      ack_allowed: verified,
-      reason: "inbound-taskupdated-routine-occurrence-title-only"
-    }, diagnostic || {}), verified ? "info" : "error", verified ? "verified" : "failed_unacked");
-    if (!verified) return { ok: false, message: "Routine occurrence title update verification failed." };
-    this.setBridgeInboundKnownRoutineDefinition(routineId, true);
-    this.recordBridgeRoutineDiagnostic("routine_occurrence_inbound_no_outbound_guard_armed", {
-      routine_id: routineId,
-      task_id: String(payload && payload.task_id || "").trim(),
-      entry_id: entryId,
-      routine_occurrence_key: String(meta.routine_occurrence_key || payload.routine_occurrence_key || "").trim(),
-      routine_source: canonicalSource,
-      source_device_id: String(diagnostic && diagnostic.source_device_id || "").trim(),
-      target_device_id: String(diagnostic && diagnostic.target_device_id || "").trim(),
-      blocks: ["RoutineCreated", "TaskCreated"],
-      reason: "inbound-occurrence-only-update"
-    }, "info", "armed");
-    try { await this.rebuildTaskchuteIndex({ notice: false }); } catch (e) {
-      return { ok: false, message: "Routine occurrence title update index rebuild failed." };
-    }
-    return { ok: true, changed: afterLine !== beforeLine, occurrenceTitleOnly: true, changedFields: ["title"] };
+      outbound_enqueue_suppressed: true
+    }, diagnostic || {}), ackAllowed ? "info" : "error", ackAllowed ? (targetExists ? "verified" : "pending_saved") : "failed_unacked");
+    if (!ackAllowed) return { ok: false, message: "Routine occurrence override application verification failed." };
+    this.setBridgeInboundKnownRoutineDefinition(identity.routineId, true);
+    try { await this.rebuildTaskchuteIndex({ notice: false }); }
+    catch (e) { return { ok: false, message: "Routine occurrence override index rebuild failed." }; }
+    return { ok: true, changed: Number(applied.updated || 0) > 0, pending: !targetExists, occurrenceTitleOnly: true, changedFields: ["title"] };
   }
 
   recordBridgeInboundTaskUpdatedProjectDiagnostic(item = {}) {
@@ -18282,7 +18413,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       const occurrenceTarget = await this.findBridgeInboundRoutineOccurrenceOnlyTarget(payload);
       const occurrenceIdentity = occurrenceTarget.identity || this.getBridgeInboundRoutineOccurrenceIdentity(payload);
       const titleValue = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
-      this.recordRoutineOccurrenceSyncDiagnostic("occurrence_only_taskupdated_detected", {
+      this.recordRoutineOccurrenceSyncDiagnostic(occurrenceTarget.ok ? "occurrence_only_taskupdated_detected" : "override_target_not_found", {
         operation: "update",
         event_type: "TaskUpdated",
         task_id: taskId,
@@ -18309,15 +18440,16 @@ class TaskchutePlugin extends obsidian.Plugin {
         file_renamed: false,
         outbound_enqueue_suppressed: true,
         reason: "explicit-occurrence-identity-detected-before-task-note-resolution"
-      }, occurrenceTarget.ok ? "info" : "error", occurrenceTarget.ok ? "detected" : "failed_unacked");
-      if (!occurrenceTarget.ok) return occurrenceTarget;
-      return await this.applyBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, occurrenceTarget.occurrence, titleValue.value, {
+      }, occurrenceTarget.ok ? "info" : "warn", occurrenceTarget.ok ? "detected" : "pending_candidate");
+      if (!occurrenceTarget.ok && Number(occurrenceTarget.matchCount || 0) > 0) return occurrenceTarget;
+      return await this.applyBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, occurrenceTarget.ok ? occurrenceTarget.occurrence : null, titleValue.value, {
         matched_by: occurrenceTarget.matchedBy,
         payload_entry_id: occurrenceIdentity.payloadEntryId,
         payload_occurrence_key: occurrenceIdentity.payloadOccurrenceKey,
         derived_occurrence_key: occurrenceIdentity.derivedOccurrenceKey,
         entry_id_match: !!occurrenceTarget.entryIdMatch,
         occurrence_key_match: !!occurrenceTarget.occurrenceKeyMatch,
+        event_id: String(event && event.event_id || "").trim(),
         source_device_id: String(event && (event.source_device_id || event.device_id) || "").trim(),
         target_device_id: String(this.settings && this.settings.bridgeDeviceId || "").trim()
       });
@@ -25740,6 +25872,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       updated_entry_ids: result.updated_entry_ids.slice(0, 30),
       targets: result.targets.slice(0, 30)
     }, diagnosticBase), "info", "finished");
+    const overlayResult = await this.applyBridgeRoutineOccurrenceOverrides();
+    if (!overlayResult.ok) return false;
     return result;
   }
 
@@ -26580,6 +26714,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         continueAfterDeviceReload: true
       });
       if (this.isTaskchuteWriteAborted(writeOk)) return 0;
+      const overlayResult = await this.applyBridgeRoutineOccurrenceOverrides({ date: targetDate });
+      if (!overlayResult.ok) return 0;
       for (const item of generatedEntries.filter(entry => !entry.existing && entry.entryId)) {
         const created = await this.enqueueBridgeTaskCreated({
           taskId: item.def.taskId, entryId: item.entryId, taskKey: item.entryId,
@@ -27045,6 +27181,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     try {
       await this.safeEnsureBaseFolders(false);
       await ensureFolder(this.app, this.getTaskchuteSystemFolder());
+      const overlayResult = await this.applyBridgeRoutineOccurrenceOverrides();
+      if (!overlayResult.ok) throw new Error("Routine occurrence override overlay application failed.");
       const index = await this.buildTaskchuteIndex();
       const path = this.getTaskchuteIndexPath();
       await this.writeFileText(path, JSON.stringify(index, null, 2) + "\n", {
