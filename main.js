@@ -1803,6 +1803,7 @@ function normalizeBridgeInboundDryRunEvents(events, selfDeviceId = "") {
   return events.map(item => {
     const src = item && typeof item === "object" ? item : {};
     const payload = parseBridgeEventPayload(src);
+    const after = payload && typeof payload.after === "object" && !Array.isArray(payload.after) ? payload.after : {};
     const sourceDeviceId = String(src.source_device_id || src.sourceDeviceId || src.device_id || "").trim();
     return {
       event_id: String(src.event_id || "").trim(),
@@ -1812,6 +1813,14 @@ function normalizeBridgeInboundDryRunEvents(events, selfDeviceId = "") {
       device_id: sourceDeviceId,
       is_self: !!ownDeviceId && sourceDeviceId === ownDeviceId,
       task_id: String(src.task_id || payload.task_id || "").trim(),
+      entry_id: String(src.entry_id || payload.entry_id || after.entry_id || "").trim(),
+      routine_id: String(src.routine_id || payload.routine_id || payload.generated_by_routine_id || after.routine_id || after.generated_by_routine_id || "").trim(),
+      generated_by_routine_id: String(src.generated_by_routine_id || payload.generated_by_routine_id || payload.routine_id || after.generated_by_routine_id || after.routine_id || "").trim(),
+      routine_occurrence_key: String(src.routine_occurrence_key || payload.routine_occurrence_key || payload.occurrence_key || after.routine_occurrence_key || after.occurrence_key || "").trim(),
+      routine_generated_for_date: String(src.routine_generated_for_date || payload.routine_generated_for_date || payload.routine_date || after.routine_generated_for_date || after.routine_date || after.date || payload.date || "").trim(),
+      routine_occurrence_override: src.routine_occurrence_override != null ? src.routine_occurrence_override : (payload.routine_occurrence_override != null ? payload.routine_occurrence_override : after.routine_occurrence_override),
+      this_occurrence_only: src.this_occurrence_only != null ? src.this_occurrence_only : (payload.this_occurrence_only != null ? payload.this_occurrence_only : after.this_occurrence_only),
+      routine_occurrence_choice: String(src.routine_occurrence_choice || payload.routine_occurrence_choice || payload.occurrence_scope || after.routine_occurrence_choice || after.occurrence_scope || "").trim(),
       title: String(src.title || payload.title || "").trim(),
       created_at: normalizeBridgeUtcIso(src.created_at),
       server_sequence: Number.isFinite(Number(src.server_sequence)) ? Math.max(0, Math.floor(Number(src.server_sequence))) : 0,
@@ -16185,8 +16194,12 @@ class TaskchutePlugin extends obsidian.Plugin {
       routine_id: identity.routineId,
       payload_entry_id: identity.payloadEntryId,
       payload_occurrence_key: identity.payloadOccurrenceKey,
+      resolved_occurrence_key: identity.effectiveOccurrenceKey,
       derived_occurrence_key: identity.derivedOccurrenceKey,
       routine_occurrence_key: identity.effectiveOccurrenceKey,
+      target_date: identity.targetDate,
+      target_path: identity.targetDate ? this.getTaskchutePath(identity.targetDate) : "",
+      desired_alias: expectedTitle,
       after_alias: expectedTitle,
       pending_override_saved: true,
       local_applied_record_allowed: false,
@@ -16213,6 +16226,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         entry_id_mismatch: false,
         updated_row_count: 0,
         before_alias: "",
+        after_alias: "",
+        desired_alias: expectedTitle,
         occurrence_key_match_count: 0,
         existing_routine_date_row_count: 0,
         local_applied_record_allowed: ok,
@@ -16227,12 +16242,13 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_before_ack_read_failed", baseDetail, "error", "failed_unacked");
       return { ok: false, message: "Routine occurrence override Ack前検証でdate noteを再読込できません。" };
     }
-    const rows = String(markdown || "").split(/\r?\n/).filter(line => isTaskLine(line)).map(line => {
+    const rows = String(markdown || "").split(/\r?\n/).filter(line => isTaskLine(line)).map((line, lineIndex) => {
       const meta = tcMetaFromTaskLine(line);
       const link = linkTitleFromLine(line);
       return {
         line,
         meta,
+        line_index: lineIndex,
         alias: String(link && link.alias || "").trim(),
         entry_id: String(meta.entry_id || taskKeyFromTaskLine(line) || "").trim(),
         routine_id: String(meta.routine_id || meta.generated_by_routine_id || "").trim(),
@@ -16250,6 +16266,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         existing_routine_date_row_count: 0,
         updated_row_count: 0,
         before_alias: "",
+        after_alias: "",
+        desired_alias: expectedTitle,
         local_applied_record_allowed: ok,
         d1_ack_allowed: ok,
         genuinely_unmaterialized: ok
@@ -16263,6 +16281,9 @@ class TaskchutePlugin extends obsidian.Plugin {
         existing_routine_date_row_count: routineDateRows.length,
         updated_row_count: 0,
         before_alias: keyMatches[0] ? keyMatches[0].alias : "",
+        after_alias: keyMatches[0] ? keyMatches[0].alias : "",
+        desired_alias: expectedTitle,
+        failure_reason: keyMatches.length > 1 ? "occurrence_key_ambiguous" : "routine_date_row_without_key_match",
         repair_required: true
       }), "error", "failed_unacked");
       return { ok: false, message: "Routine occurrence override対象行をroutine_occurrence_keyで一意に検証できないためAckしません。" };
@@ -16278,10 +16299,16 @@ class TaskchutePlugin extends obsidian.Plugin {
       occurrence_key_match_count: keyMatches.length,
       existing_routine_date_row_count: routineDateRows.length,
       updated_row_count: ok ? 1 : 0,
+      matched_line_index: row.line_index,
+      before_line: row.line,
+      after_line: row.line,
       before_alias: row.alias,
+      after_alias: row.alias,
+      desired_alias: expectedTitle,
       post_save_alias_verified: ok,
       local_applied_record_allowed: ok,
       d1_ack_allowed: ok,
+      failure_reason: ok ? "" : "alias_mismatch",
       repair_required: !ok
     }), ok ? "info" : "error", ok ? "verified" : "failed_unacked");
     return ok ? { ok: true, verified: true } : { ok: false, message: "Routine occurrence override保存後aliasがpayload after.titleと一致しないためAckしません。" };
@@ -17804,10 +17831,11 @@ class TaskchutePlugin extends obsidian.Plugin {
     const occurrences = Array.isArray(target && target.occurrences) ? target.occurrences.slice() : [];
     if (!occurrences.length) return { ok: false, skipped: true, message: "対象task_idのTaskBoard行が見つかりません。" };
     const src = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
-    const entryId = String(src.entry_id || "").trim();
-    const routineOccurrenceKey = String(src.routine_occurrence_key || "").trim();
-    const routineGeneratedForDate = this.normalizeDate(String(src.routine_generated_for_date || src.routine_date || src.date || src.source_date || src.target_date || src.to && src.to.date || src.from && src.from.date || "").trim());
-    const routineId = String(src.routine_id || src.generated_by_routine_id || "").trim();
+    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(src);
+    const entryId = String(src.entry_id || identity.payloadEntryId || "").trim();
+    const routineOccurrenceKey = String(identity.effectiveOccurrenceKey || "").trim();
+    const routineGeneratedForDate = this.normalizeDate(String(identity.targetDate || src.routine_generated_for_date || src.routine_date || src.date || src.source_date || src.target_date || src.to && src.to.date || src.from && src.from.date || "").trim());
+    const routineId = String(identity.routineId || src.routine_id || src.generated_by_routine_id || "").trim();
     const hasRoutineOccurrenceIdentity = !!(routineOccurrenceKey || routineGeneratedForDate && routineId);
     const recordRoutineApplyResolution = (reason, detail, level, status) => {
       if (!hasRoutineOccurrenceIdentity) return;
@@ -17818,6 +17846,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         entry_id: entryId,
         routine_id: routineId,
         generated_by_routine_id: routineId,
+        payload_occurrence_key: identity.payloadOccurrenceKey,
+        resolved_occurrence_key: identity.effectiveOccurrenceKey,
         routine_occurrence_key: routineOccurrenceKey,
         routine_generated_for_date: routineGeneratedForDate
       }, detail || {}), level || "info", status || "");
@@ -18026,13 +18056,14 @@ class TaskchutePlugin extends obsidian.Plugin {
     const source = payload && typeof payload === "object" ? payload : {};
     const after = source.after && typeof source.after === "object" && !Array.isArray(source.after) ? source.after : {};
     const payloadEntryId = String(source.entry_id || after.entry_id || "").trim();
-    const payloadOccurrenceKey = String(source.routine_occurrence_key || "").trim();
-    const afterOccurrenceKey = String(after.routine_occurrence_key || source.occurrence_key || after.occurrence_key || "").trim();
+    const payloadOccurrenceKey = String(source.routine_occurrence_key || source.routineOccurrenceKey || source.occurrence_key || "").trim();
+    const afterOccurrenceKey = String(after.routine_occurrence_key || after.routineOccurrenceKey || after.occurrence_key || "").trim();
     const routineId = String(source.routine_id || source.generated_by_routine_id || after.routine_id || after.generated_by_routine_id || source.task_id || "").trim();
     const keyDateMatch = String(payloadOccurrenceKey || afterOccurrenceKey).match(/(\d{4}-\d{2}-\d{2})/);
-    const rawDate = String(source.date || after.date || source.routine_generated_for_date || after.routine_generated_for_date || source.routine_date || after.routine_date || keyDateMatch && keyDateMatch[1] || "").trim();
+    const rawDate = String(source.routine_generated_for_date || after.routine_generated_for_date || source.routine_date || after.routine_date || source.date || after.date || source.target_date || after.target_date || keyDateMatch && keyDateMatch[1] || "").trim();
     const targetDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? this.normalizeDate(rawDate) : "";
-    const derivedOccurrenceKey = !payloadOccurrenceKey && routineId && targetDate ? `routine:${routineId}:${targetDate}` : "";
+    const derivedOccurrenceKey = !payloadOccurrenceKey && !afterOccurrenceKey && routineId && targetDate ? `routine:${routineId}:${targetDate}` : "";
+    const effectiveOccurrenceKey = payloadOccurrenceKey || afterOccurrenceKey || derivedOccurrenceKey;
     return {
       source,
       after,
@@ -18040,7 +18071,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       payloadOccurrenceKey,
       afterOccurrenceKey,
       derivedOccurrenceKey,
-      effectiveOccurrenceKey: payloadOccurrenceKey || derivedOccurrenceKey || afterOccurrenceKey,
+      effectiveOccurrenceKey,
+      resolvedOccurrenceKey: effectiveOccurrenceKey,
       routineId,
       targetDate
     };
@@ -18122,19 +18154,28 @@ class TaskchutePlugin extends obsidian.Plugin {
     for (const override of overrides) {
       const targetResult = {
         routine_occurrence_key: override.routine_occurrence_key,
+        payload_occurrence_key: override.routine_occurrence_key,
+        resolved_occurrence_key: override.routine_occurrence_key,
         routine_id: override.routine_id,
         date: override.date,
+        target_date: override.date,
+        target_path: this.getTaskchutePath(override.date),
         matched_by: "",
         matched_entry_id: "",
+        matched_line_index: -1,
         entry_id_mismatch: false,
         occurrence_key_match_count: 0,
         existing_routine_date_row_count: 0,
         updated_row_count: 0,
+        before_line: "",
+        after_line: "",
         before_alias: "",
         after_alias: override.title,
+        desired_alias: override.title,
         pending_override_saved: true,
         pending: false,
         genuinely_unmaterialized: false,
+        post_save_alias_verified: false,
         verified: false,
         ack_allowed: false
       };
@@ -18203,7 +18244,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       result.matched += 1;
       targetResult.matched_by = "routine_occurrence_key";
       targetResult.matched_entry_id = target.lineEntryId;
+      targetResult.matched_line_index = target.lineIndex;
       targetResult.entry_id_mismatch = !!(override.entry_id && target.lineEntryId && override.entry_id !== target.lineEntryId);
+      targetResult.before_line = target.line;
       targetResult.before_alias = String(link.alias || "").trim();
       const meta = Object.assign({}, target.meta, {
         routine_occurrence_override: "true",
@@ -18214,6 +18257,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       const entryId = String(target.lineEntryId || override.entry_id || "").trim();
       const checked = /^\s*-\s+\[[xX]\]/.test(target.line);
       const nextLine = taskLine(link.file, override.title, checked, entryId, meta);
+      targetResult.after_line = nextLine;
+      targetResult.after_alias = override.title;
       if (nextLine !== target.line) {
         lines[target.lineIndex] = nextLine;
         const writeOk = await this.writeFileText(path, lines.join("\n"), {
@@ -18250,8 +18295,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         continue;
       }
       targetResult.updated_row_count = 1;
+      targetResult.post_save_alias_verified = true;
       targetResult.verified = true;
       targetResult.ack_allowed = true;
+      targetResult.d1_ack_allowed = true;
       result.updated += 1;
       result.verified += 1;
     }
@@ -18369,17 +18416,26 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.recordRoutineOccurrenceSyncDiagnostic("pending_override_save_failed", Object.assign({}, diagnostic || {}, {
         override_event_detected: true,
         payload_occurrence_key: identity.payloadOccurrenceKey,
+        resolved_occurrence_key: identity.effectiveOccurrenceKey,
         derived_occurrence_key: identity.derivedOccurrenceKey,
         payload_entry_id: identity.payloadEntryId,
+        task_id: String(payload.task_id || "").trim(),
+        entry_id: identity.payloadEntryId,
+        target_date: identity.targetDate,
+        target_path: this.getTaskchutePath(identity.targetDate),
         matched_entry_id: entryId,
         matched_occurrence_key: identity.effectiveOccurrenceKey,
         entry_id_mismatch: !!(identity.payloadEntryId && entryId && identity.payloadEntryId !== entryId),
         matched_by: String(diagnostic.matched_by || "pending").trim(),
         updated_row_count: 0,
         pending_override_saved: false,
+        post_save_alias_verified: false,
         ack_allowed: false,
+        d1_ack_allowed: false,
         before_alias: beforeAlias,
         after_alias: nextTitle,
+        desired_alias: nextTitle,
+        failure_reason: "pending_override_save_failed",
         routine_definition_updated: false,
         task_note_updated: false,
         file_renamed: false,
@@ -18406,19 +18462,31 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.recordRoutineOccurrenceSyncDiagnostic(verifiedApplied ? "routine_occurrence_override_applied" : "routine_occurrence_override_pending", Object.assign({}, diagnostic || {}, {
       override_event_detected: true,
       payload_occurrence_key: identity.payloadOccurrenceKey,
+      resolved_occurrence_key: identity.effectiveOccurrenceKey,
       derived_occurrence_key: identity.derivedOccurrenceKey,
       payload_entry_id: identity.payloadEntryId,
+      task_id: String(payload.task_id || "").trim(),
+      entry_id: identity.payloadEntryId,
+      target_date: identity.targetDate,
+      target_path: this.getTaskchutePath(identity.targetDate),
       matched_entry_id: String(appliedTarget && appliedTarget.matched_entry_id || "").trim(),
       matched_occurrence_key: identity.effectiveOccurrenceKey,
       entry_id_mismatch: !!(appliedTarget && appliedTarget.entry_id_mismatch),
       matched_by: String(appliedTarget && appliedTarget.matched_by || diagnostic.matched_by || "unresolved").trim(),
+      matched_line_index: appliedTarget && appliedTarget.matched_line_index != null ? Number(appliedTarget.matched_line_index) : -1,
       occurrence_key_match_count: Number(appliedTarget && appliedTarget.occurrence_key_match_count || 0),
       existing_routine_date_row_count: Number(appliedTarget && appliedTarget.existing_routine_date_row_count || 0),
       updated_row_count: Number(appliedTarget && appliedTarget.updated_row_count || 0),
       pending_override_saved: true,
+      post_save_alias_verified: verifiedApplied,
       ack_allowed: ackAllowed,
+      d1_ack_allowed: ackAllowed,
+      before_line: String(appliedTarget && appliedTarget.before_line || "").trim(),
+      after_line: String(appliedTarget && appliedTarget.after_line || "").trim(),
       before_alias: String(appliedTarget && appliedTarget.before_alias || beforeAlias).trim(),
       after_alias: nextTitle,
+      desired_alias: nextTitle,
+      failure_reason: ackAllowed ? "" : String(appliedTarget && appliedTarget.failure_reason || "post_save_alias_not_verified").trim(),
       routine_definition_updated: false,
       task_note_updated: false,
       file_renamed: false,
@@ -18650,8 +18718,44 @@ class TaskchutePlugin extends obsidian.Plugin {
       "routine_generated_for_date", "routine_date", "date", "routine_occurrence_override",
       "this_occurrence_only", "routine_occurrence_choice", "routine_source", "title"
     ].filter(key => event && event[key] != null).map(key => [key, event[key]])), parsedPayload);
+    for (const key of ["entry_id", "routine_id", "generated_by_routine_id", "routine_occurrence_key", "routine_generated_for_date", "routine_date", "date", "routine_occurrence_override", "this_occurrence_only", "routine_occurrence_choice"]) {
+      if ((payload[key] == null || String(payload[key]).trim() === "") && event && event[key] != null) payload[key] = event[key];
+    }
     const taskId = String(payload.task_id || event && event.task_id || "").trim();
     if (!taskId) return { ok: false, skipped: true, message: "TaskUpdated payloadにtask_idがありません。" };
+    const occurrenceIdentityPrecheck = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
+    const occurrenceTitlePrecheck = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
+    const occurrenceOnlyPrecheck = isTrueLike(payload.routine_occurrence_override)
+      || isTrueLike(payload.this_occurrence_only)
+      || isTrueLike(occurrenceIdentityPrecheck.after && occurrenceIdentityPrecheck.after.routine_occurrence_override)
+      || isTrueLike(occurrenceIdentityPrecheck.after && occurrenceIdentityPrecheck.after.this_occurrence_only)
+      || ["today", "today_only", "this_occurrence_only"].includes(String(payload.routine_occurrence_choice || payload.occurrence_scope || occurrenceIdentityPrecheck.after && (occurrenceIdentityPrecheck.after.routine_occurrence_choice || occurrenceIdentityPrecheck.after.occurrence_scope) || "").trim());
+    if (occurrenceOnlyPrecheck && occurrenceTitlePrecheck.has && !occurrenceIdentityPrecheck.effectiveOccurrenceKey) {
+      this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_only_taskupdated_identity_missing", {
+        operation: "update",
+        event_type: "TaskUpdated",
+        event_id: String(event && event.event_id || "").trim(),
+        server_sequence: Math.max(0, Math.floor(Number(event && event.server_sequence || 0))),
+        task_id: taskId,
+        entry_id: occurrenceIdentityPrecheck.payloadEntryId,
+        routine_id: occurrenceIdentityPrecheck.routineId,
+        payload_occurrence_key: occurrenceIdentityPrecheck.payloadOccurrenceKey,
+        resolved_occurrence_key: "",
+        routine_occurrence_key: "",
+        target_date: occurrenceIdentityPrecheck.targetDate,
+        desired_alias: String(occurrenceTitlePrecheck.value || "").trim(),
+        updated_row_count: 0,
+        post_save_alias_verified: false,
+        d1_ack_allowed: false,
+        ack_allowed: false,
+        failure_reason: "missing_resolved_occurrence_key",
+        routine_definition_updated: false,
+        task_note_updated: false,
+        file_renamed: false,
+        outbound_enqueue_suppressed: true
+      }, "error", "failed_unacked");
+      return { ok: false, message: "Routine occurrence-only TaskUpdatedにroutine_occurrence_keyを解決できないためAckしません。" };
+    }
     if (this.isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload)) {
       const occurrenceTarget = await this.findBridgeInboundRoutineOccurrenceOnlyTarget(payload);
       const occurrenceIdentity = occurrenceTarget.identity || this.getBridgeInboundRoutineOccurrenceIdentity(payload);
@@ -18663,21 +18767,31 @@ class TaskchutePlugin extends obsidian.Plugin {
         entry_id: occurrenceIdentity.payloadEntryId,
         routine_id: occurrenceIdentity.routineId,
         routine_occurrence_key: occurrenceIdentity.effectiveOccurrenceKey,
+        resolved_occurrence_key: occurrenceIdentity.effectiveOccurrenceKey,
         payload_entry_id: occurrenceIdentity.payloadEntryId,
         payload_occurrence_key: occurrenceIdentity.payloadOccurrenceKey,
         after_occurrence_key: occurrenceIdentity.afterOccurrenceKey,
         derived_occurrence_key: occurrenceIdentity.derivedOccurrenceKey,
+        target_date: occurrenceIdentity.targetDate,
+        target_path: occurrenceIdentity.targetDate ? this.getTaskchutePath(occurrenceIdentity.targetDate) : "",
         matched_daily_note_path: occurrenceTarget.ok ? String(occurrenceTarget.occurrence.path || "").trim() : "",
         matched_entry_id: occurrenceTarget.ok ? String(taskKeyFromTaskLine(occurrenceTarget.occurrence.line) || "").trim() : "",
         matched_occurrence_key: occurrenceTarget.ok ? String(tcMetaFromTaskLine(occurrenceTarget.occurrence.line).routine_occurrence_key || "").trim() : "",
         matched_by: String(occurrenceTarget.matchedBy || "").trim(),
+        matched_line_index: occurrenceTarget.ok && occurrenceTarget.occurrence.lineIndex != null ? Number(occurrenceTarget.occurrence.lineIndex) : -1,
         entry_id_match: !!(occurrenceTarget.ok && occurrenceTarget.entryIdMatch),
         occurrence_key_match: !!(occurrenceTarget.ok && occurrenceTarget.occurrenceKeyMatch),
         match_count: occurrenceTarget.ok ? 1 : Math.max(0, Number(occurrenceTarget.matchCount || 0)),
         updated_row_count: 0,
+        before_line: occurrenceTarget.ok ? String(occurrenceTarget.occurrence.line || "").trim() : "",
+        after_line: "",
         before_alias: occurrenceTarget.ok ? String(linkTitleFromLine(occurrenceTarget.occurrence.line) && linkTitleFromLine(occurrenceTarget.occurrence.line).alias || "").trim() : "",
         after_alias: String(titleValue.value || "").trim(),
+        desired_alias: String(titleValue.value || "").trim(),
+        post_save_alias_verified: false,
+        d1_ack_allowed: false,
         ack_allowed: false,
+        failure_reason: occurrenceTarget.ok ? "" : "override_target_not_found",
         routine_definition_updated: false,
         task_note_updated: false,
         file_renamed: false,
@@ -18689,6 +18803,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         matched_by: occurrenceTarget.matchedBy,
         payload_entry_id: occurrenceIdentity.payloadEntryId,
         payload_occurrence_key: occurrenceIdentity.payloadOccurrenceKey,
+        resolved_occurrence_key: occurrenceIdentity.effectiveOccurrenceKey,
         derived_occurrence_key: occurrenceIdentity.derivedOccurrenceKey,
         entry_id_match: !!occurrenceTarget.entryIdMatch,
         occurrence_key_match: !!occurrenceTarget.occurrenceKeyMatch,
@@ -21848,7 +21963,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       detail: {
         routine_id: String(detail && detail.routine_id || "").trim(),
         event_type: String(detail && detail.event_type || "").trim(),
-        occurrence_key: String(detail && detail.occurrence_key || "").trim()
+        occurrence_key: String(detail && (detail.occurrence_key || detail.resolved_occurrence_key || detail.routine_occurrence_key || detail.matched_occurrence_key || detail.payload_occurrence_key) || "").trim()
       }
     });
   }
