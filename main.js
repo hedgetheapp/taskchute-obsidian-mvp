@@ -16486,12 +16486,15 @@ class TaskchutePlugin extends obsidian.Plugin {
       || (!isContinuation && fallbackSection ? getSectionByNameOrId(this.settings, fallbackSection.id || fallbackSection.name) : null)
       || (isContinuation ? getNoSectionDefinition(this.settings) : null)
       || { id: "", name: "Inbox" };
+    const routineSourceBase = String(payload.routine_source || payload.routineSource || payload.file || payload.file_base || "").trim();
     const fileBase = existingTarget && existingTarget.task
       ? String(existingTarget.task.fileBase || existingTarget.task.file || "").trim()
+      : generatedRoutineId
+      ? (routineSourceBase || this.getTaskFileBase(taskId, title))
       : isContinuation
       ? (String(payload.file || payload.file_base || "").trim() || this.getTaskFileBase(taskId, title))
       : this.getTaskFileBase(taskId, title);
-    const taskPath = existingTarget && existingTarget.taskPath ? existingTarget.taskPath : this.getTaskPath(taskId, title);
+    const taskPath = existingTarget && existingTarget.taskPath ? existingTarget.taskPath : safePath(`${this.settings.tasksFolder}/${fileBase}.md`);
 
     await this.ensureTaskchuteNote(date);
     const notePath = this.getTaskchutePath(date);
@@ -16509,7 +16512,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       }, "info", "skipped_applied");
       return { ok: true, noop: true, routineOccurrenceDuplicate: true, message: "同一Routine occurrenceは既に存在します。" };
     }
-    if (!existingTarget && !isContinuation) {
+    if (!existingTarget && !isContinuation && !generatedRoutineId) {
       const yamlAttrs = buildTaskUserYamlAttrs(this.settings, payload || {}, sec.name);
       const taskText = `---\ntype: task\ntask_id: ${taskId}\ntitle: ${title}\nestimate_min: ${estimateMin}\nstart_plan: ${startPlan}\nend_plan: ${endPlan}\nsection_id: ${sec.id || ""}\n${yamlAttrs ? yamlAttrs + "\n" : ""}active: true\nroutine: false\n---\n\n# ${title}\n\n## Notes\n\n## Comments\n`;
       const taskWriteOk = await this.writeFileText(taskPath, taskText, { deviceWriterOperation: "bridge-inbound-task-created-note" });
@@ -16534,9 +16537,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       project: String(payload.project || "").trim(), mode: String(payload.mode || "").trim(),
       category: String(payload.category || "").trim(), area: String(payload.area || "").trim(), client: String(payload.client || "").trim()
     };
-    ["generated_by_routine_id", "routine_occurrence_key", "routine_generated_for_date", "routine_scheduled_time", "routine_id", "is_routine"].forEach(key => {
+    ["generated_by_routine_id", "routine_occurrence_key", "routine_generated_for_date", "routine_scheduled_time", "routine_id", "is_routine", "routine_source"].forEach(key => {
       if (payload[key] != null && String(payload[key]).trim() !== "") lineMeta[key] = String(payload[key]).trim();
     });
+    if (!lineMeta.routine_source && generatedRoutineId && fileBase) lineMeta.routine_source = fileBase;
     const createdLine = taskLine(fileBase, title, false, entryId, lineMeta);
     const insertAfterEntryId = String(payload.continuation_after_entry_id || "").trim();
     const insertAfterTask = insertAfterEntryId ? parseTasks(md).find(task => taskKey(task) === insertAfterEntryId) : null;
@@ -26722,6 +26726,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         let text = "";
         try { text = await this.app.vault.read(file); }
         catch (e) { try { text = await readFileText(this.app, path); } catch (ignored) { text = ""; } }
+        if (isRoutineEnabled(extractYamlValue(text, "routine")) || String(extractYamlValue(text, "routine_id") || "").trim()) {
+          result.skipped.push({ path, reason: "routine_definition_filename_locked" });
+          continue;
+        }
         const taskId = this.getTaskIdFromFile(file, text);
         if (!taskId) continue;
         const fmTitle = this.getMarkdownFileFrontmatterValue(text, "title");
@@ -34677,7 +34685,58 @@ class TaskchutePlugin extends obsidian.Plugin {
     return moved;
   }
 
+  async updateRoutineDefinitionTitleFromTask(task, newTitle, options = {}) {
+    const title = String(newTitle || "").trim();
+    if (!title) return false;
+    const routineId = String(task && (task.routineId || task.routine_id || task.generated_by_routine_id || task.taskId || task.task_id) || "").trim();
+    const matches = routineId ? await this.findBridgeRoutineDefinitionFilesById(routineId) : [];
+    if (matches.length !== 1) {
+      this.recordBridgeRoutineDiagnostic("routine_definition_title_target_unresolved", {
+        routine_id: routineId,
+        title,
+        match_count: matches.length,
+        source_entry_id: String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim(),
+        source_routine_source: String(task && (task.routineSource || task.routine_source || "") || "").trim(),
+        reason: matches.length ? "multiple_matches" : "missing_definition"
+      }, matches.length ? "error" : "warn", "failed");
+      return false;
+    }
+    const match = matches[0];
+    const def = await this.getLatestRoutineDefinitionForSync({
+      taskId: extractYamlValue(match.content, "task_id") || routineId,
+      task_id: extractYamlValue(match.content, "task_id") || routineId,
+      routineId,
+      routine_id: routineId,
+      file: withoutMdExtension(match.file && match.file.name || ""),
+      fileBase: withoutMdExtension(match.file && match.file.name || ""),
+      path: match.path
+    }, options || {});
+    const ok = await this.updateTaskRoutineSettings(def, {
+      title,
+      _keepRoutineDefinition: true,
+      _silent: !!(options && options.silent),
+      _skipRoutineSettingsRefresh: !!(options && options.skipRoutineSettingsRefresh),
+      _skipViewRefresh: !!(options && options.skipViewRefresh)
+    });
+    if (ok) {
+      this.recordBridgeRoutineDiagnostic("routine_definition_title_saved", {
+        routine_id: routineId,
+        title,
+        path: match.path,
+        file: withoutMdExtension(match.file && match.file.name || ""),
+        source_entry_id: String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim(),
+        source_routine_source: String(task && (task.routineSource || task.routine_source || "") || "").trim()
+      }, "info", "saved");
+    }
+    return ok;
+  }
+
   async updateTaskTitleInline(task, newTitle) {
+    if (isRoutineHistoryTarget(task) || isTaskRoutineActive(task)) {
+      return await this.updateRoutineDefinitionTitleFromTask(task, newTitle, {
+        reason: "local-routine-title-board-save"
+      });
+    }
     if (this.blockIfTaskchuteSyncBusy && this.blockIfTaskchuteSyncBusy("タスク名編集")) return false;
     const canWrite = await this.ensureDeviceWriteGuard("タスク名編集", { deviceWriterOperation: "task-title-update", userOperationEntry: true });
     if (!canWrite) return false;
