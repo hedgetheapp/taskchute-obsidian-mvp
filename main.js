@@ -15932,6 +15932,56 @@ class TaskchutePlugin extends obsidian.Plugin {
     }, extra || {});
   }
 
+  buildBridgeTaskCreatedApplyErrorDetail(event, error = null, extra = {}) {
+    const payload = isBridgeEventPayloadParseFailure(event) ? {} : parseBridgeEventPayload(event);
+    const taskId = String(payload.task_id || event && event.task_id || "").trim();
+    const entryId = String(payload.entry_id || "").trim();
+    const title = String(payload.title || event && event.title || taskId || "").trim();
+    const dateSeed = String(payload.date || event && event.created_at || "").trim();
+    const date = this.normalizeDate(/^\d{4}-\d{2}-\d{2}/.test(dateSeed) ? dateSeed.slice(0, 10) : (dateSeed || this.getToday()));
+    const sectionKey = String(payload.section_id || payload.section || payload.section_label || "").trim();
+    const section = sectionKey ? getSectionByNameOrId(this.settings, sectionKey) : null;
+    const fallbackSection = Array.isArray(this.settings.sections) && this.settings.sections.length ? this.settings.sections[0] : null;
+    const resolvedSection = section || (fallbackSection ? getSectionByNameOrId(this.settings, fallbackSection.id || fallbackSection.name) : null) || null;
+    const generatedRoutineId = String(payload.generated_by_routine_id || payload.routine_id || "").trim();
+    const routineSourceBase = String(payload.routine_source || payload.routineSource || payload.file || payload.file_base || "").trim();
+    const fileBase = generatedRoutineId
+      ? (routineSourceBase || (taskId && title ? this.getTaskFileBase(taskId, title) : ""))
+      : String(payload.file || payload.file_base || "").trim() || (taskId && title ? this.getTaskFileBase(taskId, title) : "");
+    const stack = error && error.stack ? String(error.stack).split(/\r?\n/).slice(0, 5).join("\n") : "";
+    return Object.assign({
+      error_name: String(error && error.name || "").trim(),
+      error_message: String(error && error.message || error || "").trim(),
+      stack_head: stack,
+      payload_summary: {
+        task_id: taskId,
+        entry_id: entryId,
+        title,
+        date,
+        section_id: String(payload.section_id || "").trim(),
+        section: String(payload.section || "").trim(),
+        routine_id: String(payload.routine_id || "").trim(),
+        generated_by_routine_id: String(payload.generated_by_routine_id || "").trim(),
+        routine_occurrence_key: String(payload.routine_occurrence_key || "").trim()
+      },
+      target_date: date,
+      daily_note_path: date ? this.getTaskchutePath(date) : "",
+      task_note_path: fileBase ? safePath(`${this.settings.tasksFolder}/${fileBase}.md`) : "",
+      section_resolution: {
+        input: sectionKey,
+        found: !!section,
+        resolved_id: String(resolvedSection && resolvedSection.id || "").trim(),
+        resolved_name: String(resolvedSection && resolvedSection.name || "").trim()
+      },
+      file_base_resolution: {
+        file_base: fileBase,
+        routine_source_base: routineSourceBase,
+        generated_routine_id: generatedRoutineId,
+        is_routine_taskcreated: !!generatedRoutineId
+      }
+    }, extra || {});
+  }
+
   normalizeBridgeInboundApplyResult(event, rawResult, registry) {
     if (rawResult && rawResult.ok === true && rawResult.verified === true && ["applied", "skipped_applied", "conflict_copied"].includes(rawResult.apply_status)) {
       return Object.assign({}, rawResult, {
@@ -16486,6 +16536,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       || (!isContinuation && fallbackSection ? getSectionByNameOrId(this.settings, fallbackSection.id || fallbackSection.name) : null)
       || (isContinuation ? getNoSectionDefinition(this.settings) : null)
       || { id: "", name: "Inbox" };
+    const routineOccurrenceKey = String(payload.routine_occurrence_key || "").trim();
+    const generatedRoutineId = String(payload.generated_by_routine_id || payload.routine_id || "").trim();
     const routineSourceBase = String(payload.routine_source || payload.routineSource || payload.file || payload.file_base || "").trim();
     const fileBase = existingTarget && existingTarget.task
       ? String(existingTarget.task.fileBase || existingTarget.task.file || "").trim()
@@ -16499,8 +16551,6 @@ class TaskchutePlugin extends obsidian.Plugin {
     await this.ensureTaskchuteNote(date);
     const notePath = this.getTaskchutePath(date);
     let md = await readFileText(this.app, notePath);
-    const routineOccurrenceKey = String(payload.routine_occurrence_key || "").trim();
-    const generatedRoutineId = String(payload.generated_by_routine_id || payload.routine_id || "").trim();
     if (routineOccurrenceKey && parseTasks(md).some(task =>
       String(task.entryMeta && task.entryMeta.routine_occurrence_key || "").trim() === routineOccurrenceKey
       || (generatedRoutineId && String(task.entryMeta && task.entryMeta.routine_id || "").trim() === generatedRoutineId)
@@ -18660,7 +18710,13 @@ class TaskchutePlugin extends obsidian.Plugin {
           try {
             result = await this.applyBridgeInboundEventThroughRegistry(event);
           } catch (e) {
-            result = this.buildBridgeInboundApplyFailure(event, "apply_exception", `${eventType}反映中にエラーが発生しました。`, true);
+            const errorDetail = eventType === "TaskCreated" ? this.buildBridgeTaskCreatedApplyErrorDetail(event, e) : {
+              error_name: String(e && e.name || "").trim(),
+              error_message: String(e && e.message || e || "").trim(),
+              stack_head: e && e.stack ? String(e.stack).split(/\r?\n/).slice(0, 5).join("\n") : ""
+            };
+            this.recordBridgeStructuredDiagnostic({ level: "error", category: "apply", phase: eventType === "TaskCreated" ? "taskcreated_apply_exception" : "apply_exception", reason: "apply_exception", event, status: "error", message: `${eventType}反映中に例外が発生しました。`, detail: errorDetail });
+            result = this.buildBridgeInboundApplyFailure(event, "apply_exception", `${eventType}反映中にエラーが発生しました。`, true, { detail: errorDetail, error_detail: errorDetail });
           }
           if (!result || !result.ok) {
             failedCount++;
@@ -18949,8 +19005,18 @@ class TaskchutePlugin extends obsidian.Plugin {
             }
             result = await this.applyBridgeInboundEventThroughRegistry(event);
           } catch (e) {
-            result = this.buildBridgeInboundApplyFailure(event, "apply_exception", `${eventType}反映中にエラーが発生しました。`, true);
+            const errorDetail = eventType === "TaskCreated" ? this.buildBridgeTaskCreatedApplyErrorDetail(event, e) : {
+              error_name: String(e && e.name || "").trim(),
+              error_message: String(e && e.message || e || "").trim(),
+              stack_head: e && e.stack ? String(e.stack).split(/\r?\n/).slice(0, 5).join("\n") : ""
+            };
+            this.recordBridgeStructuredDiagnostic({ level: "error", category: "apply", phase: eventType === "TaskCreated" ? "taskcreated_apply_exception" : "apply_exception", reason: "apply_exception", event, status: "error", message: `${eventType}反映中に例外が発生しました。`, detail: errorDetail });
+            result = this.buildBridgeInboundApplyFailure(event, "apply_exception", `${eventType}反映中にエラーが発生しました。`, true, { detail: errorDetail, error_detail: errorDetail });
           }
+          const applyFinishedDetail = result && (result.detail || result.error_detail) || (eventType === "TaskCreated" && result && !result.ok ? this.buildBridgeTaskCreatedApplyErrorDetail(event, null, {
+            error_code: String(result && result.error_code || "").trim(),
+            result_message: String(result && result.message || "").trim()
+          }) : undefined);
           this.recordBridgeStructuredDiagnostic({
             level: result && result.ok ? "info" : "error",
             category: "apply",
@@ -18958,7 +19024,8 @@ class TaskchutePlugin extends obsidian.Plugin {
             reason: result && result.ok ? "applied" : "apply_failed",
             event,
             status: result && result.ok ? "applied" : "error",
-            message: result && result.message || ""
+            message: result && result.message || "",
+            detail: applyFinishedDetail
           });
           if (!result || !result.ok) {
             if (eventType === "TaskMoved") {
