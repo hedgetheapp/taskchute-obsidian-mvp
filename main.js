@@ -21579,6 +21579,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         same_as_start: !!incomingEndDateInfo.sameAsStart
       }, "info", "saved");
       Object.entries(fields).forEach(([key, value]) => { content = replaceYamlValue(content, key, value); });
+      content = replaceHeadingTitle(content, title);
       if (Array.isArray(payload.subtasks_template)) {
         content = replaceMarkdownSection(content, "Subtasks", serializeSubtaskTemplate(normalizeSubtaskTemplateItems(payload.subtasks_template)), { compact: true });
       }
@@ -29811,6 +29812,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       ? (sec => sec.id === values.section_id || sec.name === values.section)
       : (sec => sec.id === currentSectionId || sec.name === currentSectionId);
     const selectedSection = sections.find(sectionLookup) || getNoSectionDefinition(this.settings);
+    const nextTitle = hasValue("title") ? String(values.title || "").trim() : "";
+    if (hasValue("title") && !nextTitle) {
+      new obsidian.Notice("タスク名を入力してください");
+      return false;
+    }
     const fields = {
       routine: routineOn ? "true" : "false",
       active: enabled ? "true" : "false",
@@ -29834,6 +29840,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       updated_at: nowIso(),
       deleted_at: bridgeRoutineDelete ? nowIso() : ""
     };
+    if (hasValue("title")) fields.title = nextTitle;
     this.recordBridgeRoutineDiagnostic("routine_end_date_save_normalized", {
       routine_id: fields.routine_id,
       event_type: bridgeRoutineDelete ? "RoutineDeleted" : "RoutineUpdated",
@@ -29849,6 +29856,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     Object.entries(fields).forEach(([key, value]) => {
       content = replaceYamlValue(content, key, value);
     });
+    if (hasValue("title")) content = replaceHeadingTitle(content, nextTitle);
     let nextSubtasksTemplate = null;
     if (hasValue("subtasks_template")) {
       nextSubtasksTemplate = normalizeSubtaskTemplateItems(values.subtasks_template);
@@ -29884,6 +29892,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       updatedAt: fields.updated_at,
       deletedAt: fields.deleted_at
     };
+    if (hasValue("title")) patch.title = nextTitle;
     if (nextSubtasksTemplate) patch.subtasks = nextSubtasksTemplate;
     Object.assign(task, patch);
 
@@ -29906,6 +29915,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.updateTaskFieldInViews(task, "project", fields.project);
     this.updateTaskFieldInViews(task, "sectionId", fields.section_id);
     this.updateTaskFieldInViews(task, "section", fields.section);
+    if (hasValue("title")) this.updateTaskFieldInViews(task, "title", nextTitle);
     if (nextSubtasksTemplate) this.updateTaskFieldInViews(task, "subtasks", nextSubtasksTemplate);
 
     let removedGenerated = 0;
@@ -46305,13 +46315,6 @@ class RoutineManagementView extends obsidian.ItemView {
     const tasks = Array.isArray(targets) ? targets : [];
     for (const target of tasks) {
       if (!target || !target.file) continue;
-      if (field === "title") {
-        if (patch.title) {
-          const titleOk = await this.updateRoutineTaskTitle(target, patch.title);
-          if (!titleOk) return false;
-        }
-        continue;
-      }
       const values = this.getRoutineUpdateValuesFromTask(target, patch);
       values._keepRoutineDefinition = true;
       values._silent = true;
@@ -46827,8 +46830,7 @@ class RoutineManagementView extends obsidian.ItemView {
     const path = safePath(`${this.plugin.settings.tasksFolder}/${task.file}.md`);
     let content = await readFileText(this.plugin.app, path);
     content = replaceYamlValue(content, "title", nextTitle);
-    if (/^#\s+.+$/m.test(content)) content = content.replace(/^#\s+.+$/m, `# ${nextTitle}`);
-    else content += `\n# ${nextTitle}\n`;
+    content = replaceHeadingTitle(content, nextTitle);
     const writeOk = await this.plugin.writeFileText(path, content, { undoLabel: "ルーティンタスク名変更", deviceWriterOperation: "routine-title-update" });
     if (this.plugin.isTaskchuteWriteAborted && this.plugin.isTaskchuteWriteAborted(writeOk)) return false;
     task.title = nextTitle;
