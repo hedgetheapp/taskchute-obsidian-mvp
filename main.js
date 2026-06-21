@@ -17946,17 +17946,44 @@ class TaskchutePlugin extends obsidian.Plugin {
     const overrides = this.getBridgeRoutineOccurrenceOverrides().filter(item =>
       (!requestedDate || item.date === requestedDate) && (!requestedKey || item.routine_occurrence_key === requestedKey)
     );
-    const result = { ok: true, matched: 0, updated: 0, pending: 0, failures: [] };
+    const result = { ok: true, matched: 0, updated: 0, pending: 0, verified: 0, failures: [], targets: [] };
     for (const override of overrides) {
+      const targetResult = {
+        routine_occurrence_key: override.routine_occurrence_key,
+        routine_id: override.routine_id,
+        date: override.date,
+        matched_by: "",
+        matched_entry_id: "",
+        entry_id_mismatch: false,
+        occurrence_key_match_count: 0,
+        existing_routine_date_row_count: 0,
+        updated_row_count: 0,
+        before_alias: "",
+        after_alias: override.title,
+        pending_override_saved: true,
+        pending: false,
+        genuinely_unmaterialized: false,
+        verified: false,
+        ack_allowed: false
+      };
+      result.targets.push(targetResult);
       const path = this.getTaskchutePath(override.date);
       const file = this.app.vault.getAbstractFileByPath(path);
       if (!(file && file instanceof obsidian.TFile)) {
+        targetResult.pending = true;
+        targetResult.genuinely_unmaterialized = true;
+        targetResult.matched_by = "pending_date_note_missing";
         result.pending += 1;
         continue;
       }
       let markdown = "";
       try { markdown = await readFileText(this.app, path); }
-      catch (e) { result.failures.push({ routine_occurrence_key: override.routine_occurrence_key, reason: "read_failed" }); continue; }
+      catch (e) {
+        const failure = { routine_occurrence_key: override.routine_occurrence_key, reason: "read_failed" };
+        result.failures.push(failure);
+        targetResult.failure_reason = failure.reason;
+        continue;
+      }
       const lines = String(markdown || "").split(/\r?\n/);
       const candidates = [];
       lines.forEach((line, lineIndex) => {
@@ -17968,23 +17995,44 @@ class TaskchutePlugin extends obsidian.Plugin {
         const lineDate = String(meta.routine_generated_for_date || meta.routine_date || override.date).trim();
         candidates.push({ line, lineIndex, meta, lineKey, lineEntryId, lineRoutineId, lineDate });
       });
-      const stages = [
-        candidates.filter(item => item.lineKey === override.routine_occurrence_key),
-        override.entry_id ? candidates.filter(item => item.lineEntryId === override.entry_id) : [],
-        candidates.filter(item => item.lineRoutineId === override.routine_id && item.lineDate === override.date)
-      ];
-      const matches = stages.find(items => items.length === 1) || [];
-      if (matches.length !== 1) {
-        result.pending += 1;
+      const keyMatches = candidates.filter(item => item.lineKey === override.routine_occurrence_key);
+      const routineDateMatches = candidates.filter(item => item.lineRoutineId === override.routine_id && item.lineDate === override.date);
+      targetResult.occurrence_key_match_count = keyMatches.length;
+      targetResult.existing_routine_date_row_count = routineDateMatches.length;
+      if (keyMatches.length === 0) {
+        if (routineDateMatches.length === 0) {
+          targetResult.pending = true;
+          targetResult.genuinely_unmaterialized = true;
+          targetResult.matched_by = "pending_no_routine_date_row";
+          result.pending += 1;
+          continue;
+        }
+        const failure = { routine_occurrence_key: override.routine_occurrence_key, reason: "occurrence_key_not_found_existing_routine_row" };
+        result.failures.push(failure);
+        targetResult.failure_reason = failure.reason;
+        targetResult.matched_by = "routine_date_row_without_key_match";
         continue;
       }
-      const target = matches[0];
+      if (keyMatches.length !== 1) {
+        const failure = { routine_occurrence_key: override.routine_occurrence_key, reason: "occurrence_key_ambiguous" };
+        result.failures.push(failure);
+        targetResult.failure_reason = failure.reason;
+        targetResult.matched_by = "routine_occurrence_key_ambiguous";
+        continue;
+      }
+      const target = keyMatches[0];
       const link = linkTitleFromLine(target.line);
       if (!link || !String(link.file || "").trim()) {
-        result.failures.push({ routine_occurrence_key: override.routine_occurrence_key, reason: "link_missing" });
+        const failure = { routine_occurrence_key: override.routine_occurrence_key, reason: "link_missing" };
+        result.failures.push(failure);
+        targetResult.failure_reason = failure.reason;
         continue;
       }
       result.matched += 1;
+      targetResult.matched_by = "routine_occurrence_key";
+      targetResult.matched_entry_id = target.lineEntryId;
+      targetResult.entry_id_mismatch = !!(override.entry_id && target.lineEntryId && override.entry_id !== target.lineEntryId);
+      targetResult.before_alias = String(link.alias || "").trim();
       const meta = Object.assign({}, target.meta, {
         routine_occurrence_override: "true",
         this_occurrence_only: "true",
@@ -18002,32 +18050,42 @@ class TaskchutePlugin extends obsidian.Plugin {
           skipBoardHistorySnapshot: true
         });
         if (this.isTaskchuteWriteAborted(writeOk)) {
-          result.failures.push({ routine_occurrence_key: override.routine_occurrence_key, reason: "write_stopped" });
+          const failure = { routine_occurrence_key: override.routine_occurrence_key, reason: "write_stopped" };
+          result.failures.push(failure);
+          targetResult.failure_reason = failure.reason;
           continue;
         }
-        result.updated += 1;
       }
-      let verified = false;
+      let verifiedLine = "";
       try {
         const latest = await readFileText(this.app, path);
         const verifiedLines = String(latest || "").split(/\r?\n/).filter(line => {
           if (!isTaskLine(line)) return false;
-          const lineMeta = tcMetaFromTaskLine(line);
-          return String(lineMeta.routine_occurrence_key || "").trim() === override.routine_occurrence_key
-            || (entryId && String(lineMeta.entry_id || taskKeyFromTaskLine(line) || "").trim() === entryId)
-            || (String(lineMeta.routine_id || lineMeta.generated_by_routine_id || "").trim() === override.routine_id
-              && String(lineMeta.routine_generated_for_date || lineMeta.routine_date || override.date).trim() === override.date);
+          return String(tcMetaFromTaskLine(line).routine_occurrence_key || "").trim() === override.routine_occurrence_key;
         });
-        verified = verifiedLines.length === 1
-          && String(linkTitleFromLine(verifiedLines[0]) && linkTitleFromLine(verifiedLines[0]).alias || "").trim() === override.title
-          && isTrueLike(tcMetaFromTaskLine(verifiedLines[0]).routine_occurrence_override);
+        if (verifiedLines.length === 1) verifiedLine = verifiedLines[0];
       } catch (e) {}
-      if (!verified) result.failures.push({ routine_occurrence_key: override.routine_occurrence_key, reason: "verify_failed" });
+      const verifiedLink = linkTitleFromLine(verifiedLine);
+      const verifiedMeta = tcMetaFromTaskLine(verifiedLine);
+      const verified = !!verifiedLine
+        && String(verifiedLink && verifiedLink.alias || "").trim() === override.title
+        && isTrueLike(verifiedMeta.routine_occurrence_override)
+        && isTrueLike(verifiedMeta.this_occurrence_only);
+      if (!verified) {
+        const failure = { routine_occurrence_key: override.routine_occurrence_key, reason: "verify_failed" };
+        result.failures.push(failure);
+        targetResult.failure_reason = failure.reason;
+        continue;
+      }
+      targetResult.updated_row_count = 1;
+      targetResult.verified = true;
+      targetResult.ack_allowed = true;
+      result.updated += 1;
+      result.verified += 1;
     }
     result.ok = result.failures.length === 0;
     return result;
   }
-
   isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload) {
     const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
     const source = identity.source;
@@ -18081,12 +18139,13 @@ class TaskchutePlugin extends obsidian.Plugin {
         });
       });
     }
-    const stages = [{ matchedBy: "entry_id", matches: candidates.filter(item => item.entryIdMatch) }];
+    const stages = [];
     if (payloadOccurrenceKey) stages.push({ matchedBy: "payload_routine_occurrence_key", matches: candidates.filter(item => item.lineOccurrenceKey === payloadOccurrenceKey) });
     if (derivedOccurrenceKey) stages.push({ matchedBy: "derived_routine_occurrence_key", matches: candidates.filter(item => item.lineOccurrenceKey === derivedOccurrenceKey) });
     if (afterOccurrenceKey && afterOccurrenceKey !== payloadOccurrenceKey && afterOccurrenceKey !== derivedOccurrenceKey) {
       stages.push({ matchedBy: "after_routine_occurrence_key", matches: candidates.filter(item => item.lineOccurrenceKey === afterOccurrenceKey) });
     }
+    stages.push({ matchedBy: "entry_id", matches: candidates.filter(item => item.entryIdMatch) });
     stages.push({ matchedBy: "date+routine_id+routine_generated_for_date", matches: candidates.filter(item => routineId && targetDate && item.lineRoutineId === routineId && item.date === targetDate && item.lineGeneratedForDate === targetDate) });
     const resolvedStage = stages.find(stage => stage.matches.length === 1);
     if (!resolvedStage) {
@@ -18135,7 +18194,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       updated_at: nowIso()
     });
     if (!saved.ok) {
-      this.recordRoutineOccurrenceSyncDiagnostic("pending_override_save_failed", Object.assign({
+      this.recordRoutineOccurrenceSyncDiagnostic("pending_override_save_failed", Object.assign({}, diagnostic || {}, {
         override_event_detected: true,
         payload_occurrence_key: identity.payloadOccurrenceKey,
         derived_occurrence_key: identity.derivedOccurrenceKey,
@@ -18153,39 +18212,51 @@ class TaskchutePlugin extends obsidian.Plugin {
         task_note_updated: false,
         file_renamed: false,
         outbound_enqueue_suppressed: true
-      }, diagnostic || {}), "error", "failed_unacked");
+      }), "error", "failed_unacked");
       return { ok: false, message: saved.message || "Routine occurrence override persistence failed." };
     }
     const applied = await this.applyBridgeRoutineOccurrenceOverrides({
       date: identity.targetDate,
       routineOccurrenceKey: identity.effectiveOccurrenceKey
     });
-    const targetExists = !!occurrence;
-    const ackAllowed = applied.ok && (!targetExists || applied.matched === 1);
-    this.recordRoutineOccurrenceSyncDiagnostic(targetExists ? "routine_occurrence_override_applied" : "routine_occurrence_override_pending", Object.assign({
+    const appliedTarget = Array.isArray(applied.targets)
+      ? applied.targets.find(item => item && item.routine_occurrence_key === identity.effectiveOccurrenceKey) || null : null;
+    const verifiedApplied = !!(appliedTarget
+      && appliedTarget.occurrence_key_match_count === 1
+      && appliedTarget.updated_row_count === 1
+      && appliedTarget.verified === true);
+    const pendingAllowed = !!(appliedTarget
+      && appliedTarget.occurrence_key_match_count === 0
+      && appliedTarget.existing_routine_date_row_count === 0
+      && appliedTarget.pending === true
+      && appliedTarget.genuinely_unmaterialized === true);
+    const ackAllowed = applied.ok && (verifiedApplied || pendingAllowed);
+    this.recordRoutineOccurrenceSyncDiagnostic(verifiedApplied ? "routine_occurrence_override_applied" : "routine_occurrence_override_pending", Object.assign({}, diagnostic || {}, {
       override_event_detected: true,
       payload_occurrence_key: identity.payloadOccurrenceKey,
       derived_occurrence_key: identity.derivedOccurrenceKey,
       payload_entry_id: identity.payloadEntryId,
-      matched_entry_id: entryId,
+      matched_entry_id: String(appliedTarget && appliedTarget.matched_entry_id || "").trim(),
       matched_occurrence_key: identity.effectiveOccurrenceKey,
-      entry_id_mismatch: !!(identity.payloadEntryId && entryId && identity.payloadEntryId !== entryId),
-      matched_by: String(diagnostic.matched_by || (targetExists ? "resolved_target" : "pending")).trim(),
-      updated_row_count: Number(applied.updated || 0),
+      entry_id_mismatch: !!(appliedTarget && appliedTarget.entry_id_mismatch),
+      matched_by: String(appliedTarget && appliedTarget.matched_by || diagnostic.matched_by || "unresolved").trim(),
+      occurrence_key_match_count: Number(appliedTarget && appliedTarget.occurrence_key_match_count || 0),
+      existing_routine_date_row_count: Number(appliedTarget && appliedTarget.existing_routine_date_row_count || 0),
+      updated_row_count: Number(appliedTarget && appliedTarget.updated_row_count || 0),
       pending_override_saved: true,
       ack_allowed: ackAllowed,
-      before_alias: beforeAlias,
+      before_alias: String(appliedTarget && appliedTarget.before_alias || beforeAlias).trim(),
       after_alias: nextTitle,
       routine_definition_updated: false,
       task_note_updated: false,
       file_renamed: false,
       outbound_enqueue_suppressed: true
-    }, diagnostic || {}), ackAllowed ? "info" : "error", ackAllowed ? (targetExists ? "verified" : "pending_saved") : "failed_unacked");
+    }), ackAllowed ? "info" : "error", ackAllowed ? (verifiedApplied ? "verified" : "pending_saved") : "failed_unacked");
     if (!ackAllowed) return { ok: false, message: "Routine occurrence override application verification failed." };
     this.setBridgeInboundKnownRoutineDefinition(identity.routineId, true);
     try { await this.rebuildTaskchuteIndex({ notice: false }); }
     catch (e) { return { ok: false, message: "Routine occurrence override index rebuild failed." }; }
-    return { ok: true, changed: Number(applied.updated || 0) > 0, pending: !targetExists, occurrenceTitleOnly: true, changedFields: ["title"] };
+    return { ok: true, changed: verifiedApplied, pending: pendingAllowed, occurrenceTitleOnly: true, changedFields: ["title"] };
   }
 
   recordBridgeInboundTaskUpdatedProjectDiagnostic(item = {}) {
@@ -22099,8 +22170,33 @@ class TaskchutePlugin extends obsidian.Plugin {
     } else {
       const taskId = String(payload.task_id || (matches[0] && extractYamlValue(matches[0].content, "task_id")) || id).trim();
       const title = String(payload.title || "受信ルーティン").trim() || "受信ルーティン";
-      const path = matches.length === 1 ? matches[0].path : this.getTaskPath(taskId, title);
-      let content = matches.length === 1 ? matches[0].content : [
+      const payloadFileSeed = String(payload.file_base || payload.file || payload.routine_source || payload.path || "").trim();
+      const payloadFileBase = withoutMdExtension(safePath(payloadFileSeed).split("/").pop() || "");
+      const tasksFolder = safePath(this.settings.tasksFolder || DEFAULT_SETTINGS.tasksFolder || "Taskchute/Tasks");
+      const path = matches.length === 1
+        ? matches[0].path
+        : payloadFileBase ? safePath(`${tasksFolder}/${payloadFileBase}.md`) : this.getTaskPath(taskId, title);
+      let existingPathContent = "";
+      if (!matches.length) {
+        const existingAtPath = this.app.vault.getAbstractFileByPath(path);
+        if (existingAtPath && existingAtPath instanceof obsidian.TFile) {
+          existingPathContent = await readFileText(this.app, path);
+          const existingPathId = String(extractYamlValue(existingPathContent, "routine_id") || extractYamlValue(existingPathContent, "task_id") || "").trim();
+          if (existingPathId && existingPathId !== id) {
+            return { ok: false, message: `Routine定義のcanonical fileBaseが別IDの既存ファイルと競合しています。routine_id=${id}` };
+          }
+        }
+      }
+      this.recordBridgeRoutineDiagnostic("routine_inbound_filebase_preserved", {
+        routine_id: id,
+        event_type: type,
+        path,
+        payload_file_base: payloadFileBase,
+        existing_definition_path: matches.length === 1 ? matches[0].path : "",
+        file_renamed: false,
+        decision: matches.length === 1 ? "preserve_existing_path" : payloadFileBase ? "use_payload_file_base" : "legacy_title_fallback"
+      }, "info", "checked");
+      let content = matches.length === 1 ? matches[0].content : existingPathContent || [
         "---", "type: task", `task_id: ${taskId}`, `title: ${title}`, "routine: true", "---",
         "", `# ${title}`, "", "## Notes", "", "## Comments", "", "## Subtasks", ""
       ].join("\n");
