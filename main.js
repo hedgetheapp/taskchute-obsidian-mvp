@@ -16150,6 +16150,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     const eventType = String(event && event.event_type || "").trim();
     const payload = parseBridgeEventPayload(event);
     if (eventType === "TaskUpdated") {
+      const occurrenceGuard = await this.verifyBridgeRoutineOccurrenceOverrideBeforeAck(event, rawResult, { stage: "before_ack_guard" });
+      if (!occurrenceGuard.ok) return occurrenceGuard;
       const guard = await this.guardBridgeInboundTaskUpdatedTaskNoteUniqueness(String(payload.task_id || event && event.task_id || "").trim());
       if (!guard.ok) return guard;
     }
@@ -16158,6 +16160,156 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (!guard.ok) return guard;
     }
     return { ok: true };
+  }
+
+  isBridgeRoutineOccurrenceOnlyTaskUpdatedEvent(event) {
+    if (String(event && event.event_type || "").trim() !== "TaskUpdated") return false;
+    if (isBridgeEventPayloadParseFailure(event)) return false;
+    const payload = parseBridgeEventPayload(event);
+    return this.isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload);
+  }
+
+  async verifyBridgeRoutineOccurrenceOverrideBeforeAck(event, rawResult = {}, options = {}) {
+    if (!this.isBridgeRoutineOccurrenceOnlyTaskUpdatedEvent(event)) return { ok: true, notOccurrenceOverride: true };
+    const payload = parseBridgeEventPayload(event);
+    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
+    const titleValue = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
+    const expectedTitle = String(titleValue && titleValue.value || "").trim();
+    const stage = String(options && options.stage || "before_ack_guard").trim();
+    const baseDetail = {
+      operation: "update",
+      event_type: "TaskUpdated",
+      event_id: String(event && event.event_id || "").trim(),
+      server_sequence: Math.max(0, Math.floor(Number(event && event.server_sequence || 0))),
+      task_id: String(payload.task_id || event && event.task_id || "").trim(),
+      routine_id: identity.routineId,
+      payload_entry_id: identity.payloadEntryId,
+      payload_occurrence_key: identity.payloadOccurrenceKey,
+      derived_occurrence_key: identity.derivedOccurrenceKey,
+      routine_occurrence_key: identity.effectiveOccurrenceKey,
+      after_alias: expectedTitle,
+      pending_override_saved: true,
+      local_applied_record_allowed: false,
+      post_save_alias_verified: false,
+      d1_ack_allowed: false,
+      d1_acked: false,
+      routine_definition_updated: false,
+      task_note_updated: false,
+      file_renamed: false,
+      outbound_enqueue_suppressed: true,
+      stage
+    };
+    if (!identity.routineId || !identity.targetDate || !identity.effectiveOccurrenceKey || !expectedTitle) {
+      this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_before_ack_identity_missing", baseDetail, "error", "failed_unacked");
+      return { ok: false, message: "Routine occurrence override Ack前検証のidentityが不足しています。" };
+    }
+    const path = this.getTaskchutePath(identity.targetDate);
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file && file instanceof obsidian.TFile)) {
+      const ok = !!(rawResult && rawResult.pending);
+      this.recordRoutineOccurrenceSyncDiagnostic(ok ? "routine_occurrence_before_ack_pending_verified" : "routine_occurrence_before_ack_date_note_missing", Object.assign({}, baseDetail, {
+        matched_by: "pending_date_note_missing",
+        matched_entry_id: "",
+        entry_id_mismatch: false,
+        updated_row_count: 0,
+        before_alias: "",
+        occurrence_key_match_count: 0,
+        existing_routine_date_row_count: 0,
+        local_applied_record_allowed: ok,
+        d1_ack_allowed: ok,
+        genuinely_unmaterialized: ok
+      }), ok ? "info" : "error", ok ? "pending_saved" : "failed_unacked");
+      return ok ? { ok: true, pending: true } : { ok: false, message: "Routine occurrence override対象date noteが未生成ですがpending結果ではないためAckしません。" };
+    }
+    let markdown = "";
+    try { markdown = await readFileText(this.app, path); }
+    catch (e) {
+      this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_before_ack_read_failed", baseDetail, "error", "failed_unacked");
+      return { ok: false, message: "Routine occurrence override Ack前検証でdate noteを再読込できません。" };
+    }
+    const rows = String(markdown || "").split(/\r?\n/).filter(line => isTaskLine(line)).map(line => {
+      const meta = tcMetaFromTaskLine(line);
+      const link = linkTitleFromLine(line);
+      return {
+        line,
+        meta,
+        alias: String(link && link.alias || "").trim(),
+        entry_id: String(meta.entry_id || taskKeyFromTaskLine(line) || "").trim(),
+        routine_id: String(meta.routine_id || meta.generated_by_routine_id || "").trim(),
+        occurrence_key: String(meta.routine_occurrence_key || "").trim(),
+        routine_date: String(meta.routine_generated_for_date || meta.routine_date || identity.targetDate).trim()
+      };
+    });
+    const keyMatches = rows.filter(row => row.occurrence_key === identity.effectiveOccurrenceKey);
+    const routineDateRows = rows.filter(row => row.routine_id === identity.routineId && row.routine_date === identity.targetDate);
+    if (keyMatches.length === 0 && routineDateRows.length === 0) {
+      const ok = !!(rawResult && rawResult.pending);
+      this.recordRoutineOccurrenceSyncDiagnostic(ok ? "routine_occurrence_before_ack_pending_verified" : "routine_occurrence_before_ack_target_missing", Object.assign({}, baseDetail, {
+        matched_by: "pending_no_routine_date_row",
+        occurrence_key_match_count: 0,
+        existing_routine_date_row_count: 0,
+        updated_row_count: 0,
+        before_alias: "",
+        local_applied_record_allowed: ok,
+        d1_ack_allowed: ok,
+        genuinely_unmaterialized: ok
+      }), ok ? "info" : "error", ok ? "pending_saved" : "failed_unacked");
+      return ok ? { ok: true, pending: true } : { ok: false, message: "Routine occurrence override対象行が未生成ですがpending結果ではないためAckしません。" };
+    }
+    if (keyMatches.length !== 1) {
+      this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_before_ack_key_match_count_invalid", Object.assign({}, baseDetail, {
+        matched_by: keyMatches.length > 1 ? "routine_occurrence_key_ambiguous" : "routine_date_row_without_key_match",
+        occurrence_key_match_count: keyMatches.length,
+        existing_routine_date_row_count: routineDateRows.length,
+        updated_row_count: 0,
+        before_alias: keyMatches[0] ? keyMatches[0].alias : "",
+        repair_required: true
+      }), "error", "failed_unacked");
+      return { ok: false, message: "Routine occurrence override対象行をroutine_occurrence_keyで一意に検証できないためAckしません。" };
+    }
+    const row = keyMatches[0];
+    const postSaveAliasVerified = row.alias === expectedTitle;
+    const entryMismatch = !!(identity.payloadEntryId && row.entry_id && identity.payloadEntryId !== row.entry_id);
+    const ok = postSaveAliasVerified;
+    this.recordRoutineOccurrenceSyncDiagnostic(ok ? "routine_occurrence_before_ack_post_save_verified" : "routine_occurrence_before_ack_alias_mismatch", Object.assign({}, baseDetail, {
+      matched_by: "routine_occurrence_key",
+      matched_entry_id: row.entry_id,
+      entry_id_mismatch: entryMismatch,
+      occurrence_key_match_count: keyMatches.length,
+      existing_routine_date_row_count: routineDateRows.length,
+      updated_row_count: ok ? 1 : 0,
+      before_alias: row.alias,
+      post_save_alias_verified: ok,
+      local_applied_record_allowed: ok,
+      d1_ack_allowed: ok,
+      repair_required: !ok
+    }), ok ? "info" : "error", ok ? "verified" : "failed_unacked");
+    return ok ? { ok: true, verified: true } : { ok: false, message: "Routine occurrence override保存後aliasがpayload after.titleと一致しないためAckしません。" };
+  }
+
+  async recordRoutineOccurrenceAppliedCacheRepairDiagnostic(event, reason = "already_applied_cache") {
+    const guard = await this.verifyBridgeRoutineOccurrenceOverrideBeforeAck(event, { pending: false }, { stage: reason });
+    if (guard && guard.notOccurrenceOverride) return guard;
+    if (!guard || !guard.ok) {
+      const payload = isBridgeEventPayloadParseFailure(event) ? {} : parseBridgeEventPayload(event);
+      const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
+      this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_ack_alias_mismatch_repair_needed", {
+        operation: "repair-diagnostic",
+        event_type: "TaskUpdated",
+        event_id: String(event && event.event_id || "").trim(),
+        server_sequence: Math.max(0, Math.floor(Number(event && event.server_sequence || 0))),
+        task_id: String(payload.task_id || event && event.task_id || "").trim(),
+        routine_id: identity.routineId,
+        routine_occurrence_key: identity.effectiveOccurrenceKey,
+        applied_events_device_id_hint: "remote/mobile",
+        old_test_device_ids: ["obsidian-clean-remote", "obsidian-clean-mobile"],
+        d1_acked_assumed: true,
+        post_save_alias_verified: false,
+        repair_required: true,
+        reason
+      }, "error", "repair_needed");
+    }
+    return guard;
   }
 
   async applyBridgeInboundEventThroughRegistry(event) {
@@ -16687,6 +16839,26 @@ class TaskchutePlugin extends obsidian.Plugin {
           message: "ack OK",
           detail: { cursor: cursor.cursor, cursor_advanced: !!cursor.advanced }
         });
+        if (this.isBridgeRoutineOccurrenceOnlyTaskUpdatedEvent(event)) {
+          const payload = parseBridgeEventPayload(event);
+          const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
+          this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_d1_ack_recorded", {
+            operation: "ack",
+            event_type: "TaskUpdated",
+            event_id: id,
+            server_sequence: serverSequence,
+            task_id: String(payload.task_id || event && event.task_id || "").trim(),
+            routine_id: identity.routineId,
+            routine_occurrence_key: identity.effectiveOccurrenceKey,
+            applied_events_device_id: deviceId,
+            applied_events_device_id_hint: "remote/mobile",
+            local_applied_record_allowed: true,
+            post_save_alias_verified: true,
+            d1_ack_allowed: true,
+            d1_acked: true,
+            cursor: cursor.cursor
+          }, "info", "acknowledged");
+        }
         return { ok: true, message: "ack OK", cursor: cursor.cursor, cursorAdvanced: cursor.advanced };
       }
       this.recordBridgeStructuredDiagnostic({
@@ -18803,7 +18975,16 @@ class TaskchutePlugin extends obsidian.Plugin {
           const payload = parseBridgeEventPayload(event);
           const taskId = String(payload.task_id || event && event.task_id || "").trim();
           if (!eventId) { skippedCount++; continue; }
-          if (alreadyApplied.has(eventId)) { skippedCount++; continue; }
+          if (alreadyApplied.has(eventId)) {
+            const repair = await this.recordRoutineOccurrenceAppliedCacheRepairDiagnostic(event, "taskupdated_manual_already_applied_cache");
+            if (repair && !repair.ok && !repair.notOccurrenceOverride) {
+              failedCount++;
+              lastFailureDetail = formatBridgeInboundApplyFailure(event, repair.message || "Routine occurrence overrideはapplied cache済みですがalias不一致です。");
+              continue;
+            }
+            skippedCount++;
+            continue;
+          }
           if (selfDeviceId && String(sourceDeviceId || "").trim() === selfDeviceId) { skippedCount++; continue; }
           if (String(event && event.event_type || "") !== "TaskUpdated") { skippedCount++; continue; }
           if (isBridgeEventPayloadParseFailure(event)) { failedCount++; lastFailureDetail = formatBridgeInboundApplyFailure(event, "payload_json解析に失敗しました。"); continue; }
@@ -19463,6 +19644,15 @@ class TaskchutePlugin extends obsidian.Plugin {
             continue;
           }
           if (appliedByType[eventType].has(eventId)) {
+            if (eventType === "TaskUpdated") {
+              const repair = await this.recordRoutineOccurrenceAppliedCacheRepairDiagnostic(event, "auto_apply_already_applied_cache");
+              if (repair && !repair.ok && !repair.notOccurrenceOverride) {
+                this.recordBridgeStructuredDiagnostic({ level: "error", category: "apply", phase: "safe_stop", reason: "routine_occurrence_applied_cache_alias_mismatch", event, status: "stopped", message: repair.message || "Routine occurrence override applied cacheのalias不一致を検出しました。" });
+                failedCount++;
+                stoppedReason = formatBridgeInboundApplyFailure(event, repair.message || "Routine occurrence override applied cacheのalias不一致を検出しました。");
+                break;
+              }
+            }
             this.recordBridgeStructuredDiagnostic({ level: "debug", category: "apply", phase: "ack_skipped", reason: "already_applied_cache", event, status: "skipped", message: "反映済みcacheにあるためskipしました。" });
             skippedCount++;
             continue;
