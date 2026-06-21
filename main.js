@@ -34786,6 +34786,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       _skipViewRefresh: !!(options && options.skipViewRefresh)
     });
     if (ok) {
+      task.title = title;
+      this.updateTaskRowsInViews([taskKey(task)], { [taskKey(task)]: { title } });
       this.recordBridgeRoutineDiagnostic("routine_definition_title_saved", {
         routine_id: routineId,
         title,
@@ -34795,7 +34797,12 @@ class TaskchutePlugin extends obsidian.Plugin {
         source_routine_source: String(task && (task.routineSource || task.routine_source || "") || "").trim()
       }, "info", "saved");
     }
-    return ok;
+    return ok ? {
+      oldBase: withoutMdExtension(match.file && match.file.name || ""),
+      newBase: withoutMdExtension(match.file && match.file.name || ""),
+      title,
+      routineDefinition: true
+    } : false;
   }
 
   async updateTaskTitleInline(task, newTitle) {
@@ -40926,8 +40933,10 @@ class TaskchuteView extends obsidian.ItemView {
 
   updateVisibleTaskTitle(taskId, title, fileBase) {
     if (!taskId) return;
-    const nextTitle = String(title || "");
     const nextFile = String(fileBase || "");
+    let nextTitle = String(title || "").trim();
+    if (!nextTitle && nextFile) nextTitle = taskTitleFromFileBase(nextFile);
+    if (!nextTitle) return;
     (this.latestTasks || []).forEach(t => {
       if (t && t.taskId === taskId) {
         t.title = nextTitle;
