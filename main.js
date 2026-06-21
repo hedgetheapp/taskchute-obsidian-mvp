@@ -17846,6 +17846,66 @@ class TaskchutePlugin extends obsidian.Plugin {
     return explicitOccurrenceOnly || !!(payloadOccurrenceKey || lineOccurrenceKey);
   }
 
+  isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload) {
+    const source = payload && typeof payload === "object" ? payload : {};
+    const after = source.after && typeof source.after === "object" && !Array.isArray(source.after) ? source.after : {};
+    const occurrenceKey = String(source.routine_occurrence_key || after.routine_occurrence_key || "").trim();
+    const occurrenceOnly = isTrueLike(source.routine_occurrence_override)
+      || isTrueLike(source.this_occurrence_only)
+      || isTrueLike(after.routine_occurrence_override)
+      || isTrueLike(after.this_occurrence_only)
+      || ["today", "today_only", "this_occurrence_only"].includes(String(source.routine_occurrence_choice || source.occurrence_scope || after.routine_occurrence_choice || after.occurrence_scope || "").trim());
+    const titleValue = this.getBridgeTaskUpdatedPayloadValue(source, ["title"]);
+    return !!occurrenceKey && occurrenceOnly && titleValue.has && !!String(titleValue.value || "").trim();
+  }
+
+  async findBridgeInboundRoutineOccurrenceOnlyTarget(payload) {
+    const source = payload && typeof payload === "object" ? payload : {};
+    const after = source.after && typeof source.after === "object" && !Array.isArray(source.after) ? source.after : {};
+    const entryId = String(source.entry_id || after.entry_id || "").trim();
+    const occurrenceKey = String(source.routine_occurrence_key || after.routine_occurrence_key || "").trim();
+    const routineId = String(source.routine_id || source.generated_by_routine_id || after.routine_id || after.generated_by_routine_id || "").trim();
+    const dateMatch = occurrenceKey.match(/(\d{4}-\d{2}-\d{2})/);
+    const targetDate = this.normalizeDate(source.date || after.date || dateMatch && dateMatch[1] || "");
+    const folder = safePath(this.settings.taskchuteFolder || "Taskchute");
+    const files = this.app.vault.getMarkdownFiles().filter(file => {
+      const path = safePath(file && file.path || "");
+      const date = taskchuteDateFromPath(path);
+      if (!date || !(path.startsWith(`${folder}/`) || path === folder)) return false;
+      return !targetDate || date === targetDate;
+    });
+    const matches = [];
+    for (const file of files) {
+      let markdown = "";
+      try { markdown = await this.app.vault.read(file); }
+      catch (e) { try { markdown = await readFileText(this.app, file.path); } catch (ignored) { markdown = ""; } }
+      const lines = String(markdown || "").split(/\r?\n/);
+      lines.forEach((line, lineIndex) => {
+        if (!isTaskLine(line)) return;
+        const meta = tcMetaFromTaskLine(line);
+        const lineEntryId = String(meta.entry_id || taskKeyFromTaskLine(line) || "").trim();
+        const lineOccurrenceKey = String(meta.routine_occurrence_key || "").trim();
+        const lineRoutineId = String(meta.routine_id || meta.generated_by_routine_id || "").trim();
+        if (entryId && lineEntryId !== entryId) return;
+        if (occurrenceKey && lineOccurrenceKey !== occurrenceKey) return;
+        if (routineId && lineRoutineId && lineRoutineId !== routineId) return;
+        matches.push({ path: file.path, date: taskchuteDateFromPath(file.path), markdown, line, lineIndex });
+      });
+    }
+    if (matches.length !== 1) {
+      return {
+        ok: false,
+        skipped: true,
+        message: matches.length ? "Routine occurrence-only TaskUpdated target is ambiguous." : "Routine occurrence-only TaskUpdated target was not found.",
+        matchCount: matches.length,
+        entryId,
+        occurrenceKey,
+        targetDate
+      };
+    }
+    return { ok: true, occurrence: matches[0], entryId, occurrenceKey, targetDate, matchedBy: "entry_id+routine_occurrence_key" };
+  }
+
   async applyBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, occurrence, title, diagnostic = {}) {
     const nextTitle = String(title || "").trim();
     if (!nextTitle || !occurrence) return { ok: false, message: "Routine occurrence title update target is missing." };
@@ -17867,9 +17927,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       ? withoutMdExtension(definitionMatches[0].file && definitionMatches[0].file.name || "")
       : "";
     const payloadSource = String(payload.routine_source || payload.routineSource || "").trim();
-    const canonicalSource = definitionSource || payloadSource || String(meta.routine_source || "").trim() || String(link.file || "").trim();
+    const canonicalSource = String(meta.routine_source || "").trim() || payloadSource || definitionSource || String(link.file || "").trim();
     meta.routine_source = canonicalSource;
-    const afterLine = taskLine(canonicalSource, nextTitle, checked, entryId, meta);
+    const afterLine = taskLine(link.file, nextTitle, checked, entryId, meta);
     if (afterLine !== beforeLine) {
       lines[occurrence.lineIndex] = afterLine;
       const writeOk = await this.writeFileText(occurrence.path, lines.join("\n"), {
@@ -17896,7 +17956,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       const verifiedMeta = tcMetaFromTaskLine(verifiedLine);
       verified = !!verifiedLine
         && String(verifiedLink && verifiedLink.alias || "").trim() === nextTitle
-        && String(verifiedLink && verifiedLink.file || "").trim() === canonicalSource
+        && String(verifiedLink && verifiedLink.file || "").trim() === String(link.file || "").trim()
         && isTrueLike(verifiedMeta.routine_occurrence_override)
         && isTrueLike(verifiedMeta.this_occurrence_only)
         && String(verifiedMeta.routine_source || "").trim() === canonicalSource;
@@ -17917,6 +17977,17 @@ class TaskchutePlugin extends obsidian.Plugin {
       definition_match_count: definitionMatches.length,
       definition_source: definitionSource,
       payload_routine_source: payloadSource,
+      occurrence_only_taskupdated_detected: true,
+      matched_daily_note_path: String(occurrence.path || "").trim(),
+      matched_entry_id: entryId,
+      matched_occurrence_key: String(meta.routine_occurrence_key || payload.routine_occurrence_key || "").trim(),
+      before_alias: String(link.alias || "").trim(),
+      after_alias: nextTitle,
+      updated_row_count: afterLine !== beforeLine ? 1 : 0,
+      routine_definition_updated: false,
+      task_note_updated: false,
+      file_renamed: false,
+      outbound_enqueue_suppressed: true,
       reason: "inbound-taskupdated-routine-occurrence-title-only"
     }, diagnostic || {}), verified ? "info" : "error", verified ? "verified" : "failed_unacked");
     if (!verified) return { ok: false, message: "Routine occurrence title update verification failed." };
@@ -18154,6 +18225,33 @@ class TaskchutePlugin extends obsidian.Plugin {
     const payload = parseBridgeEventPayload(event);
     const taskId = String(payload.task_id || event && event.task_id || "").trim();
     if (!taskId) return { ok: false, skipped: true, message: "TaskUpdated payloadにtask_idがありません。" };
+    if (this.isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload)) {
+      const occurrenceTarget = await this.findBridgeInboundRoutineOccurrenceOnlyTarget(payload);
+      const titleValue = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
+      this.recordRoutineOccurrenceSyncDiagnostic("occurrence_only_taskupdated_detected", {
+        operation: "update",
+        event_type: "TaskUpdated",
+        task_id: taskId,
+        entry_id: String(payload.entry_id || payload.after && payload.after.entry_id || "").trim(),
+        routine_id: String(payload.routine_id || payload.generated_by_routine_id || "").trim(),
+        routine_occurrence_key: String(payload.routine_occurrence_key || payload.after && payload.after.routine_occurrence_key || "").trim(),
+        matched_daily_note_path: occurrenceTarget.ok ? String(occurrenceTarget.occurrence.path || "").trim() : "",
+        matched_entry_id: occurrenceTarget.ok ? String(taskKeyFromTaskLine(occurrenceTarget.occurrence.line) || "").trim() : "",
+        matched_occurrence_key: occurrenceTarget.ok ? String(tcMetaFromTaskLine(occurrenceTarget.occurrence.line).routine_occurrence_key || "").trim() : "",
+        match_count: occurrenceTarget.ok ? 1 : Math.max(0, Number(occurrenceTarget.matchCount || 0)),
+        routine_definition_updated: false,
+        task_note_updated: false,
+        file_renamed: false,
+        outbound_enqueue_suppressed: true,
+        reason: "explicit-occurrence-identity-detected-before-task-note-resolution"
+      }, occurrenceTarget.ok ? "info" : "error", occurrenceTarget.ok ? "detected" : "failed_unacked");
+      if (!occurrenceTarget.ok) return occurrenceTarget;
+      return await this.applyBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, occurrenceTarget.occurrence, titleValue.value, {
+        matched_by: occurrenceTarget.matchedBy,
+        source_device_id: String(event && (event.source_device_id || event.device_id) || "").trim(),
+        target_device_id: String(this.settings && this.settings.bridgeDeviceId || "").trim()
+      });
+    }
     const uniquenessGuard = await this.guardBridgeInboundTaskUpdatedTaskNoteUniqueness(taskId);
     if (!uniquenessGuard.ok) return uniquenessGuard;
     let target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
