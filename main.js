@@ -1923,6 +1923,64 @@ function removeTaskExecutionLogs(markdown, key) {
   }
   return out.join("\n");
 }
+function executionLogLineMatchesIdentity(line, identity = {}) {
+  const text = String(line || "");
+  const execId = String(identity.execId || identity.exec_id || "").trim();
+  const entryId = String(identity.entryId || identity.entry_id || "").trim();
+  const taskId = String(identity.taskId || identity.task_id || "").trim();
+  const occurrenceKey = String(identity.routineOccurrenceKey || identity.routine_occurrence_key || "").trim();
+  return !!(
+    execId && text.includes(`[exec_id::${execId}]`)
+    || entryId && text.includes(`[entry_id::${entryId}]`)
+    || taskId && text.includes(`[task_id::${taskId}]`)
+    || occurrenceKey && text.includes(`[routine_occurrence_key::${occurrenceKey}]`)
+  );
+}
+function isRunningExecutionLogLine(line) {
+  const statusMatch = String(line || "").match(/\[status::([^\]]+)\]/i);
+  return statusMatch && String(statusMatch[1] || "").trim().toLowerCase() === "running";
+}
+function removeActiveRunningExecutionLogs(markdown, identity = {}) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  let section = "";
+  let removedDateLog = 0;
+  let removedLogDaily = 0;
+  const out = [];
+  for (const line of lines) {
+    const heading = String(line || "").match(/^##\s+(.+?)\s*$/);
+    if (heading) section = heading[1].trim();
+    const inExecutionLog = section === "Log" || section === "LogDaily";
+    const shouldRemove = inExecutionLog
+      && /^\s*-\s+\[exec_id::/.test(String(line || ""))
+      && isRunningExecutionLogLine(line)
+      && executionLogLineMatchesIdentity(line, identity);
+    if (shouldRemove) {
+      if (section === "LogDaily") removedLogDaily += 1;
+      else removedDateLog += 1;
+      continue;
+    }
+    out.push(line);
+  }
+  return { markdown: out.join("\n"), removedDateLog, removedLogDaily };
+}
+function hasActiveRunningExecutionLog(markdown, identity = {}, sectionName = "") {
+  const targetSection = String(sectionName || "").trim();
+  let section = "";
+  const lines = String(markdown || "").split(/\r?\n/);
+  for (const line of lines) {
+    const heading = String(line || "").match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      section = heading[1].trim();
+      continue;
+    }
+    if (targetSection && section !== targetSection) continue;
+    if (section !== "Log" && section !== "LogDaily") continue;
+    if (!/^\s*-\s+\[exec_id::/.test(String(line || ""))) continue;
+    if (!isRunningExecutionLogLine(line)) continue;
+    if (executionLogLineMatchesIdentity(line, identity)) return true;
+  }
+  return false;
+}
 function minutesBetween(startIso, endIso) {
   const s = new Date(startIso);
   const e = new Date(endIso);
@@ -20491,6 +20549,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     let logDailyVerified = false;
     let runtimeVerified = false;
     let endVerified = false;
+    let runningDateLogCleared = false;
+    let runningLogDailyCleared = false;
     let localEntryId = "";
     let matchedBy = "";
     try {
@@ -20513,6 +20573,9 @@ class TaskchutePlugin extends obsidian.Plugin {
           || hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "LogDaily", ["done"], execId);
         const latestEnd = String(latestEndAtFromLog(markdown, key || taskId) || "").trim();
         endVerified = !completedAt || !latestEnd || this.isSameBridgeStartTime(latestEnd, completedAt);
+        const runningIdentity = { execId, entryId: key, taskId, routineOccurrenceKey: occurrenceKey };
+        runningDateLogCleared = !hasActiveRunningExecutionLog(markdown, runningIdentity, "Log");
+        runningLogDailyCleared = !hasActiveRunningExecutionLog(markdown, runningIdentity, "LogDaily");
       }
       const running = this.normalizeRuntimeSession(this.runtime && this.runtime.running, false);
       const runningKey = runtimeSessionKey(running);
@@ -20535,14 +20598,18 @@ class TaskchutePlugin extends obsidian.Plugin {
       logDailyVerified = false;
       runtimeVerified = false;
       endVerified = false;
+      runningDateLogCleared = false;
+      runningLogDailyCleared = false;
     }
-    const verified = !!(checkboxVerified && logVerified && logDailyVerified && runtimeVerified && endVerified);
+    const verified = !!(checkboxVerified && logVerified && logDailyVerified && runtimeVerified && endVerified && runningDateLogCleared && runningLogDailyCleared);
     const failedChecks = this.buildBridgeFailedChecks({
       checkbox_verified: checkboxVerified,
       log_verified: logVerified,
       logdaily_verified: logDailyVerified,
       runtime_verified: runtimeVerified,
-      end_verified: endVerified
+      end_verified: endVerified,
+      running_row_remaining_date_log: runningDateLogCleared,
+      running_row_remaining_logdaily: runningLogDailyCleared
     });
     this.recordBridgeTaskStartedApplyDiagnostic(event, {
       task_id: taskId,
@@ -20560,9 +20627,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       log_verified: logVerified,
       logdaily_verified: logDailyVerified,
       runtime_verified: runtimeVerified,
-      end_verified: endVerified
+      end_verified: endVerified,
+      running_row_cleared_date_log: runningDateLogCleared,
+      running_row_cleared_logdaily: runningLogDailyCleared
     });
-    return { ok: verified, verified, failed_checks: failedChecks, checkbox_verified: checkboxVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified, end_verified: endVerified };
+    return { ok: verified, verified, failed_checks: failedChecks, checkbox_verified: checkboxVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified, end_verified: endVerified, running_row_cleared_date_log: runningDateLogCleared, running_row_cleared_logdaily: runningLogDailyCleared };
   }
 
   normalizeBridgeInboundExecutionAliasEvent(event, nextEventType, defaults = {}) {
@@ -21199,6 +21268,26 @@ class TaskchutePlugin extends obsidian.Plugin {
     const localEndActual = String(latestEndAtFromLog(md, entryId) || "").trim();
     if (alreadyChecked) {
       if (!localEndActual || this.isSameBridgeStartTime(localEndActual, completedInfo.value)) {
+        const alreadyMeta = tcMetaFromTaskLine(occurrence.line);
+        const alreadyRoutineFields = this.getRoutineOccurrenceBridgeFields(Object.assign({}, target.task, {
+          entryId,
+          entry_id: entryId,
+          taskKey: entryId,
+          sourceDate: occurrence.date,
+          date: occurrence.date,
+          entryMeta: alreadyMeta
+        }), payload);
+        const cleaned = removeActiveRunningExecutionLogs(md, {
+          execId: payloadExecId,
+          entryId,
+          taskId,
+          routineOccurrenceKey: alreadyRoutineFields.routine_occurrence_key || ""
+        });
+        if (cleaned.markdown !== md) {
+          const cleanupWriteOk = await this.writeFileText(notePath, cleaned.markdown, { deviceWriterOperation: "bridge-inbound-task-completed-running-cleanup" });
+          if (this.isTaskchuteWriteAborted(cleanupWriteOk)) return { ok: false, message: "TaskCompleted冪等確認中のrunning行cleanupが保存前確認で停止しました。" };
+          md = cleaned.markdown;
+        }
         const verifiedAlreadyCompleted = await this.verifyBridgeInboundTaskCompletedApplied(event, { entryId, execId: payloadExecId, completedAt: completedInfo.value });
         return verifiedAlreadyCompleted.ok
           ? { ok: true, noop: true, verified: true, taskId, message: "対象entryは既に同じ完了状態です。" }
@@ -21258,6 +21347,12 @@ class TaskchutePlugin extends obsidian.Plugin {
     const logDaily = `- [exec_id::${execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] ${routineLogFields}`;
     md = replaceTaskCheckbox(md, entryId, true);
     if (sectionName) md = moveTaskLineToSection(md, this.settings, entryId, sectionName);
+    md = removeActiveRunningExecutionLogs(md, {
+      execId,
+      entryId,
+      taskId,
+      routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
+    }).markdown;
     md = appendSection(md, "Log", log);
     md = appendSection(md, "LogDaily", logDaily);
     const writeOk = await this.writeFileText(notePath, md, { deviceWriterOperation: "bridge-inbound-task-completed-board" });
@@ -36777,6 +36872,24 @@ class TaskchutePlugin extends obsidian.Plugin {
     // 別端末更新反映後に完了を自動継続する場合でも、
     // 到着済みのTaskchuteノート上で既に完了済みなら二重ログを書かない。
     if (isTaskCheckedInMarkdown(md, completedKey) || hasDoneExecutionLogForExecId(md, r.execId)) {
+      const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(Object.assign({}, r, {
+        entryId: completedKey,
+        entry_id: completedKey,
+        taskKey: completedKey,
+        sourceDate: date,
+        date
+      }), { date });
+      const cleaned = removeActiveRunningExecutionLogs(md, {
+        execId: r.execId,
+        entryId: completedKey,
+        taskId: r.taskId,
+        routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
+      });
+      if (cleaned.markdown !== md) {
+        const cleanupWriteOk = await this.writeFileText(notePath, cleaned.markdown);
+        if (this.isTaskchuteWriteAborted(cleanupWriteOk)) return false;
+        md = cleaned.markdown;
+      }
       this.runtime.running = null;
       await this.savePluginData();
       const alreadyDonePatch = { checked: true, logStatus: "done", startActual: r.startedAt || "" };
@@ -36792,10 +36905,24 @@ class TaskchutePlugin extends obsidian.Plugin {
     const completedSection = getSectionForStartPlan(this.settings, formatClock(r.startedAt || ""));
     const attrPairs = await this.getTaskAttributePairs(Object.assign({}, r, { section: completedSection.name, sectionId: completedSection.id }));
     const taskLink = `[[${r.file}|${r.title}]]`;
-    const log = `- [exec_id::${r.execId}] [date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [start_at::${r.startedAt}] [end_at::${end}] [actual::${actual}] [status::done] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::${r.isInterrupt ? "true" : "false"}] [interrupted_task_id::${r.interruptedTaskId || ""}] [interrupted_entry_id::${r.interruptedEntryId || ""}] [comment_count::0] [is_routine::${r.isRoutine ? "true" : "false"}]`;
-    const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done]`;
+    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(Object.assign({}, r, {
+      entryId: completedKey,
+      entry_id: completedKey,
+      taskKey: completedKey,
+      sourceDate: date,
+      date
+    }), { date });
+    const routineLogFields = this.formatRoutineOccurrenceExecutionLogFields(routineOccurrenceFields);
+    const log = `- [exec_id::${r.execId}] [date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [start_at::${r.startedAt}] [end_at::${end}] [actual::${actual}] [status::done] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::${r.isInterrupt ? "true" : "false"}] [interrupted_task_id::${r.interruptedTaskId || ""}] [interrupted_entry_id::${r.interruptedEntryId || ""}] [comment_count::0] ${routineLogFields}`;
+    const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] ${routineLogFields}`;
     md = replaceTaskCheckbox(md, completedKey, true);
     md = moveTaskLineToSection(md, this.settings, completedKey, completedSection.name);
+    md = removeActiveRunningExecutionLogs(md, {
+      execId: r.execId,
+      entryId: completedKey,
+      taskId: r.taskId,
+      routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
+    }).markdown;
     md = appendSection(md, "Log", log);
     md = appendSection(md, "LogDaily", logDaily);
     const completeWriteOk = await this.writeFileText(notePath, md);
