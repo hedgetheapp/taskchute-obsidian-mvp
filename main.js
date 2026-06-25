@@ -6018,6 +6018,33 @@ function hasExecutionLogForKeyInSectionWithStatus(markdown, key, sectionName, st
   }
   return false;
 }
+function hasExecutionLogForRoutineOccurrenceInSectionWithStatus(markdown, occurrenceKey, sectionName, statuses, execId = "") {
+  const target = String(occurrenceKey || "").trim();
+  if (!target) return false;
+  const normalizedSection = String(sectionName || "").trim();
+  const normalizedStatuses = new Set((Array.isArray(statuses) ? statuses : [statuses]).map(v => String(v || "").trim().toLowerCase()).filter(Boolean));
+  if (!normalizedSection || !normalizedStatuses.size) return false;
+  const keyRe = new RegExp(`\\[routine_occurrence_key::${escapeRegExp(target)}\\]`);
+  const execRe = String(execId || "").trim() ? new RegExp(`\\[exec_id::${escapeRegExp(String(execId || "").trim())}\\]`) : null;
+  let section = "";
+  const lines = String(markdown || "").split(/\r?\n/);
+  for (const line of lines) {
+    const text = String(line || "");
+    const heading = text.match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      section = heading[1].trim();
+      continue;
+    }
+    if (section !== normalizedSection) continue;
+    if (!/^\s*-\s+\[exec_id::/.test(text)) continue;
+    if (!keyRe.test(text)) continue;
+    if (execRe && !execRe.test(text)) continue;
+    const statusMatch = text.match(/\[status::([^\]]+)\]/i);
+    const status = statusMatch ? statusMatch[1].trim().toLowerCase() : "";
+    if (normalizedStatuses.has(status)) return true;
+  }
+  return false;
+}
 function hasDoneExecutionLogForExecId(markdown, execId) {
   return hasExecutionLogForExecIdWithStatus(markdown, execId, ["done"]);
 }
@@ -20357,11 +20384,19 @@ class TaskchutePlugin extends obsidian.Plugin {
     return Math.abs(at - bt) < 1000;
   }
 
+  buildBridgeFailedChecks(checks = {}) {
+    return Object.entries(checks)
+      .filter(([, ok]) => !ok)
+      .map(([key]) => key);
+  }
+
   async verifyBridgeInboundTaskStartedApplied(event, options = {}) {
     const payload = parseBridgeEventPayload(event);
     const taskId = String(payload.task_id || event && event.task_id || options.taskId || "").trim();
     const entryId = String(payload.entry_id || options.entryId || "").trim();
     const execId = String(payload.exec_id || options.execId || "").trim();
+    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
+    const occurrenceKey = String(identity.effectiveOccurrenceKey || "").trim();
     const startedAt = String(options.startedAt || this.getBridgeInboundTaskStartedAt(payload, event).value || "").trim();
     const isResume = String(payload.reason || "").trim() === "resume"
       || String(event && event.event_type || "").trim() === "TaskResumed";
@@ -20370,14 +20405,20 @@ class TaskchutePlugin extends obsidian.Plugin {
     let logDailyVerified = false;
     let runtimeVerified = false;
     let occurrence = null;
+    let localEntryId = "";
+    let matchedBy = "";
     try {
       const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
       if (target && target.task) {
         const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskStarted", preferUnchecked: true, preferActiveSession: true });
-        if (resolved && resolved.ok) occurrence = resolved.occurrence;
+        if (resolved && resolved.ok) {
+          occurrence = resolved.occurrence;
+          matchedBy = String(resolved.matchedBy || "").trim();
+        }
       }
       if (occurrence) {
-        const key = entryId || taskKeyFromTaskLine(occurrence.line) || "";
+        localEntryId = taskKeyFromTaskLine(occurrence.line) || "";
+        const key = occurrenceKey ? localEntryId : (entryId || localEntryId || "");
         const markdown = await readFileText(this.app, occurrence.path);
         const lineCount = countTaskLinesMatchingKey(markdown, key || taskId);
         const latestStart = String(latestStartAtFromLog(markdown, key || taskId) || "").trim();
@@ -20386,14 +20427,18 @@ class TaskchutePlugin extends obsidian.Plugin {
           logVerified = true;
           logDailyVerified = true;
         } else {
-          logVerified = hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "Log", ["running"], execId);
-          logDailyVerified = hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "LogDaily", ["running"], execId);
+          logVerified = (occurrenceKey && hasExecutionLogForRoutineOccurrenceInSectionWithStatus(markdown, occurrenceKey, "Log", ["running"], execId))
+            || hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "Log", ["running"], execId);
+          logDailyVerified = (occurrenceKey && hasExecutionLogForRoutineOccurrenceInSectionWithStatus(markdown, occurrenceKey, "LogDaily", ["running"], execId))
+            || hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "LogDaily", ["running"], execId);
         }
       }
       const running = this.normalizeRuntimeSession(this.runtime && this.runtime.running, false);
       const runningKey = runtimeSessionKey(running);
       const runningExecMatches = !execId || String(running && running.execId || "").trim() === execId;
-      const runningEntryMatches = entryId ? runningKey === entryId : true;
+      const runningOccurrenceMatches = occurrenceKey && String(running && (running.routineOccurrenceKey || running.routine_occurrence_key) || "").trim() === occurrenceKey;
+      const runningEntryMatches = occurrenceKey ? (runningOccurrenceMatches || runningKey === localEntryId)
+        : (entryId ? runningKey === entryId : true);
       runtimeVerified = !!running
         && runningExecMatches
         && runningEntryMatches
@@ -20406,20 +20451,30 @@ class TaskchutePlugin extends obsidian.Plugin {
       runtimeVerified = false;
     }
     const verified = !!(dateNoteVerified && logVerified && logDailyVerified && runtimeVerified);
-    this.recordBridgeTaskStartedApplyDiagnostic(event, {
-      task_id: taskId,
-      entry_id: entryId,
-      exec_id: execId,
-      started_at: startedAt,
-      decision: verified ? "applied" : "failed_unacked",
-      reason_code: verified ? (isResume ? "task_started_resume_verified" : "task_started_verified") : "task_started_post_apply_verification_failed",
-      verified,
+    const failedChecks = this.buildBridgeFailedChecks({
       date_note_verified: dateNoteVerified,
       log_verified: logVerified,
       logdaily_verified: logDailyVerified,
       runtime_verified: runtimeVerified
     });
-    return { ok: verified, verified, date_note_verified: dateNoteVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified };
+    this.recordBridgeTaskStartedApplyDiagnostic(event, {
+      task_id: taskId,
+      entry_id: entryId,
+      local_entry_id: localEntryId,
+      exec_id: execId,
+      routine_occurrence_key: occurrenceKey,
+      matched_by: matchedBy,
+      started_at: startedAt,
+      decision: verified ? "applied" : "failed_unacked",
+      reason_code: verified ? (isResume ? "task_started_resume_verified" : "task_started_verified") : "task_started_post_apply_verification_failed",
+      verified,
+      failed_checks: failedChecks,
+      date_note_verified: dateNoteVerified,
+      log_verified: logVerified,
+      logdaily_verified: logDailyVerified,
+      runtime_verified: runtimeVerified
+    });
+    return { ok: verified, verified, failed_checks: failedChecks, date_note_verified: dateNoteVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified };
   }
 
   async verifyBridgeInboundTaskCompletedApplied(event, options = {}) {
@@ -20427,6 +20482,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     const taskId = String(payload.task_id || event && event.task_id || options.taskId || "").trim();
     const entryId = String(payload.entry_id || options.entryId || "").trim();
     const execId = String(payload.exec_id || options.execId || "").trim();
+    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
+    const occurrenceKey = String(identity.effectiveOccurrenceKey || "").trim();
     const completedAt = String(options.completedAt || this.getBridgeInboundTaskCompletedAt(payload, event).value || "").trim();
     let occurrence = null;
     let checkboxVerified = false;
@@ -20434,18 +20491,26 @@ class TaskchutePlugin extends obsidian.Plugin {
     let logDailyVerified = false;
     let runtimeVerified = false;
     let endVerified = false;
+    let localEntryId = "";
+    let matchedBy = "";
     try {
       const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
       if (target && target.task) {
         const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskCompleted", preferUnchecked: true, preferActiveSession: true });
-        if (resolved && resolved.ok) occurrence = resolved.occurrence;
+        if (resolved && resolved.ok) {
+          occurrence = resolved.occurrence;
+          matchedBy = String(resolved.matchedBy || "").trim();
+        }
       }
       if (occurrence) {
-        const key = entryId || taskKeyFromTaskLine(occurrence.line) || "";
+        localEntryId = taskKeyFromTaskLine(occurrence.line) || "";
+        const key = occurrenceKey ? localEntryId : (entryId || localEntryId || "");
         const markdown = await readFileText(this.app, occurrence.path);
         checkboxVerified = isTaskCheckedInMarkdown(markdown, key || taskId) && countTaskLinesMatchingKey(markdown, key || taskId) === 1;
-        logVerified = hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "Log", ["done"], execId);
-        logDailyVerified = hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "LogDaily", ["done"], execId);
+        logVerified = (occurrenceKey && hasExecutionLogForRoutineOccurrenceInSectionWithStatus(markdown, occurrenceKey, "Log", ["done"], execId))
+          || hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "Log", ["done"], execId);
+        logDailyVerified = (occurrenceKey && hasExecutionLogForRoutineOccurrenceInSectionWithStatus(markdown, occurrenceKey, "LogDaily", ["done"], execId))
+          || hasExecutionLogForKeyInSectionWithStatus(markdown, key || taskId, "LogDaily", ["done"], execId);
         const latestEnd = String(latestEndAtFromLog(markdown, key || taskId) || "").trim();
         endVerified = !completedAt || !latestEnd || this.isSameBridgeStartTime(latestEnd, completedAt);
       }
@@ -20455,11 +20520,14 @@ class TaskchutePlugin extends obsidian.Plugin {
       const pausedMatches = paused.some(item => {
         const session = this.normalizeRuntimeSession(item, true);
         const key = runtimeSessionKey(session);
+        const sessionOccurrenceMatches = occurrenceKey && String(session && (session.routineOccurrenceKey || session.routine_occurrence_key) || "").trim() === occurrenceKey;
         return !!session
           && (!execId || String(session.execId || "").trim() === execId)
-          && (entryId ? key === entryId : String(session.taskId || "") === taskId);
+          && (occurrenceKey ? (sessionOccurrenceMatches || key === localEntryId) : (entryId ? key === entryId : String(session.taskId || "") === taskId));
       });
-      runtimeVerified = (!running || !((!execId || String(running.execId || "").trim() === execId) && (entryId ? runningKey === entryId : String(running.taskId || "") === taskId)))
+      const runningOccurrenceMatches = occurrenceKey && String(running && (running.routineOccurrenceKey || running.routine_occurrence_key) || "").trim() === occurrenceKey;
+      runtimeVerified = (!running || !((!execId || String(running.execId || "").trim() === execId)
+        && (occurrenceKey ? (runningOccurrenceMatches || runningKey === localEntryId) : (entryId ? runningKey === entryId : String(running.taskId || "") === taskId))))
         && !pausedMatches;
     } catch (e) {
       checkboxVerified = false;
@@ -20469,21 +20537,32 @@ class TaskchutePlugin extends obsidian.Plugin {
       endVerified = false;
     }
     const verified = !!(checkboxVerified && logVerified && logDailyVerified && runtimeVerified && endVerified);
-    this.recordBridgeTaskStartedApplyDiagnostic(event, {
-      task_id: taskId,
-      entry_id: entryId,
-      exec_id: execId,
-      completed_at: completedAt,
-      decision: verified ? "applied" : "failed_unacked",
-      reason_code: verified ? "task_completed_verified" : "task_completed_post_apply_verification_failed",
-      verified,
+    const failedChecks = this.buildBridgeFailedChecks({
       checkbox_verified: checkboxVerified,
       log_verified: logVerified,
       logdaily_verified: logDailyVerified,
       runtime_verified: runtimeVerified,
       end_verified: endVerified
     });
-    return { ok: verified, verified, checkbox_verified: checkboxVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified, end_verified: endVerified };
+    this.recordBridgeTaskStartedApplyDiagnostic(event, {
+      task_id: taskId,
+      entry_id: entryId,
+      local_entry_id: localEntryId,
+      exec_id: execId,
+      routine_occurrence_key: occurrenceKey,
+      matched_by: matchedBy,
+      completed_at: completedAt,
+      decision: verified ? "applied" : "failed_unacked",
+      reason_code: verified ? "task_completed_verified" : "task_completed_post_apply_verification_failed",
+      verified,
+      failed_checks: failedChecks,
+      checkbox_verified: checkboxVerified,
+      log_verified: logVerified,
+      logdaily_verified: logDailyVerified,
+      runtime_verified: runtimeVerified,
+      end_verified: endVerified
+    });
+    return { ok: verified, verified, failed_checks: failedChecks, checkbox_verified: checkboxVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified, end_verified: endVerified };
   }
 
   normalizeBridgeInboundExecutionAliasEvent(event, nextEventType, defaults = {}) {
