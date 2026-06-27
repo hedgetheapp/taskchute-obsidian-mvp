@@ -16134,8 +16134,27 @@ class TaskchutePlugin extends obsidian.Plugin {
           const occurrence = await this.findBridgeLocalTaskMoveOccurrence(taskId, [payload.date], entryId);
           verified = !!occurrence && !occurrence.bridgeOccurrenceResolutionError;
         }
-      } else if (eventType === "TaskUpdated" || eventType === "TaskDeleted") {
-        // These handlers already perform save/re-read guards before returning ok.
+      } else if (eventType === "TaskUpdated") {
+        const strictIdentity = this.getBridgeInboundRoutineOccurrenceIdentity(payload, { allowTaskIdFallback: false });
+        const expectedTitleValue = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
+        const changedFields = Array.isArray(payload.changed_fields) ? payload.changed_fields.map(value => String(value || "").trim()) : [];
+        const normalTitleUpdate = !strictIdentity.payloadHasRoutineIdentity
+          && expectedTitleValue.has
+          && (changedFields.includes("title") || rawResult && rawResult.normalTaskUpdatedTitleVerification);
+        if (normalTitleUpdate) {
+          const inspection = await this.verifyBridgeInboundNormalTaskUpdatedTitle(
+            taskId,
+            entryId,
+            expectedTitleValue.value,
+            rawResult && rawResult.normalTaskUpdatedTitleVerification || {}
+          );
+          verified = inspection.ok;
+          rawResult.normalTaskUpdatedTitleVerification = inspection;
+        } else {
+          verified = true;
+        }
+      } else if (eventType === "TaskDeleted") {
+        // TaskDeleted performs its own save/re-read guard before returning ok.
         verified = true;
       } else if (eventType === "TaskMoved") {
         const from = payload.from && typeof payload.from === "object" ? payload.from : (payload.before && typeof payload.before === "object" ? payload.before : {});
@@ -16241,7 +16260,12 @@ class TaskchutePlugin extends obsidian.Plugin {
       verification_kind: String(registry && registry.verification_kind || "")
     });
     const normalized = this.normalizeBridgeInboundApplyResult(event, rawResult, registry);
-    if (normalized.ok) normalized.verification_kind = String(registry && registry.verification_kind || normalized.verification_kind || "");
+    if (normalized.ok) {
+      normalized.verification_kind = String(registry && registry.verification_kind || normalized.verification_kind || "");
+      if (eventType === "TaskUpdated" && rawResult && rawResult.normalTaskUpdatedTitleVerification) {
+        normalized.normalTaskUpdatedTitleVerification = rawResult.normalTaskUpdatedTitleVerification;
+      }
+    }
     return normalized;
   }
 
@@ -17007,7 +17031,45 @@ class TaskchutePlugin extends obsidian.Plugin {
     const applyResult = rawResult && rawResult.verified !== undefined
       ? rawResult
       : this.normalizeBridgeInboundApplyResult(event, rawResult, registry);
-    return this.ackBridgeInboundEvent(event, applyResult);
+    const ack = await this.ackBridgeInboundEvent(event, applyResult);
+    if (String(event && event.event_type || "").trim() === "TaskUpdated"
+      && applyResult && applyResult.normalTaskUpdatedTitleVerification) {
+      const payload = parseBridgeEventPayload(event);
+      const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload, { allowTaskIdFallback: false });
+      if (!identity.payloadHasRoutineIdentity) {
+        const inspection = applyResult.normalTaskUpdatedTitleVerification;
+        this.recordRoutineOccurrenceSyncDiagnostic(
+          ack && ack.ok ? "taskupdated_normal_d1_acked" : "taskupdated_normal_d1_ack_failed",
+          {
+            operation: "ack",
+            event_type: "TaskUpdated",
+            event_id: String(event && event.event_id || "").trim(),
+            task_id: String(payload.task_id || event && event.task_id || "").trim(),
+            entry_id: String(payload.entry_id || "").trim(),
+            taskupdated_normal_path_used: true,
+            taskupdated_routine_path_used: false,
+            payload_has_routine_identity: false,
+            derived_routine_identity_blocked_for_normal_task: true,
+            expected_title: String(this.getBridgeRoutineOccurrenceDesiredAlias(payload).value || "").trim(),
+            actual_alias: String(inspection.actualAlias || "").trim(),
+            actual_yaml_title: String(inspection.actualYamlTitle || "").trim(),
+            actual_heading: String(inspection.actualHeading || "").trim(),
+            matched_date_note_path: String(inspection.matchedDateNotePath || "").trim(),
+            matched_task_note_path_before: String(inspection.matchedTaskNotePathBefore || "").trim(),
+            matched_task_note_path_after: String(inspection.matchedTaskNotePathAfter || "").trim(),
+            post_save_alias_ok: !!inspection.postSaveAliasOk,
+            post_save_note_title_ok: !!inspection.postSaveNoteTitleOk,
+            post_save_heading_ok: !!inspection.postSaveHeadingOk,
+            d1_ack_allowed: !!inspection.ok,
+            d1_acked: !!(ack && ack.ok),
+            failed_checks: Array.isArray(inspection.failedChecks) ? inspection.failedChecks : []
+          },
+          ack && ack.ok ? "info" : "error",
+          ack && ack.ok ? "acked" : "failed_unacked"
+        );
+      }
+    }
+    return ack;
   }
 
   async applyBridgeInboundTaskCreatedFromDryRun() {
@@ -17934,7 +17996,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     const occurrences = Array.isArray(target && target.occurrences) ? target.occurrences.slice() : [];
     if (!occurrences.length) return { ok: false, skipped: true, message: "対象task_idのTaskBoard行が見つかりません。" };
     const src = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
-    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(src);
+    const strictTaskUpdatedIdentity = String(options && options.eventType || "").trim() === "TaskUpdated";
+    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(src, { allowTaskIdFallback: !strictTaskUpdatedIdentity });
     const entryId = String(src.entry_id || identity.payloadEntryId || "").trim();
     const routineOccurrenceKey = String(identity.effectiveOccurrenceKey || "").trim();
     const routineGeneratedForDate = this.normalizeDate(String(identity.targetDate || src.routine_generated_for_date || src.routine_date || src.date || src.source_date || src.target_date || src.to && src.to.date || src.from && src.from.date || "").trim());
@@ -18090,7 +18153,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
     };
 
-    const titleValue = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
+    const titleValue = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
     if (titleValue.has) {
       const title = String(titleValue.value == null ? "" : titleValue.value).trim();
       if (title) setIfChanged("title", title, task.title || extractYamlValue(content, "title"));
@@ -18162,6 +18225,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     const title = String(desiredAlias.value || changes && changes.title || "").trim();
     if (!title) return false;
     const meta = tcMetaFromTaskLine(occurrence && occurrence.line || "");
+    const strictIdentity = this.getBridgeInboundRoutineOccurrenceIdentity(payload, { allowTaskIdFallback: false });
+    if (!strictIdentity.payloadHasRoutineIdentity) return false;
     const payloadOccurrenceKey = String(payload && payload.routine_occurrence_key || payload && payload.after && payload.after.routine_occurrence_key || "").trim();
     const lineOccurrenceKey = String(meta.routine_occurrence_key || "").trim();
     const routineId = String(payload && (payload.routine_id || payload.generated_by_routine_id) || meta.routine_id || meta.generated_by_routine_id || "").trim();
@@ -18173,13 +18238,15 @@ class TaskchutePlugin extends obsidian.Plugin {
     return explicitOccurrenceOnly;
   }
 
-  getBridgeInboundRoutineOccurrenceIdentity(payload) {
+  getBridgeInboundRoutineOccurrenceIdentity(payload, options = {}) {
     const source = payload && typeof payload === "object" ? payload : {};
     const after = source.after && typeof source.after === "object" && !Array.isArray(source.after) ? source.after : {};
+    const allowTaskIdFallback = options.allowTaskIdFallback !== false;
     const payloadEntryId = String(source.entry_id || after.entry_id || "").trim();
     const payloadOccurrenceKey = String(source.routine_occurrence_key || source.routineOccurrenceKey || source.occurrence_key || "").trim();
     const afterOccurrenceKey = String(after.routine_occurrence_key || after.routineOccurrenceKey || after.occurrence_key || "").trim();
-    const routineId = String(source.routine_id || source.generated_by_routine_id || after.routine_id || after.generated_by_routine_id || source.task_id || "").trim();
+    const explicitRoutineId = String(source.routine_id || source.generated_by_routine_id || after.routine_id || after.generated_by_routine_id || "").trim();
+    const routineId = String(explicitRoutineId || (allowTaskIdFallback ? source.task_id : "") || "").trim();
     const keyDateMatch = String(payloadOccurrenceKey || afterOccurrenceKey).match(/(\d{4}-\d{2}-\d{2})/);
     const rawDate = String(source.routine_generated_for_date || after.routine_generated_for_date || source.routine_date || after.routine_date || source.date || after.date || source.target_date || after.target_date || keyDateMatch && keyDateMatch[1] || "").trim();
     const targetDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? this.normalizeDate(rawDate) : "";
@@ -18195,6 +18262,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       effectiveOccurrenceKey,
       resolvedOccurrenceKey: effectiveOccurrenceKey,
       routineId,
+      explicitRoutineId,
+      payloadHasRoutineIdentity: !!(payloadOccurrenceKey || afterOccurrenceKey || explicitRoutineId),
+      derivedRoutineIdentityBlocked: !allowTaskIdFallback && !payloadOccurrenceKey && !afterOccurrenceKey && !explicitRoutineId && !!String(source.task_id || "").trim(),
       targetDate
     };
   }
@@ -18428,7 +18498,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     return result;
   }
   isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload) {
-    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
+    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload, { allowTaskIdFallback: false });
     const source = identity.source;
     const after = identity.after;
     const occurrenceOnly = isTrueLike(source.routine_occurrence_override)
@@ -18437,7 +18507,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       || isTrueLike(after.this_occurrence_only)
       || ["today", "today_only", "this_occurrence_only"].includes(String(source.routine_occurrence_choice || source.occurrence_scope || after.routine_occurrence_choice || after.occurrence_scope || "").trim());
     const desiredAlias = this.getBridgeRoutineOccurrenceDesiredAlias(source);
-    return !!(identity.payloadEntryId || identity.effectiveOccurrenceKey || identity.routineId && identity.targetDate)
+    return identity.payloadHasRoutineIdentity
+      && !!(identity.payloadEntryId || identity.effectiveOccurrenceKey || identity.routineId && identity.targetDate)
       && occurrenceOnly && desiredAlias.has && !!desiredAlias.value;
   }
 
@@ -18634,6 +18705,62 @@ class TaskchutePlugin extends obsidian.Plugin {
       applied: !!item.applied,
       result: String(item.result || "").trim()
     }), "bridgeInboundTaskUpdatedProjectDiagnostics", this.settings);
+  }
+
+  async verifyBridgeInboundNormalTaskUpdatedTitle(taskId, entryId, expectedTitle, options = {}) {
+    const id = String(taskId || "").trim();
+    const key = String(entryId || "").trim();
+    const title = String(expectedTitle || "").trim();
+    const failedChecks = [];
+    let postSaveAliasOk = false;
+    let postSaveNoteTitleOk = false;
+    let postSaveHeadingOk = false;
+    let actualAlias = "";
+    let actualYamlTitle = "";
+    let actualHeading = "";
+    let matchedDateNotePath = "";
+    const matchedTaskNotePathBefore = safePath(String(options.taskNotePathBefore || "").trim());
+    let matchedTaskNotePathAfter = "";
+    const target = await this.findBridgeLocalTaskUpdatedTarget(id);
+    if (target) {
+      matchedTaskNotePathAfter = safePath(String(target.taskPath || "").trim());
+      const occurrences = Array.isArray(target.occurrences) ? target.occurrences : [];
+      const matches = key
+        ? occurrences.filter(item => taskKeyFromTaskLine(item && item.line || "") === key)
+        : [];
+      if (matches.length === 1) {
+        const link = linkTitleFromLine(matches[0].line);
+        actualAlias = String(link && link.alias || "").trim();
+        matchedDateNotePath = safePath(String(matches[0].path || "").trim());
+        postSaveAliasOk = actualAlias === title;
+      }
+      let content = "";
+      try { content = await readFileText(this.app, target.taskPath); } catch (e) {}
+      actualYamlTitle = String(extractYamlValue(content, "title") || "").trim();
+      postSaveNoteTitleOk = actualYamlTitle === title;
+      const heading = String(content || "").match(/^#\s+(.+?)\s*$/m);
+      actualHeading = String(heading && heading[1] || "").trim();
+      postSaveHeadingOk = actualHeading === title;
+      if (options.expectRenamedPath && matchedTaskNotePathAfter !== safePath(String(options.expectedTaskNotePath || "").trim())) {
+        failedChecks.push("post_save_task_note_path_ok");
+      }
+    }
+    if (!postSaveAliasOk) failedChecks.push("post_save_alias_ok");
+    if (!postSaveNoteTitleOk) failedChecks.push("post_save_note_title_ok");
+    if (!postSaveHeadingOk) failedChecks.push("post_save_heading_ok");
+    return {
+      ok: failedChecks.length === 0,
+      postSaveAliasOk,
+      postSaveNoteTitleOk,
+      postSaveHeadingOk,
+      actualAlias,
+      actualYamlTitle,
+      actualHeading,
+      matchedDateNotePath,
+      matchedTaskNotePathBefore,
+      matchedTaskNotePathAfter,
+      failedChecks
+    };
   }
 
   async verifyBridgeInboundTaskUpdatedMode(occurrence, expectedMode, diagnostic = {}) {
@@ -18845,7 +18972,27 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     const taskId = String(payload.task_id || event && event.task_id || "").trim();
     if (!taskId) return { ok: false, skipped: true, message: "TaskUpdated payloadにtask_idがありません。" };
-    const occurrenceIdentityPrecheck = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
+    const occurrenceIdentityPrecheck = this.getBridgeInboundRoutineOccurrenceIdentity(payload, { allowTaskIdFallback: false });
+    const payloadHasRoutineIdentity = occurrenceIdentityPrecheck.payloadHasRoutineIdentity;
+    const recordTaskUpdatedPath = (reason, detail = {}, level = "info", status = "") => {
+      this.recordRoutineOccurrenceSyncDiagnostic(reason, Object.assign({
+        operation: "apply",
+        event_type: "TaskUpdated",
+        event_id: String(event && event.event_id || "").trim(),
+        server_sequence: Math.max(0, Math.floor(Number(event && event.server_sequence || 0))),
+        task_id: taskId,
+        entry_id: String(payload.entry_id || "").trim(),
+        payload_has_routine_identity: payloadHasRoutineIdentity,
+        derived_routine_identity_blocked_for_normal_task: occurrenceIdentityPrecheck.derivedRoutineIdentityBlocked,
+        taskupdated_normal_path_used: false,
+        taskupdated_routine_path_used: false,
+        post_save_alias_ok: false,
+        post_save_note_title_ok: false,
+        post_save_heading_ok: false,
+        d1_ack_allowed: false,
+        failed_checks: []
+      }, detail || {}), level, status);
+    };
     const occurrenceTitlePrecheck = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
     const occurrenceOnlyPrecheck = isTrueLike(payload.routine_occurrence_override)
       || isTrueLike(payload.this_occurrence_only)
@@ -18880,6 +19027,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       return { ok: false, message: "Routine occurrence-only TaskUpdatedにroutine_occurrence_keyを解決できないためAckしません。" };
     }
     if (this.isExplicitBridgeInboundRoutineOccurrenceOnlyTitleUpdate(payload)) {
+      recordTaskUpdatedPath("taskupdated_routine_path_used", {
+        taskupdated_routine_path_used: true,
+        routine_id: occurrenceIdentityPrecheck.routineId,
+        routine_occurrence_key: occurrenceIdentityPrecheck.effectiveOccurrenceKey
+      }, "info", "started");
       const occurrenceTarget = await this.findBridgeInboundRoutineOccurrenceOnlyTarget(payload);
       const occurrenceIdentity = occurrenceTarget.identity || this.getBridgeInboundRoutineOccurrenceIdentity(payload);
       const titleValue = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
@@ -18937,6 +19089,9 @@ class TaskchutePlugin extends obsidian.Plugin {
         target_device_id: String(this.settings && this.settings.bridgeDeviceId || "").trim()
       });
     }
+    recordTaskUpdatedPath("taskupdated_normal_path_used", {
+      taskupdated_normal_path_used: true
+    }, "info", "started");
     const uniquenessGuard = await this.guardBridgeInboundTaskUpdatedTaskNoteUniqueness(taskId);
     if (!uniquenessGuard.ok) return uniquenessGuard;
     let target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
@@ -18957,6 +19112,10 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     const resolvedOccurrence = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskUpdated" });
     if (!resolvedOccurrence.ok) return resolvedOccurrence;
+    if (!payloadHasRoutineIdentity && String(payload.entry_id || "").trim()
+      && resolvedOccurrence.matchedBy !== "entry_id") {
+      return { ok: false, message: "通常TaskUpdatedの対象行をentry_idで一意に解決できないためAckしません。" };
+    }
     const resolvedEntryId = taskKeyFromTaskLine(resolvedOccurrence.occurrence.line);
     const beforeProject = String(tcMetaFromTaskLine(resolvedOccurrence.occurrence.line).project || "").trim();
     const beforeMode = String(tcMetaFromTaskLine(resolvedOccurrence.occurrence.line).mode || "").trim();
@@ -18990,7 +19149,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       changes.project_name = String(inboundProjectNameValue.value || "").trim();
       built.changedFields.push("project_name");
     }
-    const inboundTitleValue = this.getBridgeTaskUpdatedPayloadValue(payload, ["title"]);
+    const inboundTitleValue = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
     if (this.isBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, resolvedOccurrence.occurrence, changes, built.changedFields)) {
       const desiredAlias = this.getBridgeRoutineOccurrenceDesiredAlias(payload);
       return await this.applyBridgeInboundRoutineOccurrenceTitleOnlyUpdate(payload, resolvedOccurrence.occurrence, desiredAlias.value || changes.title || inboundTitleValue.value, {
@@ -19161,6 +19320,38 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     const finalUniquenessGuard = await this.guardBridgeInboundTaskUpdatedTaskNoteUniqueness(taskId);
     if (!finalUniquenessGuard.ok) return finalUniquenessGuard;
+    if (shouldNormalizeTitle) {
+      const expectedEntryId = String(payload.entry_id || resolvedEntryId || "").trim();
+      const titleVerification = await this.verifyBridgeInboundNormalTaskUpdatedTitle(
+        taskId,
+        expectedEntryId,
+        titleForNormalization,
+        {
+          taskNotePathBefore: taskPath,
+          expectedTaskNotePath: normalizedTaskPath,
+          expectRenamedPath: renameRequired
+        }
+      );
+      recordTaskUpdatedPath(titleVerification.ok ? "taskupdated_normal_title_post_save_verified" : "taskupdated_normal_title_post_save_failed", {
+        taskupdated_normal_path_used: true,
+        expected_title: titleForNormalization,
+        actual_alias: titleVerification.actualAlias,
+        actual_yaml_title: titleVerification.actualYamlTitle,
+        actual_heading: titleVerification.actualHeading,
+        matched_date_note_path: titleVerification.matchedDateNotePath,
+        matched_task_note_path_before: titleVerification.matchedTaskNotePathBefore,
+        matched_task_note_path_after: titleVerification.matchedTaskNotePathAfter,
+        post_save_alias_ok: titleVerification.postSaveAliasOk,
+        post_save_note_title_ok: titleVerification.postSaveNoteTitleOk,
+        post_save_heading_ok: titleVerification.postSaveHeadingOk,
+        d1_ack_allowed: titleVerification.ok,
+        d1_acked: false,
+        failed_checks: titleVerification.failedChecks
+      }, titleVerification.ok ? "info" : "error", titleVerification.ok ? "verified" : "failed_unacked");
+      if (!titleVerification.ok) {
+        return { ok: false, message: `通常TaskUpdated(title)の保存後検証に失敗しました。failed_checks=${titleVerification.failedChecks.join(",")}` };
+      }
+    }
     let rebuiltIndex = null;
     try {
       rebuiltIndex = await this.rebuildTaskchuteIndex({ notice: false });
@@ -19179,7 +19370,17 @@ class TaskchutePlugin extends obsidian.Plugin {
         return { ok: false, message: `TaskUpdated(start_plan)のsection移動が未反映です。${sectionVerification.reason || ""}` };
       }
     }
-    return { ok: true, taskId, changedFields: built.changedFields, repaired: !!(repairResult && repairResult.repaired) };
+    return {
+      ok: true,
+      taskId,
+      changedFields: built.changedFields,
+      repaired: !!(repairResult && repairResult.repaired),
+      normalTaskUpdatedTitleVerification: shouldNormalizeTitle ? {
+        taskNotePathBefore: taskPath,
+        expectedTaskNotePath: normalizedTaskPath,
+        expectRenamedPath: renameRequired
+      } : null
+    };
   }
 
   async applyBridgeInboundTaskUpdatedFromDryRun() {
