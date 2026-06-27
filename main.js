@@ -1929,12 +1929,10 @@ function executionLogLineMatchesIdentity(line, identity = {}) {
   const entryId = String(identity.entryId || identity.entry_id || "").trim();
   const taskId = String(identity.taskId || identity.task_id || "").trim();
   const occurrenceKey = String(identity.routineOccurrenceKey || identity.routine_occurrence_key || "").trim();
-  return !!(
-    execId && text.includes(`[exec_id::${execId}]`)
-    || entryId && text.includes(`[entry_id::${entryId}]`)
-    || taskId && text.includes(`[task_id::${taskId}]`)
-    || occurrenceKey && text.includes(`[routine_occurrence_key::${occurrenceKey}]`)
-  );
+  if (execId) return text.includes(`[exec_id::${execId}]`);
+  if (occurrenceKey) return text.includes(`[routine_occurrence_key::${occurrenceKey}]`);
+  if (entryId) return text.includes(`[entry_id::${entryId}]`);
+  return !!(taskId && text.includes(`[task_id::${taskId}]`));
 }
 function isRunningExecutionLogLine(line) {
   const statusMatch = String(line || "").match(/\[status::([^\]]+)\]/i);
@@ -14926,7 +14924,23 @@ class TaskchutePlugin extends obsidian.Plugin {
         decision: String(detail.decision || "").trim(),
         outbox_count: Math.max(0, Math.floor(Number(detail.outbox_count || 0))),
         queue_count: Math.max(0, Math.floor(Number(detail.queue_count || detail.outbox_count || 0))),
-        flush_result: String(detail.flush_result || "").trim()
+        flush_result: String(detail.flush_result || "").trim(),
+        lifecycle_identity_classification: String(detail.lifecycle_identity_classification || "").trim(),
+        lifecycle_identity_source: String(detail.lifecycle_identity_source || "").trim(),
+        markdown_entry_match_count: Math.max(0, Math.floor(Number(detail.markdown_entry_match_count || 0))),
+        markdown_routine_occurrence_key: String(detail.markdown_routine_occurrence_key || "").trim(),
+        payload_routine_occurrence_key: String(detail.payload_routine_occurrence_key || "").trim(),
+        runtime_routine_occurrence_key: String(detail.runtime_routine_occurrence_key || "").trim(),
+        runtime_routine_identity_removed: !!detail.runtime_routine_identity_removed,
+        payload_markdown_identity_conflict: !!detail.payload_markdown_identity_conflict,
+        normal_lifecycle_path_used: !!detail.normal_lifecycle_path_used,
+        routine_lifecycle_path_used: !!detail.routine_lifecycle_path_used,
+        matched_by: String(detail.matched_by || "").trim(),
+        post_save_identity_verified: !!detail.post_save_identity_verified,
+        post_save_verified: !!detail.post_save_verified,
+        d1_ack_allowed: !!detail.d1_ack_allowed,
+        d1_acked: !!detail.d1_acked,
+        failed_checks: Array.isArray(detail.failed_checks) ? detail.failed_checks.map(value => String(value || "").trim()).filter(Boolean) : []
       };
       this.settings.bridgeExecutionEventDiagnostics = limitBridgeDiagnosticArrayProtectedAware(
         diagnostics.concat(item),
@@ -16196,7 +16210,16 @@ class TaskchutePlugin extends obsidian.Plugin {
         verified = !!(inspection && inspection.ok);
       } else if (eventType === "TaskStopped" || eventType === "TaskPaused") {
         const running = this.normalizeRuntimeSession(this.runtime && this.runtime.running, false);
-        verified = !running || (entryId ? runtimeSessionKey(running) !== entryId : String(running.taskId || "") !== taskId);
+        let identityVerified = false;
+        const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
+        if (target && target.task) {
+          const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType, preferUnchecked: true, preferActiveSession: true });
+          if (resolved && resolved.ok) {
+            const lifecycleIdentity = this.inspectBridgeInboundLifecycleIdentity(event, resolved.occurrence, running);
+            identityVerified = lifecycleIdentity.classification !== "identity_conflict";
+          }
+        }
+        verified = identityVerified && (!running || (entryId ? runtimeSessionKey(running) !== entryId : String(running.taskId || "") !== taskId));
       } else if (eventType === "TaskCompleted") {
         const inspection = await this.verifyBridgeInboundTaskCompletedApplied(event, {
           entryId,
@@ -17068,6 +17091,41 @@ class TaskchutePlugin extends obsidian.Plugin {
           ack && ack.ok ? "acked" : "failed_unacked"
         );
       }
+    }
+    const lifecycleEventType = String(event && event.event_type || "").trim();
+    if (["TaskStarted", "TaskStopped", "TaskPaused", "TaskResumed", "TaskCompleted"].includes(lifecycleEventType)) {
+      const payload = parseBridgeEventPayload(event);
+      const taskId = String(payload.task_id || event && event.task_id || "").trim();
+      const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
+      let lifecycleIdentity = null;
+      let matchedBy = "";
+      if (target && target.task) {
+        const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, {
+          eventType: lifecycleEventType,
+          preferUnchecked: lifecycleEventType !== "TaskCompleted",
+          preferActiveSession: true
+        });
+        if (resolved && resolved.ok) {
+          lifecycleIdentity = this.inspectBridgeInboundLifecycleIdentity(event, resolved.occurrence, this.runtime && this.runtime.running);
+          matchedBy = String(resolved.matchedBy || lifecycleIdentity.matchedBy || "").trim();
+        }
+      }
+      this.recordBridgeExecutionEventDiagnostic(
+        ack && ack.ok ? "bridge_lifecycle_d1_acked" : "bridge_lifecycle_d1_ack_failed",
+        Object.assign({
+          event_type: lifecycleEventType,
+          event_id: String(event && event.event_id || "").trim(),
+          task_id: taskId,
+          entry_id: String(payload.entry_id || "").trim(),
+          matched_by: matchedBy,
+          post_save_identity_verified: !!(lifecycleIdentity && lifecycleIdentity.classification !== "identity_conflict"),
+          post_save_verified: !!(applyResult && applyResult.verified),
+          d1_ack_allowed: !!(applyResult && applyResult.verified),
+          d1_acked: !!(ack && ack.ok),
+          failed_checks: lifecycleIdentity && lifecycleIdentity.classification === "identity_conflict"
+            ? ["lifecycle_identity_classification"] : []
+        }, this.buildBridgeLifecycleIdentityDiagnostic(lifecycleIdentity || {}))
+      );
     }
     return ack;
   }
@@ -17996,10 +18054,13 @@ class TaskchutePlugin extends obsidian.Plugin {
     const occurrences = Array.isArray(target && target.occurrences) ? target.occurrences.slice() : [];
     if (!occurrences.length) return { ok: false, skipped: true, message: "対象task_idのTaskBoard行が見つかりません。" };
     const src = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
-    const strictTaskUpdatedIdentity = String(options && options.eventType || "").trim() === "TaskUpdated";
-    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(src, { allowTaskIdFallback: !strictTaskUpdatedIdentity });
+    const eventType = String(options && options.eventType || "").trim();
+    const strictTaskUpdatedIdentity = eventType === "TaskUpdated";
+    const strictLifecycleIdentity = ["TaskStarted", "TaskStopped", "TaskPaused", "TaskResumed", "TaskCompleted"].includes(eventType);
+    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(src, { allowTaskIdFallback: !(strictTaskUpdatedIdentity || strictLifecycleIdentity) });
     const entryId = String(src.entry_id || identity.payloadEntryId || "").trim();
-    const routineOccurrenceKey = String(identity.effectiveOccurrenceKey || "").trim();
+    const explicitPayloadOccurrenceKey = String(src.routine_occurrence_key || src.occurrence_key || src.after && (src.after.routine_occurrence_key || src.after.occurrence_key) || "").trim();
+    const routineOccurrenceKey = strictLifecycleIdentity ? explicitPayloadOccurrenceKey : String(identity.effectiveOccurrenceKey || "").trim();
     const routineGeneratedForDate = this.normalizeDate(String(identity.targetDate || src.routine_generated_for_date || src.routine_date || src.date || src.source_date || src.target_date || src.to && src.to.date || src.from && src.from.date || "").trim());
     const routineId = String(identity.routineId || src.routine_id || src.generated_by_routine_id || "").trim();
     const hasRoutineOccurrenceIdentity = !!(routineOccurrenceKey || routineGeneratedForDate && routineId);
@@ -20649,13 +20710,152 @@ class TaskchutePlugin extends obsidian.Plugin {
       .map(([key]) => key);
   }
 
+  classifyBridgeLifecycleIdentity(input = {}) {
+    const payload = input.payload && typeof input.payload === "object" && !Array.isArray(input.payload) ? input.payload : {};
+    const runtime = input.runtime && typeof input.runtime === "object" && !Array.isArray(input.runtime) ? input.runtime : {};
+    const line = String(input.line || "");
+    const meta = input.meta && typeof input.meta === "object" && !Array.isArray(input.meta)
+      ? input.meta : tcMetaFromTaskLine(line);
+    const taskId = String(payload.task_id || runtime.taskId || runtime.task_id || taskIdFromTaskLine(line) || "").trim();
+    const payloadEntryId = String(payload.entry_id || "").trim();
+    const lineEntryId = String(meta.entry_id || taskKeyFromTaskLine(line) || "").trim();
+    const payloadKey = String(payload.routine_occurrence_key || payload.occurrence_key || "").trim();
+    const lineKey = String(meta.routine_occurrence_key || "").trim();
+    const runtimeKey = String(runtime.routineOccurrenceKey || runtime.routine_occurrence_key || "").trim();
+    const payloadRoutineId = String(payload.routine_id || "").trim();
+    const payloadGeneratedId = String(payload.generated_by_routine_id || "").trim();
+    const lineRoutineId = String(meta.routine_id || meta.generated_by_routine_id || "").trim();
+    const lineIsRoutine = isTrueLike(meta.is_routine);
+    const lineExplicitNormal = Object.prototype.hasOwnProperty.call(meta, "is_routine") && !lineIsRoutine;
+    const entryMatches = !!payloadEntryId && !!lineEntryId && payloadEntryId === lineEntryId;
+    const routineFields = {};
+    const conflict = reason => ({
+      classification: "identity_conflict",
+      identitySource: "payload-markdown-conflict",
+      routineFields: {},
+      conflictReason: reason,
+      payloadOccurrenceKey: payloadKey,
+      markdownOccurrenceKey: lineKey,
+      runtimeOccurrenceKey: runtimeKey,
+      entryMatches
+    });
+    if (!line || !isTaskLine(line)) return conflict("markdown_task_line_missing");
+    if (lineExplicitNormal && (lineKey || payloadKey)) return conflict("is_routine_false_with_occurrence_key");
+    if (payloadKey && lineKey && payloadKey !== lineKey) return conflict("payload_markdown_occurrence_key_mismatch");
+    if (payloadKey && !lineKey) return conflict("payload_occurrence_key_on_normal_or_keyless_line");
+    if (lineKey) {
+      const routineId = lineRoutineId || payloadRoutineId || payloadGeneratedId;
+      if (!routineId) return conflict("markdown_occurrence_key_without_routine_id");
+      routineFields.is_routine = "true";
+      routineFields.routine_id = routineId;
+      routineFields.generated_by_routine_id = String(meta.generated_by_routine_id || routineId).trim();
+      routineFields.routine_occurrence_key = lineKey;
+      routineFields.routine_generated_for_date = String(meta.routine_generated_for_date || meta.routine_date || "").trim();
+      routineFields.routine_date = String(meta.routine_date || meta.routine_generated_for_date || "").trim();
+      routineFields.routine_scheduled_time = String(meta.routine_scheduled_time || "").trim();
+      routineFields.routine_source = String(meta.routine_source || "").trim();
+      if (isTrueLike(meta.routine_occurrence_override) || isTrueLike(payload.routine_occurrence_override)) routineFields.routine_occurrence_override = "true";
+      if (isTrueLike(meta.this_occurrence_only) || isTrueLike(payload.this_occurrence_only)) routineFields.this_occurrence_only = "true";
+      const occurrenceChoice = String(meta.routine_occurrence_choice || payload.routine_occurrence_choice || "").trim();
+      if (occurrenceChoice) routineFields.routine_occurrence_choice = occurrenceChoice;
+      Object.keys(routineFields).forEach(key => {
+        if (routineFields[key] === "") delete routineFields[key];
+      });
+      return {
+        classification: "routine_occurrence",
+        identitySource: "markdown-routine-occurrence-key",
+        routineFields,
+        conflictReason: "",
+        payloadOccurrenceKey: payloadKey,
+        markdownOccurrenceKey: lineKey,
+        runtimeOccurrenceKey: runtimeKey,
+        entryMatches
+      };
+    }
+    if (lineIsRoutine || lineRoutineId) return conflict("keyless_routine_line");
+    if (payloadRoutineId || payloadGeneratedId) {
+      const legacyNormal = entryMatches
+        && payloadRoutineId === taskId
+        && (!payloadGeneratedId || payloadGeneratedId === taskId);
+      if (!legacyNormal) return conflict("routine_id_only_payload_not_legacy_normal");
+      return {
+        classification: "normal",
+        identitySource: "markdown-normal-legacy-payload",
+        routineFields: {},
+        conflictReason: "",
+        payloadOccurrenceKey: "",
+        markdownOccurrenceKey: "",
+        runtimeOccurrenceKey: runtimeKey,
+        entryMatches
+      };
+    }
+    return {
+      classification: "normal",
+      identitySource: "markdown-normal",
+      routineFields: {},
+      conflictReason: "",
+      payloadOccurrenceKey: "",
+      markdownOccurrenceKey: "",
+      runtimeOccurrenceKey: runtimeKey,
+      entryMatches
+    };
+  }
+
+  buildBridgeLifecycleIdentityDiagnostic(classification, extra = {}) {
+    const identity = classification || {};
+    return Object.assign({
+      lifecycle_identity_classification: String(identity.classification || "").trim(),
+      lifecycle_identity_source: String(identity.identitySource || "").trim(),
+      markdown_routine_occurrence_key: String(identity.markdownOccurrenceKey || "").trim(),
+      payload_routine_occurrence_key: String(identity.payloadOccurrenceKey || "").trim(),
+      runtime_routine_occurrence_key: String(identity.runtimeOccurrenceKey || "").trim(),
+      payload_markdown_identity_conflict: identity.classification === "identity_conflict",
+      normal_lifecycle_path_used: identity.classification === "normal",
+      routine_lifecycle_path_used: identity.classification === "routine_occurrence",
+      reason: String(identity.conflictReason || "").trim()
+    }, extra || {});
+  }
+
+  inspectBridgeInboundLifecycleIdentity(event, occurrence, runtime = null) {
+    const payload = parseBridgeEventPayload(event);
+    const identity = this.classifyBridgeLifecycleIdentity({
+      payload,
+      runtime,
+      line: occurrence && occurrence.line || "",
+      meta: tcMetaFromTaskLine(occurrence && occurrence.line || ""),
+      eventType: String(event && event.event_type || "").trim()
+    });
+    const payloadKey = String(payload.routine_occurrence_key || payload.occurrence_key || "").trim();
+    const matchedBy = payloadKey && identity.markdownOccurrenceKey === payloadKey ? "routine_occurrence_key" : "entry_id";
+    return Object.assign({}, identity, { matchedBy });
+  }
+
+  sanitizeBridgeLifecycleRuntimeSession(session, lifecycleIdentity) {
+    const source = session && typeof session === "object" && !Array.isArray(session) ? session : null;
+    if (!source) return source;
+    const next = Object.assign({}, source);
+    if (!lifecycleIdentity || lifecycleIdentity.classification !== "normal") return next;
+    next.isRoutine = false;
+    next.routineId = "";
+    next.routineDate = "";
+    next.routineOccurrenceKey = "";
+    next.routineGeneratedForDate = "";
+    next.routineSource = "";
+    delete next.routine_id;
+    delete next.routine_date;
+    delete next.routine_occurrence_key;
+    delete next.routine_generated_for_date;
+    delete next.routine_source;
+    delete next.generated_by_routine_id;
+    return next;
+  }
+
   async verifyBridgeInboundTaskStartedApplied(event, options = {}) {
     const payload = parseBridgeEventPayload(event);
     const taskId = String(payload.task_id || event && event.task_id || options.taskId || "").trim();
     const entryId = String(payload.entry_id || options.entryId || "").trim();
     const execId = String(payload.exec_id || options.execId || "").trim();
-    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
-    const occurrenceKey = String(identity.effectiveOccurrenceKey || "").trim();
+    let occurrenceKey = String(payload.routine_occurrence_key || payload.occurrence_key || "").trim();
     const startedAt = String(options.startedAt || this.getBridgeInboundTaskStartedAt(payload, event).value || "").trim();
     const isResume = String(payload.reason || "").trim() === "resume"
       || String(event && event.event_type || "").trim() === "TaskResumed";
@@ -20663,6 +20863,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     let logVerified = false;
     let logDailyVerified = false;
     let runtimeVerified = false;
+    let identityVerified = false;
     let occurrence = null;
     let localEntryId = "";
     let matchedBy = "";
@@ -20676,6 +20877,11 @@ class TaskchutePlugin extends obsidian.Plugin {
         }
       }
       if (occurrence) {
+        const lifecycleIdentity = this.inspectBridgeInboundLifecycleIdentity(event, occurrence, this.runtime && this.runtime.running);
+        if (lifecycleIdentity.classification === "identity_conflict") throw new Error(lifecycleIdentity.conflictReason || "lifecycle_identity_conflict");
+        identityVerified = true;
+        occurrenceKey = lifecycleIdentity.classification === "routine_occurrence"
+          ? String(lifecycleIdentity.markdownOccurrenceKey || "").trim() : "";
         localEntryId = taskKeyFromTaskLine(occurrence.line) || "";
         const key = occurrenceKey ? localEntryId : (entryId || localEntryId || "");
         const markdown = await readFileText(this.app, occurrence.path);
@@ -20708,9 +20914,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       logVerified = false;
       logDailyVerified = false;
       runtimeVerified = false;
+      identityVerified = false;
     }
-    const verified = !!(dateNoteVerified && logVerified && logDailyVerified && runtimeVerified);
+    const verified = !!(identityVerified && dateNoteVerified && logVerified && logDailyVerified && runtimeVerified);
     const failedChecks = this.buildBridgeFailedChecks({
+      post_save_identity_verified: identityVerified,
       date_note_verified: dateNoteVerified,
       log_verified: logVerified,
       logdaily_verified: logDailyVerified,
@@ -20733,7 +20941,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       logdaily_verified: logDailyVerified,
       runtime_verified: runtimeVerified
     });
-    return { ok: verified, verified, failed_checks: failedChecks, date_note_verified: dateNoteVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified };
+    return { ok: verified, verified, failed_checks: failedChecks, post_save_identity_verified: identityVerified, date_note_verified: dateNoteVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified };
   }
 
   async verifyBridgeInboundTaskCompletedApplied(event, options = {}) {
@@ -20741,8 +20949,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const taskId = String(payload.task_id || event && event.task_id || options.taskId || "").trim();
     const entryId = String(payload.entry_id || options.entryId || "").trim();
     const execId = String(payload.exec_id || options.execId || "").trim();
-    const identity = this.getBridgeInboundRoutineOccurrenceIdentity(payload);
-    const occurrenceKey = String(identity.effectiveOccurrenceKey || "").trim();
+    let occurrenceKey = String(payload.routine_occurrence_key || payload.occurrence_key || "").trim();
     const completedAt = String(options.completedAt || this.getBridgeInboundTaskCompletedAt(payload, event).value || "").trim();
     let occurrence = null;
     let checkboxVerified = false;
@@ -20754,6 +20961,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     let runningLogDailyCleared = false;
     let localEntryId = "";
     let matchedBy = "";
+    let identityVerified = false;
     try {
       const target = await this.findBridgeLocalTaskUpdatedTarget(taskId);
       if (target && target.task) {
@@ -20764,6 +20972,11 @@ class TaskchutePlugin extends obsidian.Plugin {
         }
       }
       if (occurrence) {
+        const lifecycleIdentity = this.inspectBridgeInboundLifecycleIdentity(event, occurrence, this.runtime && this.runtime.running);
+        if (lifecycleIdentity.classification === "identity_conflict") throw new Error(lifecycleIdentity.conflictReason || "lifecycle_identity_conflict");
+        identityVerified = true;
+        occurrenceKey = lifecycleIdentity.classification === "routine_occurrence"
+          ? String(lifecycleIdentity.markdownOccurrenceKey || "").trim() : "";
         localEntryId = taskKeyFromTaskLine(occurrence.line) || "";
         const key = occurrenceKey ? localEntryId : (entryId || localEntryId || "");
         const markdown = await readFileText(this.app, occurrence.path);
@@ -20801,9 +21014,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       endVerified = false;
       runningDateLogCleared = false;
       runningLogDailyCleared = false;
+      identityVerified = false;
     }
-    const verified = !!(checkboxVerified && logVerified && logDailyVerified && runtimeVerified && endVerified && runningDateLogCleared && runningLogDailyCleared);
+    const verified = !!(identityVerified && checkboxVerified && logVerified && logDailyVerified && runtimeVerified && endVerified && runningDateLogCleared && runningLogDailyCleared);
     const failedChecks = this.buildBridgeFailedChecks({
+      post_save_identity_verified: identityVerified,
       checkbox_verified: checkboxVerified,
       log_verified: logVerified,
       logdaily_verified: logDailyVerified,
@@ -20832,7 +21047,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       running_row_cleared_date_log: runningDateLogCleared,
       running_row_cleared_logdaily: runningLogDailyCleared
     });
-    return { ok: verified, verified, failed_checks: failedChecks, checkbox_verified: checkboxVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified, end_verified: endVerified, running_row_cleared_date_log: runningDateLogCleared, running_row_cleared_logdaily: runningLogDailyCleared };
+    return { ok: verified, verified, failed_checks: failedChecks, post_save_identity_verified: identityVerified, checkbox_verified: checkboxVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified, end_verified: endVerified, running_row_cleared_date_log: runningDateLogCleared, running_row_cleared_logdaily: runningLogDailyCleared };
   }
 
   normalizeBridgeInboundExecutionAliasEvent(event, nextEventType, defaults = {}) {
@@ -20860,6 +21075,21 @@ class TaskchutePlugin extends obsidian.Plugin {
     const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskStarted", preferUnchecked: true, preferActiveSession: true });
     if (!resolved.ok) return resolved;
     const occurrence = resolved.occurrence;
+    const lifecycleIdentity = this.inspectBridgeInboundLifecycleIdentity(event, occurrence, this.runtime && this.runtime.running);
+    if (lifecycleIdentity.classification === "identity_conflict") {
+      this.recordBridgeExecutionEventDiagnostic("bridge_inbound_lifecycle_identity_conflict", Object.assign({
+        event_type: "TaskStarted",
+        event_id: String(event && event.event_id || "").trim(),
+        task_id: taskId,
+        entry_id: String(payload.entry_id || "").trim(),
+        matched_by: String(resolved.matchedBy || lifecycleIdentity.matchedBy || "").trim(),
+        reason_code: lifecycleIdentity.conflictReason,
+        decision: "failed_unacked",
+        d1_ack_allowed: false,
+        failed_checks: ["lifecycle_identity_classification"]
+      }, this.buildBridgeLifecycleIdentityDiagnostic(lifecycleIdentity)));
+      return { ok: false, message: `TaskStarted lifecycle identityが矛盾しています。${lifecycleIdentity.conflictReason}` };
+    }
 
     const startInfo = this.getBridgeInboundTaskStartedAt(payload, event);
     const startLocalClock = this.getBridgeInboundTaskStartedLocalClock(startInfo.value);
@@ -20899,7 +21129,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         return !!session && execMatches && (key === occurrenceKey || (!payloadEntryId && String(session.taskId || "") === taskId));
       });
       if (pausedIndex < 0) return { ok: false, skipped: true, message: "resume対象の中断中sessionが見つかりません。" };
-      const resumed = this.normalizeRuntimeSession(paused[pausedIndex], true);
+      const resumed = this.sanitizeBridgeLifecycleRuntimeSession(
+        this.normalizeRuntimeSession(paused[pausedIndex], true),
+        lifecycleIdentity
+      );
       if (!resumed) return { ok: false, skipped: true, message: "resume対象の中断中sessionを復元できません。" };
       if (resumed.pausedAt) {
         resumed.pauseMin = Object.prototype.hasOwnProperty.call(payload, "pause_min")
@@ -20942,14 +21175,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const meta = tcMetaFromTaskLine(occurrence.line);
     const link = linkTitleFromLine(occurrence.line);
     const entryId = meta.entry_id || entryIdFromTaskLine(occurrence.line) || occurrenceKey || taskId;
-    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(Object.assign({}, target.task, {
-      entryId,
-      entry_id: entryId,
-      taskKey: entryId,
-      sourceDate: occurrence.date,
-      date: occurrence.date,
-      entryMeta: meta
-    }), payload);
+    const routineOccurrenceFields = Object.assign({}, lifecycleIdentity.routineFields || {});
     const routineLogFields = this.formatRoutineOccurrenceExecutionLogFields(routineOccurrenceFields);
     const section = getSectionForStartPlan(this.settings, startLocalClock);
     if (!section || !section.name) return { ok: false, message: "開始時刻に対応するセクションを解決できませんでした。" };
@@ -21179,6 +21405,21 @@ class TaskchutePlugin extends obsidian.Plugin {
     const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskStopped", preferUnchecked: true, preferActiveSession: true });
     if (!resolved.ok) return resolved;
     const occurrence = resolved.occurrence;
+    const lifecycleIdentity = this.inspectBridgeInboundLifecycleIdentity(event, occurrence, this.runtime && this.runtime.running);
+    if (lifecycleIdentity.classification === "identity_conflict") {
+      this.recordBridgeExecutionEventDiagnostic("bridge_inbound_lifecycle_identity_conflict", Object.assign({
+        event_type: "TaskStopped",
+        event_id: String(event && event.event_id || "").trim(),
+        task_id: taskId,
+        entry_id: String(payload.entry_id || "").trim(),
+        matched_by: String(resolved.matchedBy || lifecycleIdentity.matchedBy || "").trim(),
+        reason_code: lifecycleIdentity.conflictReason,
+        decision: "failed_unacked",
+        d1_ack_allowed: false,
+        failed_checks: ["lifecycle_identity_classification"]
+      }, this.buildBridgeLifecycleIdentityDiagnostic(lifecycleIdentity)));
+      return { ok: false, message: `TaskStopped lifecycle identityが矛盾しています。${lifecycleIdentity.conflictReason}` };
+    }
 
     const stopInfo = this.getBridgeInboundTaskStoppedAt(payload, event);
     const stoppedLocalClock = formatLocalClockFromIso(stopInfo.value);
@@ -21217,7 +21458,10 @@ class TaskchutePlugin extends obsidian.Plugin {
 
     const previousRunning = this.runtime.running ? Object.assign({}, this.runtime.running) : null;
     const previousPaused = Array.isArray(this.runtime.paused) ? this.runtime.paused.map(item => item && typeof item === "object" ? Object.assign({}, item) : item) : [];
-    const stopped = this.normalizeRuntimeSession(running, false);
+    const stopped = this.sanitizeBridgeLifecycleRuntimeSession(
+      this.normalizeRuntimeSession(running, false),
+      lifecycleIdentity
+    );
     if (isInterruptStop) {
       const date = this.normalizeDate(stopped.sourceDate || occurrence.date || this.getToday());
       const notePath = safePath(occurrence.path || this.getTaskchutePath(date));
@@ -21230,8 +21474,9 @@ class TaskchutePlugin extends obsidian.Plugin {
         const section = stoppedSection;
         const attrPairs = await this.getTaskAttributePairs(Object.assign({}, stopped, { section: section.name, sectionId: section.id }));
         const taskLink = `[[${stopped.file}|${stopped.title}]]`;
-        const log = `- [exec_id::${stopped.execId}] [date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${stopped.startedAt}] [end_at::${stopInfo.value}] [actual::${actual}] [status::interrupted] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::false] [interrupted_by_task_id::${String(payload.next_task_id || "").trim()}] [interrupted_by_entry_id::] [comment_count::0] [is_routine::${stopped.isRoutine ? "true" : "false"}]`;
-        const logDaily = `- [exec_id::${stopped.execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::interrupted]`;
+        const stoppedRoutineLogFields = this.formatRoutineOccurrenceExecutionLogFields(lifecycleIdentity.routineFields || {});
+        const log = `- [exec_id::${stopped.execId}] [date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${stopped.startedAt}] [end_at::${stopInfo.value}] [actual::${actual}] [status::interrupted] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::false] [interrupted_by_task_id::${String(payload.next_task_id || "").trim()}] [interrupted_by_entry_id::] [comment_count::0] ${stoppedRoutineLogFields}`;
+        const logDaily = `- [exec_id::${stopped.execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::interrupted] ${stoppedRoutineLogFields}`;
         md = replaceTaskCheckbox(md, entryId, true);
         md = moveTaskLineToSection(md, this.settings, entryId, section.name);
         md = appendSection(md, "Log", log);
@@ -21434,6 +21679,21 @@ class TaskchutePlugin extends obsidian.Plugin {
     const resolved = this.resolveBridgeInboundTaskOccurrence(target, payload, { eventType: "TaskCompleted", preferUnchecked: true, preferActiveSession: true });
     if (!resolved.ok) return resolved;
     const occurrence = resolved.occurrence;
+    const lifecycleIdentity = this.inspectBridgeInboundLifecycleIdentity(event, occurrence, this.runtime && this.runtime.running);
+    if (lifecycleIdentity.classification === "identity_conflict") {
+      this.recordBridgeExecutionEventDiagnostic("bridge_inbound_lifecycle_identity_conflict", Object.assign({
+        event_type: "TaskCompleted",
+        event_id: String(event && event.event_id || "").trim(),
+        task_id: taskId,
+        entry_id: String(payload.entry_id || "").trim(),
+        matched_by: String(resolved.matchedBy || lifecycleIdentity.matchedBy || "").trim(),
+        reason_code: lifecycleIdentity.conflictReason,
+        decision: "failed_unacked",
+        d1_ack_allowed: false,
+        failed_checks: ["lifecycle_identity_classification"]
+      }, this.buildBridgeLifecycleIdentityDiagnostic(lifecycleIdentity)));
+      return { ok: false, message: `TaskCompleted lifecycle identityが矛盾しています。${lifecycleIdentity.conflictReason}` };
+    }
 
     const completedInfo = this.getBridgeInboundTaskCompletedAt(payload, event);
     const occurrenceKey = taskKeyFromTaskLine(occurrence.line) || "";
@@ -21470,14 +21730,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (alreadyChecked) {
       if (!localEndActual || this.isSameBridgeStartTime(localEndActual, completedInfo.value)) {
         const alreadyMeta = tcMetaFromTaskLine(occurrence.line);
-        const alreadyRoutineFields = this.getRoutineOccurrenceBridgeFields(Object.assign({}, target.task, {
-          entryId,
-          entry_id: entryId,
-          taskKey: entryId,
-          sourceDate: occurrence.date,
-          date: occurrence.date,
-          entryMeta: alreadyMeta
-        }), payload);
+        const alreadyRoutineFields = Object.assign({}, lifecycleIdentity.routineFields || {});
         const cleaned = removeActiveRunningExecutionLogs(md, {
           execId: payloadExecId,
           entryId,
@@ -21511,14 +21764,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const sectionId = completedSection && completedSection.id ? completedSection.id : (target.task.sectionId || "");
     const link = linkTitleFromLine(occurrence.line);
     const occurrenceMeta = tcMetaFromTaskLine(occurrence.line);
-    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(Object.assign({}, target.task, activeSession || {}, {
-      entryId,
-      entry_id: entryId,
-      taskKey: entryId,
-      sourceDate: date,
-      date,
-      entryMeta: occurrenceMeta
-    }), payload);
+    const routineOccurrenceFields = Object.assign({}, lifecycleIdentity.routineFields || {});
     const routineLogFields = this.formatRoutineOccurrenceExecutionLogFields(routineOccurrenceFields);
     const fileBase = String((activeSession && activeSession.file) || target.task.fileBase || target.task.file || link && link.file || "").trim();
     const title = String((activeSession && activeSession.title) || target.task.title || link && link.alias || "").trim();
@@ -24072,7 +24318,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     const eventId = createBridgeEventId();
     const phasePrefix = String(eventType || "").toLowerCase();
     const outboxCount = normalizeBridgeOutboxEvents(this.settings && this.settings.bridgeOutboxEvents).length;
-    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(task, { date: requestedDate });
+    let routineOccurrenceFields = {};
+    let lifecycleIdentity = null;
 
     this.recordBridgeExecutionEventDiagnostic(`bridge_${phasePrefix}_enqueue_started`, {
       event_type: eventType,
@@ -24137,13 +24384,69 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!taskId) return await recordFailure("task_idがないため、実行系イベントをoutboxへ追加できませんでした。");
     if (!entryId) return await recordFailure("entry_idがないため、実行系イベントをoutboxへ追加できませんでした。");
     const occurrence = await this.findBridgeLocalTaskMoveOccurrence(taskId, requestedDate ? [requestedDate] : [], entryId, {
-      routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key,
-      routineGeneratedForDate: routineOccurrenceFields.routine_generated_for_date,
-      routineId: routineOccurrenceFields.routine_id || routineOccurrenceFields.generated_by_routine_id
+      routineOccurrenceKey: "",
+      routineGeneratedForDate: "",
+      routineId: ""
     });
     if (!occurrence || occurrence.bridgeOccurrenceResolutionError) {
       return await recordFailure("保存後Markdownから実行系イベント対象entryを一意に確認できませんでした。");
     }
+    let confirmedMarkdown = "";
+    try { confirmedMarkdown = await readFileText(this.app, occurrence.path); }
+    catch (e) { return await recordFailure("lifecycle対象のMarkdownを再読込できませんでした。"); }
+    const confirmedMatches = String(confirmedMarkdown || "").split(/\r?\n/)
+      .map((line, lineIndex) => ({ line, lineIndex }))
+      .filter(item => isTaskLine(item.line) && taskKeyFromTaskLine(item.line) === entryId);
+    if (confirmedMatches.length !== 1) {
+      this.recordBridgeExecutionEventDiagnostic("bridge_lifecycle_identity_resolution_failed", {
+        event_type: eventType,
+        event_id: eventId,
+        task_id: taskId,
+        entry_id: entryId,
+        markdown_entry_match_count: confirmedMatches.length,
+        reason_code: "markdown_entry_not_unique",
+        decision: "blocked"
+      });
+      return await recordFailure("lifecycle対象のMarkdown行をentry_idで一意に再確認できませんでした。");
+    }
+    const confirmedLine = confirmedMatches[0].line;
+    lifecycleIdentity = this.classifyBridgeLifecycleIdentity({
+      payload: { task_id: taskId, entry_id: entryId },
+      runtime: task,
+      line: confirmedLine,
+      meta: tcMetaFromTaskLine(confirmedLine),
+      eventType
+    });
+    if (lifecycleIdentity.classification === "identity_conflict") {
+      this.recordBridgeExecutionEventDiagnostic("bridge_lifecycle_identity_conflict", Object.assign({
+        event_type: eventType,
+        event_id: eventId,
+        task_id: taskId,
+        entry_id: entryId,
+        markdown_entry_match_count: confirmedMatches.length,
+        reason_code: lifecycleIdentity.conflictReason,
+        decision: "blocked",
+        d1_ack_allowed: false,
+        failed_checks: ["lifecycle_identity_classification"]
+      }, this.buildBridgeLifecycleIdentityDiagnostic(lifecycleIdentity)));
+      return await recordFailure(`lifecycle identityが矛盾しています。${lifecycleIdentity.conflictReason}`);
+    }
+    routineOccurrenceFields = Object.assign({}, lifecycleIdentity.routineFields || {});
+    const runtimeIdentityRemoved = lifecycleIdentity.classification === "normal"
+      && !!String(task && (task.routineId || task.routine_id || task.routineOccurrenceKey || task.routine_occurrence_key || task.routineDate || task.routine_date || task.routineSource || task.routine_source) || "").trim();
+    this.recordBridgeExecutionEventDiagnostic("bridge_lifecycle_identity_classified", Object.assign({
+      event_type: eventType,
+      event_id: eventId,
+      task_id: taskId,
+      entry_id: entryId,
+      markdown_entry_match_count: confirmedMatches.length,
+      runtime_routine_identity_removed: runtimeIdentityRemoved,
+      matched_by: "entry_id",
+      post_save_identity_verified: true,
+      post_save_verified: true,
+      reason_code: "lifecycle_identity_classified",
+      decision: lifecycleIdentity.classification
+    }, this.buildBridgeLifecycleIdentityDiagnostic(lifecycleIdentity)));
     const runningSession = this.normalizeRuntimeSession(this.runtime && this.runtime.running, false);
     const targetIdentity = { taskId, entryId, taskKey: entryId };
     if (String(eventType || "") === "TaskStarted" && !this.sameTaskEntry(runningSession, targetIdentity)) {
@@ -24193,12 +24496,6 @@ class TaskchutePlugin extends obsidian.Plugin {
       section_label: String(section.name || "").trim(),
       source: String(options && options.source || "obsidian-plugin").trim() || "obsidian-plugin"
     };
-    if (routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key) {
-      payload.routine_occurrence_override = "true";
-      payload.this_occurrence_only = "true";
-      if (!payload.routine_occurrence_choice) payload.routine_occurrence_choice = "today";
-      if (!payload.routine_date && payload.routine_generated_for_date) payload.routine_date = payload.routine_generated_for_date;
-    }
     payload[timestampKey] = timestamp;
     if (options && options.reason) payload.reason = String(options.reason || "").trim();
     if (options && options.stopReason) payload.stop_reason = String(options.stopReason || "").trim();
@@ -24283,6 +24580,33 @@ class TaskchutePlugin extends obsidian.Plugin {
       const saved = await this.appendBridgeOutboxEvent(event, { deviceWriterOperation: "bridge-lifecycle-enqueue" });
       if (saved === false) {
         return await recordFailure("実行系イベントをoutboxへ保存できませんでした。");
+      }
+      if (runtimeIdentityRemoved) {
+        const previousRunning = this.runtime && this.runtime.running ? Object.assign({}, this.runtime.running) : null;
+        const previousPaused = Array.isArray(this.runtime && this.runtime.paused)
+          ? this.runtime.paused.map(item => item && typeof item === "object" ? Object.assign({}, item) : item) : [];
+        if (this.runtime && this.runtime.running && runtimeSessionKey(this.runtime.running) === entryId) {
+          this.runtime.running = this.sanitizeBridgeLifecycleRuntimeSession(this.runtime.running, lifecycleIdentity);
+        }
+        if (this.runtime && Array.isArray(this.runtime.paused)) {
+          this.runtime.paused = this.runtime.paused.map(item =>
+            runtimeSessionKey(item) === entryId ? this.sanitizeBridgeLifecycleRuntimeSession(item, lifecycleIdentity) : item
+          );
+        }
+        const runtimeSaved = await this.savePluginData({ deviceWriterOperation: "bridge-lifecycle-runtime-identity-cleanup" });
+        if (this.isTaskchuteWriteAborted(runtimeSaved)) {
+          this.runtime.running = previousRunning;
+          this.runtime.paused = previousPaused;
+          this.recordBridgeExecutionEventDiagnostic("bridge_lifecycle_runtime_identity_cleanup_failed", Object.assign({
+            event_type: eventType,
+            event_id: eventId,
+            task_id: taskId,
+            entry_id: entryId,
+            runtime_routine_identity_removed: false,
+            reason_code: "runtime_identity_cleanup_save_failed",
+            decision: "warning"
+          }, this.buildBridgeLifecycleIdentityDiagnostic(lifecycleIdentity)));
+        }
       }
       this.recordBridgeExecutionEventDiagnostic(`bridge_${phasePrefix}_enqueue_finished`, {
         event_type: eventType,
@@ -31077,7 +31401,19 @@ class TaskchutePlugin extends obsidian.Plugin {
     }));
     const taskLink = `[[${task.file}|${task.title}]]`;
     const execId = `X-${date.replace(/-/g,"")}-${task.taskId}-${Date.now()}`;
-    const log = `- [exec_id::${execId}] [date::${date}] [task_id::${task.taskId}] [entry_id::${key}] [task::${taskLink}] ${attrPairs} [start_at::${startIso}] [status::running] [pause_count::0] [pause_min::0] [manual::true] [is_routine::${isRoutineInstance(task) ? "true" : "false"}]`;
+    const manualStartLine = String(md || "").split(/\r?\n/)
+      .find(line => isTaskLine(line) && taskKeyFromTaskLine(line) === key) || "";
+    const manualStartIdentity = this.classifyBridgeLifecycleIdentity({
+      payload: { task_id: task.taskId, entry_id: key },
+      runtime: task,
+      line: manualStartLine,
+      meta: tcMetaFromTaskLine(manualStartLine),
+      eventType: "TaskStarted"
+    });
+    if (manualStartIdentity.classification === "identity_conflict") return false;
+    const manualRoutineFields = Object.assign({}, manualStartIdentity.routineFields || {});
+    const manualRoutineLogFields = this.formatRoutineOccurrenceExecutionLogFields(manualRoutineFields);
+    const log = `- [exec_id::${execId}] [date::${date}] [task_id::${task.taskId}] [entry_id::${key}] [task::${taskLink}] ${attrPairs} [start_at::${startIso}] [status::running] [pause_count::0] [pause_min::0] [manual::true] ${manualRoutineLogFields}`;
     md = appendSection(md, "Log", log);
     const writeOk = await this.writeFileText(notePath, md);
     if (this.isTaskchuteWriteAborted(writeOk)) return false;
@@ -31090,10 +31426,12 @@ class TaskchutePlugin extends obsidian.Plugin {
       taskId: task.taskId,
       title: task.title,
       file: task.file,
-      isRoutine: isRoutineInstance(task),
-      routineId: task.routineId || task.taskId || "",
-      routineDate: task.routineDate || date,
-      routineSource: task.routineSource || task.file || "",
+      isRoutine: manualStartIdentity.classification === "routine_occurrence",
+      routineId: manualRoutineFields.routine_id || "",
+      routineDate: manualRoutineFields.routine_date || manualRoutineFields.routine_generated_for_date || "",
+      routineOccurrenceKey: manualRoutineFields.routine_occurrence_key || "",
+      routineGeneratedForDate: manualRoutineFields.routine_generated_for_date || "",
+      routineSource: manualRoutineFields.routine_source || "",
       section: actualSection && actualSection.name ? actualSection.name : (task.section || ""),
       sectionId: actualSection && actualSection.id ? actualSection.id : (task.sectionId || ""),
       estimateMin: Number(task.estimateMin || this.settings.defaultEstimateMin || 15),
@@ -36775,6 +37113,12 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
     }
 
+    const startEntryMeta = task && task.entryMeta && typeof task.entryMeta === "object" ? task.entryMeta : {};
+    const startRoutineOccurrenceKey = String(task && task.routineOccurrenceKey || startEntryMeta.routine_occurrence_key || "").trim();
+    const startRoutineId = startRoutineOccurrenceKey
+      ? String(task && task.routineId || task && task.generatedByRoutineId || startEntryMeta.routine_id || startEntryMeta.generated_by_routine_id || "").trim()
+      : "";
+    const startIsRoutineOccurrence = !!(startRoutineOccurrenceKey && startRoutineId);
     this.runtime.running = {
       execId: `X-${todayDate().replace(/-/g,"")}-${task.taskId}-${Date.now()}`,
       entryId: startKey,
@@ -36782,10 +37126,12 @@ class TaskchutePlugin extends obsidian.Plugin {
       taskId: task.taskId,
       title: task.title,
       file: task.file,
-      isRoutine: isRoutineInstance(task),
-      routineId: task.routineId || task.taskId || "",
-      routineDate: task.routineDate || sourceDate,
-      routineSource: task.routineSource || task.file || "",
+      isRoutine: startIsRoutineOccurrence,
+      routineId: startIsRoutineOccurrence ? startRoutineId : "",
+      routineDate: startIsRoutineOccurrence ? String(task.routineDate || startEntryMeta.routine_date || startEntryMeta.routine_generated_for_date || "").trim() : "",
+      routineOccurrenceKey: startIsRoutineOccurrence ? startRoutineOccurrenceKey : "",
+      routineGeneratedForDate: startIsRoutineOccurrence ? String(task.routineGeneratedForDate || startEntryMeta.routine_generated_for_date || startEntryMeta.routine_date || "").trim() : "",
+      routineSource: startIsRoutineOccurrence ? String(task.routineSource || startEntryMeta.routine_source || task.file || "").trim() : "",
       section: afterStartMoveSnapshot && afterStartMoveSnapshot.section_label ? afterStartMoveSnapshot.section_label : (actualSection && actualSection.name ? actualSection.name : (task.section || "")),
       sectionId: afterStartMoveSnapshot && afterStartMoveSnapshot.section_id ? afterStartMoveSnapshot.section_id : (actualSection && actualSection.id ? actualSection.id : (task.sectionId || "")),
       estimateMin: Number(task.estimateMin || this.settings.defaultEstimateMin || 15),
@@ -36848,6 +37194,18 @@ class TaskchutePlugin extends obsidian.Plugin {
     const taskLink = `[[${r.file}|${r.title}]]`;
     const entryKey = r.entryId || r.taskKey || r.taskId;
     const nextKey = nextTask ? (nextTask.entryId || nextTask.taskKey || nextTask.taskId) : "";
+    const interruptedLine = String(md || "").split(/\r?\n/)
+      .find(line => isTaskLine(line) && taskKeyFromTaskLine(line) === entryKey) || "";
+    const interruptedIdentity = this.classifyBridgeLifecycleIdentity({
+      payload: { task_id: r.taskId, entry_id: entryKey },
+      runtime: r,
+      line: interruptedLine,
+      meta: tcMetaFromTaskLine(interruptedLine),
+      eventType: "TaskStopped"
+    });
+    if (interruptedIdentity.classification === "identity_conflict") return null;
+    const interruptedRoutineFields = Object.assign({}, interruptedIdentity.routineFields || {});
+    const interruptedRoutineLogFields = this.formatRoutineOccurrenceExecutionLogFields(interruptedRoutineFields);
 
     // v0.5.65: 別端末側で既に完了/割り込み終了ログが到着している場合、
     // ここでさらに interrupted ログを追記して二重終了扱いにしない。
@@ -36861,18 +37219,21 @@ class TaskchutePlugin extends obsidian.Plugin {
       return null;
     }
 
-    const log = `- [exec_id::${r.execId}] [date::${date}] [task_id::${r.taskId}] [entry_id::${entryKey}] [task::${taskLink}] ${attrPairs} [start_at::${r.startedAt}] [end_at::${end}] [actual::${actual}] [status::interrupted] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::false] [interrupted_by_task_id::${nextTask && nextTask.taskId ? nextTask.taskId : ""}] [interrupted_by_entry_id::${nextKey}] [comment_count::0] [is_routine::${r.isRoutine ? "true" : "false"}]`;
-    const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${entryKey}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::interrupted]`;
+    const log = `- [exec_id::${r.execId}] [date::${date}] [task_id::${r.taskId}] [entry_id::${entryKey}] [task::${taskLink}] ${attrPairs} [start_at::${r.startedAt}] [end_at::${end}] [actual::${actual}] [status::interrupted] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::false] [interrupted_by_task_id::${nextTask && nextTask.taskId ? nextTask.taskId : ""}] [interrupted_by_entry_id::${nextKey}] [comment_count::0] ${interruptedRoutineLogFields}`;
+    const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${entryKey}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::interrupted] ${interruptedRoutineLogFields}`;
 
     md = replaceTaskCheckbox(md, entryKey, true);
     md = moveTaskLineToSection(md, this.settings, entryKey, interruptedSection.name);
 
     const continuationEntryId = await this.nextUniqueEntryId(date, md);
-    const continuationMeta = r.isRoutine ? {
+    const continuationMeta = interruptedIdentity.classification === "routine_occurrence" ? {
       is_routine: "true",
-      routine_id: r.routineId || r.taskId || "",
-      routine_date: date,
-      routine_source: r.routineSource || r.file || ""
+      routine_id: interruptedRoutineFields.routine_id || interruptedRoutineFields.generated_by_routine_id || "",
+      generated_by_routine_id: interruptedRoutineFields.generated_by_routine_id || interruptedRoutineFields.routine_id || "",
+      routine_occurrence_key: interruptedRoutineFields.routine_occurrence_key || "",
+      routine_date: interruptedRoutineFields.routine_date || interruptedRoutineFields.routine_generated_for_date || "",
+      routine_generated_for_date: interruptedRoutineFields.routine_generated_for_date || interruptedRoutineFields.routine_date || "",
+      routine_source: interruptedRoutineFields.routine_source || r.file || ""
     } : {};
     const continuationLine = taskLine(r.file, r.title, false, continuationEntryId, continuationMeta);
     const fallbackSection = resolveTaskSection(this.settings, r.section || (nextTask && nextTask.section) || "").name;
@@ -37073,13 +37434,17 @@ class TaskchutePlugin extends obsidian.Plugin {
     // 別端末更新反映後に完了を自動継続する場合でも、
     // 到着済みのTaskchuteノート上で既に完了済みなら二重ログを書かない。
     if (isTaskCheckedInMarkdown(md, completedKey) || hasDoneExecutionLogForExecId(md, r.execId)) {
-      const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(Object.assign({}, r, {
-        entryId: completedKey,
-        entry_id: completedKey,
-        taskKey: completedKey,
-        sourceDate: date,
-        date
-      }), { date });
+      const alreadyDoneLine = String(md || "").split(/\r?\n/)
+        .find(line => isTaskLine(line) && taskKeyFromTaskLine(line) === completedKey) || "";
+      const alreadyDoneIdentity = this.classifyBridgeLifecycleIdentity({
+        payload: { task_id: r.taskId, entry_id: completedKey },
+        runtime: r,
+        line: alreadyDoneLine,
+        meta: tcMetaFromTaskLine(alreadyDoneLine),
+        eventType: "TaskCompleted"
+      });
+      if (alreadyDoneIdentity.classification === "identity_conflict") return false;
+      const routineOccurrenceFields = Object.assign({}, alreadyDoneIdentity.routineFields || {});
       const cleaned = removeActiveRunningExecutionLogs(md, {
         execId: r.execId,
         entryId: completedKey,
@@ -37106,13 +37471,17 @@ class TaskchutePlugin extends obsidian.Plugin {
     const completedSection = getSectionForStartPlan(this.settings, formatClock(r.startedAt || ""));
     const attrPairs = await this.getTaskAttributePairs(Object.assign({}, r, { section: completedSection.name, sectionId: completedSection.id }));
     const taskLink = `[[${r.file}|${r.title}]]`;
-    const routineOccurrenceFields = this.getRoutineOccurrenceBridgeFields(Object.assign({}, r, {
-      entryId: completedKey,
-      entry_id: completedKey,
-      taskKey: completedKey,
-      sourceDate: date,
-      date
-    }), { date });
+    const completionLine = String(md || "").split(/\r?\n/)
+      .find(line => isTaskLine(line) && taskKeyFromTaskLine(line) === completedKey) || "";
+    const completionIdentity = this.classifyBridgeLifecycleIdentity({
+      payload: { task_id: r.taskId, entry_id: completedKey },
+      runtime: r,
+      line: completionLine,
+      meta: tcMetaFromTaskLine(completionLine),
+      eventType: "TaskCompleted"
+    });
+    if (completionIdentity.classification === "identity_conflict") return false;
+    const routineOccurrenceFields = Object.assign({}, completionIdentity.routineFields || {});
     const routineLogFields = this.formatRoutineOccurrenceExecutionLogFields(routineOccurrenceFields);
     const log = `- [exec_id::${r.execId}] [date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [start_at::${r.startedAt}] [end_at::${end}] [actual::${actual}] [status::done] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::${r.isInterrupt ? "true" : "false"}] [interrupted_task_id::${r.interruptedTaskId || ""}] [interrupted_entry_id::${r.interruptedEntryId || ""}] [comment_count::0] ${routineLogFields}`;
     const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] ${routineLogFields}`;
@@ -37127,13 +37496,14 @@ class TaskchutePlugin extends obsidian.Plugin {
     md = appendSection(md, "Log", log);
     md = appendSection(md, "LogDaily", logDaily);
     const completeWriteOk = await this.writeFileText(notePath, md);
-    if (isRoutineHistoryTarget(r)) {
+    if (completionIdentity.classification === "routine_occurrence") {
       await this.recordRoutineHistoryForTask(r, "done", {
         task_id: r.taskId,
         entry_id: completedKey,
         title: r.title || "",
-        routine_id: r.routineId || r.taskId || "",
-        routine_source: r.routineSource || r.file || "",
+        routine_id: routineOccurrenceFields.routine_id || routineOccurrenceFields.generated_by_routine_id || "",
+        routine_occurrence_key: routineOccurrenceFields.routine_occurrence_key || "",
+        routine_source: routineOccurrenceFields.routine_source || r.file || "",
         start_actual: r.startedAt || "",
         end_actual: end,
         completed_at: end,
