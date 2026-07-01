@@ -1940,6 +1940,32 @@ function isRunningExecutionLogLine(line) {
 }
 function removeActiveRunningExecutionLogs(markdown, identity = {}) {
   const lines = String(markdown || "").split(/\r?\n/);
+  const execId = String(identity.execId || identity.exec_id || "").trim();
+  const occurrenceKey = String(identity.routineOccurrenceKey || identity.routine_occurrence_key || "").trim();
+  const entryId = String(identity.entryId || identity.entry_id || "").trim();
+  const taskId = String(identity.taskId || identity.task_id || "").trim();
+  const matchedBy = execId ? "exec_id" : occurrenceKey ? "routine_occurrence_key" : entryId ? "entry_id" : taskId ? "task_id" : "";
+  if (matchedBy === "task_id") {
+    let sectionName = "";
+    const taskMatches = lines.filter(line => {
+      const heading = String(line || "").match(/^##\s+(.+?)\s*$/);
+      if (heading) sectionName = heading[1].trim();
+      return (sectionName === "Log" || sectionName === "LogDaily")
+        && /^\s*-\s+\[exec_id::/.test(String(line || ""))
+        && isRunningExecutionLogLine(line)
+        && executionLogLineMatchesIdentity(line, identity);
+    });
+    if (taskMatches.length > 2) {
+      return {
+        markdown: String(markdown || ""),
+        removedDateLog: 0,
+        removedLogDaily: 0,
+        matchedBy,
+        taskIdFallbackBlocked: true,
+        matchingRunningRowCount: taskMatches.length
+      };
+    }
+  }
   let section = "";
   let removedDateLog = 0;
   let removedLogDaily = 0;
@@ -1959,7 +1985,7 @@ function removeActiveRunningExecutionLogs(markdown, identity = {}) {
     }
     out.push(line);
   }
-  return { markdown: out.join("\n"), removedDateLog, removedLogDaily };
+  return { markdown: out.join("\n"), removedDateLog, removedLogDaily, matchedBy, taskIdFallbackBlocked: false };
 }
 function hasActiveRunningExecutionLog(markdown, identity = {}, sectionName = "") {
   const targetSection = String(sectionName || "").trim();
@@ -5794,6 +5820,82 @@ function reorderTaskSectionByTaskIds(markdown, settings, sectionName, orderedTas
     lines[index] = nextLines[position];
   });
   return { markdown: lines.join("\n"), changed, matchedCount: specified.length };
+}
+
+function getTaskSectionOrderInfoFromMarkdown(markdown, sectionName) {
+  const section = String(sectionName || "").trim();
+  const entries = [];
+  let inTasks = false;
+  let inSection = false;
+  for (const line of String(markdown || "").split(/\r?\n/)) {
+    if (/^##\s+Tasks\s*$/.test(line)) { inTasks = true; continue; }
+    if (inTasks && /^##\s+/.test(line)) break;
+    if (!inTasks) continue;
+    const match = String(line || "").match(/^###\s+(.+?)\s*$/);
+    if (match) {
+      inSection = match[1].trim() === section;
+      continue;
+    }
+    if (!inSection || !isTaskLine(line)) continue;
+    entries.push({
+      entryId: String(entryIdFromTaskLine(line) || "").trim(),
+      taskId: String(taskIdFromTaskLine(line) || "").trim(),
+      line
+    });
+  }
+  const entryIds = entries.map(item => item.entryId);
+  const taskIds = entries.map(item => item.taskId);
+  const duplicates = values => Array.from(new Set(values.filter((value, index) => value && values.indexOf(value) !== index)));
+  return {
+    entryIds,
+    taskIds,
+    missingEntryIdCount: entryIds.filter(value => !value).length,
+    duplicateEntryIds: duplicates(entryIds),
+    duplicateTaskIds: duplicates(taskIds)
+  };
+}
+
+function reorderTaskSectionByEntryIds(markdown, settings, sectionName, orderedEntryIds) {
+  const requested = Array.isArray(orderedEntryIds) ? orderedEntryIds.map(value => String(value || "").trim()) : [];
+  const duplicateEntryIds = Array.from(new Set(requested.filter((value, index) => value && requested.indexOf(value) !== index)));
+  if (!requested.length || requested.some(value => !value) || duplicateEntryIds.length) {
+    return { markdown: String(markdown || ""), changed: false, matchedCount: 0, ok: false, reason: duplicateEntryIds.length ? "duplicate_entry_id" : "invalid_entry_id" };
+  }
+  const lines = ensureTasksSkeleton(markdown, settings).split(/\r?\n/);
+  const section = String(sectionName || "").trim();
+  let inTasks = false;
+  let inSection = false;
+  const indexes = [];
+  const byEntryId = new Map();
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (/^##\s+Tasks\s*$/.test(line)) { inTasks = true; continue; }
+    if (inTasks && /^##\s+/.test(line)) break;
+    if (!inTasks) continue;
+    const match = String(line || "").match(/^###\s+(.+?)\s*$/);
+    if (match) {
+      inSection = match[1].trim() === section;
+      continue;
+    }
+    if (!inSection || !isTaskLine(line)) continue;
+    const entryId = String(entryIdFromTaskLine(line) || "").trim();
+    indexes.push(index);
+    if (!entryId || byEntryId.has(entryId)) {
+      return { markdown: String(markdown || ""), changed: false, matchedCount: 0, ok: false, reason: !entryId ? "missing_entry_id" : "duplicate_entry_id" };
+    }
+    byEntryId.set(entryId, line);
+  }
+  const physicalEntryIds = Array.from(byEntryId.keys());
+  if (requested.length !== physicalEntryIds.length || requested.some(value => !byEntryId.has(value))) {
+    return { markdown: String(markdown || ""), changed: false, matchedCount: 0, ok: false, reason: "entry_set_mismatch", physicalEntryIds };
+  }
+  const nextLines = requested.map(value => byEntryId.get(value));
+  let changed = false;
+  indexes.forEach((index, position) => {
+    if (lines[index] !== nextLines[position]) changed = true;
+    lines[index] = nextLines[position];
+  });
+  return { markdown: lines.join("\n"), changed, matchedCount: nextLines.length, ok: true, reason: "", physicalEntryIds };
 }
 
 function getTaskSectionOrderTaskIdsFromMarkdown(markdown, sectionName) {
@@ -15216,8 +15318,13 @@ class TaskchutePlugin extends obsidian.Plugin {
     const to = payload.to && typeof payload.to === "object" ? payload.to : {};
     const taskId = String(payload.task_id || "").trim();
     const entryId = String(payload.entry_id || to.entry_id || from.entry_id || "").trim();
+    const fromEntryId = String(from.entry_id || entryId).trim();
+    const toEntryId = String(to.entry_id || entryId).trim();
     const occurrenceKey = String(payload.routine_occurrence_key || to.routine_occurrence_key || from.routine_occurrence_key || "").trim();
     if (!entryId && occurrenceKey) return `routine-occurrence\u0000${occurrenceKey}`;
+    if (Number(payload.move_payload_version || 0) >= 4 && taskId && fromEntryId && toEntryId) {
+      return `${taskId}\u0000${fromEntryId}\u0000${toEntryId}`;
+    }
     return taskId && entryId ? `${taskId}\u0000${entryId}` : "";
   }
 
@@ -15234,8 +15341,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       `from=${String(from.section_id || from.section || "-").trim() || "-"}`,
       `to=${String(to.section_id || to.section || "-").trim() || "-"}`,
       `move_type=${String(payload.move_type || "-").trim() || "-"}`,
+      `move_payload_version=${Math.max(0, Number(payload.move_payload_version || 0))}`,
       `to.index=${Math.max(0, Number(to.index || 0))}`,
-      `target_order_count=${Array.isArray(payload.target_order_task_ids) ? payload.target_order_task_ids.length : 0}`
+      `target_order_count=${Array.isArray(payload.target_order_task_ids) ? payload.target_order_task_ids.length : 0}`,
+      `target_entry_order_count=${Array.isArray(payload.target_order_entry_ids) ? payload.target_order_entry_ids.length : 0}`
     ].join(" / ");
   }
 
@@ -15248,18 +15357,41 @@ class TaskchutePlugin extends obsidian.Plugin {
     const from = payload.from && typeof payload.from === "object" ? payload.from : {};
     const sameDate = String(from.date || "") === String(to.date || "");
     const sameSection = String(from.section_id || from.section || "") === String(to.section_id || to.section || "");
+    const isV4 = Number(payload.move_payload_version || 0) >= 4;
+    if (isV4) {
+      const targetInfo = await this.getBridgeSectionOrderInfo(to.date || payload.date, to.section_id || to.section);
+      if (targetInfo.missingEntryIdCount || targetInfo.duplicateEntryIds.length || !targetInfo.entryIds.includes(String(to.entry_id || payload.entry_id || "").trim())) {
+        throw new Error("TaskMoved v4 target entry order refresh failed.");
+      }
+      payload.target_order_entry_ids = targetInfo.entryIds.slice();
+      payload.target_order_task_ids = targetInfo.taskIds.slice();
+      to.index = targetInfo.entryIds.indexOf(String(to.entry_id || payload.entry_id || "").trim());
+      payload.to = to;
+      if (sameDate && sameSection) {
+        delete payload.source_order_entry_ids;
+        delete payload.source_order_task_ids;
+      } else {
+        const sourceInfo = await this.getBridgeSectionOrderInfo(from.date, from.section_id || from.section);
+        if (sourceInfo.missingEntryIdCount || sourceInfo.duplicateEntryIds.length) {
+          throw new Error("TaskMoved v4 source entry order refresh failed.");
+        }
+        payload.source_order_entry_ids = sourceInfo.entryIds.slice();
+        payload.source_order_task_ids = sourceInfo.taskIds.slice();
+      }
+    }
     if (sameDate && sameSection) {
       delete payload.source_order_task_ids;
+      if (isV4) delete payload.source_order_entry_ids;
       payload.move_type = "reorder";
     } else {
-      payload.source_order_task_ids = await this.getBridgeSectionOrderTaskIds(from.date, from.section_id || from.section);
+      if (!isV4) payload.source_order_task_ids = await this.getBridgeSectionOrderTaskIds(from.date, from.section_id || from.section);
       payload.move_type = sameDate ? "section-change" : (sameSection ? "date-change" : "date-section-change");
     }
     payload.before = Object.assign({}, from);
     payload.after = Object.assign({}, to);
     payload.date = String(to.date || payload.date || "").trim();
     payload.entry_id = String(to.entry_id || payload.entry_id || "").trim();
-    payload.move_payload_version = Math.max(3, Number(payload.move_payload_version || 0));
+    payload.move_payload_version = isV4 ? 4 : Math.max(3, Number(payload.move_payload_version || 0));
     event.payload = payload;
     return event;
   }
@@ -15343,11 +15475,18 @@ class TaskchutePlugin extends obsidian.Plugin {
         });
         const payload = latest.payload && typeof latest.payload === "object" ? latest.payload : {};
         const to = payload.to && typeof payload.to === "object" ? payload.to : {};
-        const targetOrder = await this.getBridgeSectionOrderTaskIds(to.date || payload.date, to.section_id || to.section);
+        const isV4 = Number(payload.move_payload_version || 0) >= 4;
+        const targetInfo = isV4
+          ? await this.getBridgeSectionOrderInfo(to.date || payload.date, to.section_id || to.section)
+          : null;
+        const targetOrder = isV4 ? targetInfo.taskIds : await this.getBridgeSectionOrderTaskIds(to.date || payload.date, to.section_id || to.section);
         const taskId = String(payload.task_id || "").trim();
-        if (targetOrder.length && targetOrder.includes(taskId)) {
+        const targetEntryId = String(to.entry_id || payload.entry_id || "").trim();
+        const targetFound = isV4 ? targetInfo.entryIds.includes(targetEntryId) : targetOrder.includes(taskId);
+        if (targetOrder.length && targetFound) {
           payload.target_order_task_ids = targetOrder;
-          to.index = targetOrder.indexOf(taskId);
+          if (isV4) payload.target_order_entry_ids = targetInfo.entryIds.slice();
+          to.index = isV4 ? targetInfo.entryIds.indexOf(targetEntryId) : targetOrder.indexOf(taskId);
           payload.to = to;
           if (payload.order_diagnostic && typeof payload.order_diagnostic === "object" && !Array.isArray(payload.order_diagnostic)) {
             payload.order_diagnostic.after_save_order = targetOrder.slice();
@@ -15393,29 +15532,22 @@ class TaskchutePlugin extends obsidian.Plugin {
   }
 
   async getBridgeSectionOrderTaskIds(date, sectionIdOrName) {
+    const info = await this.getBridgeSectionOrderInfo(date, sectionIdOrName);
+    return info.taskIds;
+  }
+
+  async getBridgeSectionOrderInfo(date, sectionIdOrName) {
     const normalizedDate = this.normalizeDate(date || this.getToday());
     const section = getSectionByNameOrId(this.settings, String(sectionIdOrName || "").trim());
-    if (!section) return [];
+    if (!section) return { entryIds: [], taskIds: [], missingEntryIdCount: 0, duplicateEntryIds: [], duplicateTaskIds: [], date: normalizedDate, sectionId: "", sectionName: "" };
     const path = this.getTaskchutePath(normalizedDate);
-    if (!this.app.vault.getAbstractFileByPath(path)) return [];
+    if (!this.app.vault.getAbstractFileByPath(path)) return { entryIds: [], taskIds: [], missingEntryIdCount: 0, duplicateEntryIds: [], duplicateTaskIds: [], date: normalizedDate, sectionId: section.id, sectionName: section.name };
     const markdown = await readFileText(this.app, path);
-    const ids = [];
-    let inTasks = false;
-    let inSection = false;
-    for (const line of String(markdown || "").split(/\r?\n/)) {
-      if (/^##\s+Tasks\s*$/.test(line)) { inTasks = true; continue; }
-      if (inTasks && /^##\s+/.test(line)) break;
-      if (!inTasks) continue;
-      const match = String(line || "").match(/^###\s+(.+?)\s*$/);
-      if (match) {
-        inSection = match[1].trim() === section.name;
-        continue;
-      }
-      if (!inSection || !isTaskLine(line)) continue;
-      const taskId = taskIdFromTaskLine(line);
-      if (taskId) ids.push(taskId);
-    }
-    return ids;
+    return Object.assign(getTaskSectionOrderInfoFromMarkdown(markdown, section.name), {
+      date: normalizedDate,
+      sectionId: section.id,
+      sectionName: section.name
+    });
   }
 
   async mergeBridgePendingTaskCreatedRename(task, title) {
@@ -16193,9 +16325,13 @@ class TaskchutePlugin extends obsidian.Plugin {
             taskId,
             Object.assign({}, from, { entry_id: String(from.entry_id || payload.before && payload.before.entry_id || "").trim() }),
             Object.assign({}, to, { entry_id: String(to.entry_id || payload.after && payload.after.entry_id || entryId).trim() }),
-            { stage: "registry-after-apply", expectedTargetOrder: payload.target_order_task_ids }
+            { stage: "registry-after-apply", expectedTargetOrder: payload.target_order_task_ids, expectedTargetEntryOrder: payload.target_order_entry_ids, expectedSourceEntryOrder: payload.source_order_entry_ids }
           )
-          : await this.inspectBridgeTaskMovedVaultState(taskId, entryId, to.date || payload.date, to.section_id || payload.to_section_id || "", { stage: "registry-after-apply" });
+          : await this.inspectBridgeTaskMovedVaultState(taskId, entryId, to.date || payload.date, to.section_id || payload.to_section_id || "", {
+            stage: "registry-after-apply",
+            expectedTargetOrder: payload.target_order_task_ids,
+            expectedTargetEntryOrder: payload.target_order_entry_ids
+          });
         verified = !!(inspection && inspection.ok);
         this.recordBridgeTaskMovedInboundDiagnostic(verified ? "taskmoved_save_verify_ok" : "taskmoved_save_verify_failed", event, {
           verification_kind: String(registry && registry.verification_kind || ""),
@@ -17353,6 +17489,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       row_section_id: "",
       row_section_label_id: "",
       index_section_id: "",
+      index_position_ignored_for_board_entry: true,
       current_target_order_task_ids: [],
       expected_target_order_task_ids: [],
       ok: false,
@@ -17410,7 +17547,20 @@ class TaskchutePlugin extends obsidian.Plugin {
     const expectedTargetOrder = Array.isArray(options && options.expectedTargetOrder)
       ? options.expectedTargetOrder.map(value => String(value || "").trim()).filter(Boolean)
       : [];
-    if (expectedTargetOrder.length) {
+    const expectedTargetEntryOrder = Array.isArray(options && options.expectedTargetEntryOrder)
+      ? options.expectedTargetEntryOrder.map(value => String(value || "").trim()).filter(Boolean)
+      : [];
+    if (expectedTargetEntryOrder.length) {
+      const currentInfo = await this.getBridgeSectionOrderInfo(expectedDate, expected);
+      diagnostic.current_target_order_entry_ids = currentInfo.entryIds.slice();
+      diagnostic.expected_target_order_entry_ids = expectedTargetEntryOrder.slice();
+      if (currentInfo.missingEntryIdCount || currentInfo.duplicateEntryIds.length
+        || JSON.stringify(currentInfo.entryIds) !== JSON.stringify(expectedTargetEntryOrder)) {
+        diagnostic.reason_code = "target_entry_order_mismatch";
+        diagnostic.reason = "TaskMovedのtarget_order_entry_idsが現在Vaultの移動先section順序と一致しません。";
+        return diagnostic;
+      }
+    } else if (expectedTargetOrder.length) {
       const currentTargetOrder = await this.getBridgeSectionOrderTaskIds(expectedDate, expected);
       diagnostic.current_target_order_task_ids = currentTargetOrder.slice();
       diagnostic.expected_target_order_task_ids = expectedTargetOrder.slice();
@@ -17459,6 +17609,20 @@ class TaskchutePlugin extends obsidian.Plugin {
       const sourceMarkdown = await readFileText(this.app, this.getTaskchutePath(fromDate));
       diagnostic.source_entry_absent = !String(sourceMarkdown || "").split(/\r?\n/)
         .some(line => isTaskLine(line) && taskKeyFromTaskLine(line) === fromEntryId);
+      const expectedSourceEntryOrder = Array.isArray(options && options.expectedSourceEntryOrder)
+        ? options.expectedSourceEntryOrder.map(value => String(value || "").trim()) : [];
+      if (expectedSourceEntryOrder.length || Array.isArray(options && options.expectedSourceEntryOrder)) {
+        const sourceSection = getSectionByNameOrId(this.settings, String(from.section_id || from.section || "").trim());
+        const sourceInfo = sourceSection ? getTaskSectionOrderInfoFromMarkdown(sourceMarkdown, sourceSection.name) : null;
+        diagnostic.source_entry_order_verified = !!sourceInfo
+          && !sourceInfo.missingEntryIdCount
+          && !sourceInfo.duplicateEntryIds.length
+          && JSON.stringify(sourceInfo.entryIds) === JSON.stringify(expectedSourceEntryOrder);
+        if (!diagnostic.source_entry_order_verified) {
+          diagnostic.reason = "TaskMoved date changeのsource_order_entry_idsが一致しません。";
+          return diagnostic;
+        }
+      }
     } catch (e) {
       diagnostic.reason = "TaskMoved日付移動の移動元日付ノートを再読込できませんでした。";
       return diagnostic;
@@ -17481,7 +17645,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       {
         stage: diagnostic.stage,
         index: options && options.index,
-        expectedTargetOrder: options && options.expectedTargetOrder
+        expectedTargetOrder: options && options.expectedTargetOrder,
+        expectedTargetEntryOrder: options && options.expectedTargetEntryOrder
       }
     );
     diagnostic.target_position_ok = !!(targetInspection && targetInspection.ok);
@@ -17534,7 +17699,28 @@ class TaskchutePlugin extends obsidian.Plugin {
       };
     }
     const payload = event && event.payload && typeof event.payload === "object" ? event.payload : {};
+    const from = payload.from && typeof payload.from === "object" ? payload.from : {};
     const to = payload.to && typeof payload.to === "object" ? payload.to : {};
+    const isV4 = Number(payload.move_payload_version || 0) >= 4;
+    if (isV4) {
+      const targetEntries = Array.isArray(payload.target_order_entry_ids) ? payload.target_order_entry_ids.map(value => String(value || "").trim()) : [];
+      const targetInfo = await this.getBridgeSectionOrderInfo(to.date || payload.date, to.section_id || to.section);
+      if (!targetEntries.length || targetEntries.some(value => !value)
+        || new Set(targetEntries).size !== targetEntries.length
+        || JSON.stringify(targetInfo.entryIds) !== JSON.stringify(targetEntries)) {
+        return { ok: false, reason: "TaskMoved v4 target_order_entry_idsの送信前検証に失敗しました。" };
+      }
+      const sameLocation = String(from.date || "") === String(to.date || "")
+        && String(from.section_id || from.section || "") === String(to.section_id || to.section || "");
+      if (!sameLocation) {
+        const sourceEntries = Array.isArray(payload.source_order_entry_ids) ? payload.source_order_entry_ids.map(value => String(value || "").trim()) : [];
+        const sourceInfo = await this.getBridgeSectionOrderInfo(from.date, from.section_id || from.section);
+        if (sourceEntries.some(value => !value) || new Set(sourceEntries).size !== sourceEntries.length
+          || JSON.stringify(sourceInfo.entryIds) !== JSON.stringify(sourceEntries)) {
+          return { ok: false, reason: "TaskMoved v4 source_order_entry_idsの送信前検証に失敗しました。" };
+        }
+      }
+    }
     let rebuiltIndex = null;
     try {
       rebuiltIndex = await this.rebuildTaskchuteIndex({ notice: false });
@@ -17544,7 +17730,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       payload.entry_id,
       to.date || payload.date,
       to.section_id || to.section,
-      { stage, index: rebuiltIndex, expectedTargetOrder: payload.target_order_task_ids }
+      { stage, index: rebuiltIndex, expectedTargetOrder: payload.target_order_task_ids, expectedTargetEntryOrder: payload.target_order_entry_ids }
     );
     await this.recordBridgeTaskMovedSectionDiagnostic(diagnostic);
     if (!diagnostic.ok) {
@@ -17581,6 +17767,29 @@ class TaskchutePlugin extends obsidian.Plugin {
     const targetOrderTaskIds = Array.isArray(payload.target_order_task_ids) ? payload.target_order_task_ids : [];
     const hasSourceOrderTaskIds = Array.isArray(payload.source_order_task_ids);
     const sourceOrderTaskIds = hasSourceOrderTaskIds ? payload.source_order_task_ids : [];
+    const movePayloadVersion = Math.max(0, Math.floor(Number(payload.move_payload_version || 0)));
+    const isV4 = movePayloadVersion >= 4;
+    const targetOrderEntryIds = Array.isArray(payload.target_order_entry_ids)
+      ? payload.target_order_entry_ids.map(value => String(value || "").trim()) : [];
+    const hasSourceOrderEntryIds = Array.isArray(payload.source_order_entry_ids);
+    const sourceOrderEntryIds = hasSourceOrderEntryIds
+      ? payload.source_order_entry_ids.map(value => String(value || "").trim()) : [];
+    const duplicateValues = values => values.filter((value, index) => value && values.indexOf(value) !== index);
+    const samePayloadLocation = fromDate === toDate
+      && String(from.section_id || from.section || from.section_label || "").trim() === String(to.section_id || to.section || to.section_label || "").trim();
+    if (isV4) {
+      const invalidTarget = !targetOrderEntryIds.length
+        || targetOrderEntryIds.some(value => !value)
+        || duplicateValues(targetOrderEntryIds).length > 0
+        || !targetOrderEntryIds.includes(toEntryId || String(payload.entry_id || "").trim());
+      const sourceRequired = !samePayloadLocation;
+      const invalidSource = sourceRequired && (!hasSourceOrderEntryIds
+        || sourceOrderEntryIds.some(value => !value)
+        || duplicateValues(sourceOrderEntryIds).length > 0);
+      if (invalidTarget || invalidSource) {
+        return { ok: false, message: `TaskMoved v4 entry orderが不正です。${invalidTarget ? "target_order_entry_ids" : "source_order_entry_ids"}` };
+      }
+    }
     if (!targetOrderTaskIds.length) return { ok: false, skipped: true, message: "TaskMoved payloadにtarget_order_task_idsがありません。" };
     this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_apply_started", event, {
       move_type: String(payload.move_type || "").trim(),
@@ -17631,7 +17840,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           taskId,
           Object.assign({}, from, { date: fromDate, entry_id: fromEntryId }),
           Object.assign({}, to, { date: toDate, entry_id: toEntryId }),
-          { stage: "inbound-date-change-idempotency", expectedTargetOrder: targetOrderTaskIds }
+          { stage: "inbound-date-change-idempotency", expectedTargetOrder: targetOrderTaskIds, expectedTargetEntryOrder: targetOrderEntryIds, expectedSourceEntryOrder: isV4 ? sourceOrderEntryIds : undefined }
         );
         if (alreadyApplied && alreadyApplied.ok) {
           return { ok: true, noop: true, message: "TaskMoved日付移動は既に保存後検証済みの状態です。" };
@@ -17650,6 +17859,13 @@ class TaskchutePlugin extends obsidian.Plugin {
     const sourceSection = getSectionByNameOrId(this.settings, String(from.section_id || from.section || from.section_label || occurrence.section || "").trim())
       || getSectionByNameOrId(this.settings, occurrence.section);
     if (!sourceSection) return { ok: false, message: "移動元セクションを解決できませんでした。" };
+    if (!isV4) {
+      const legacySourceInfo = await this.getBridgeSectionOrderInfo(occurrence.date, sourceSection.id);
+      const legacyTargetInfo = await this.getBridgeSectionOrderInfo(toDate || occurrence.date, targetSection.id);
+      if (legacySourceInfo.duplicateTaskIds.length || legacyTargetInfo.duplicateTaskIds.length) {
+        return { ok: false, message: "TaskMoved v3の関連sectionに重複task_idがあるため、entry-safeに並べ替えできません。" };
+      }
+    }
     const sameDate = targetDate === occurrence.date;
     const sameSection = targetSection.id === sourceSection.id;
     this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_current_location_resolved", event, {
@@ -17674,7 +17890,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         expectedEntryId,
         targetDate,
         targetSection.id,
-        { stage: "inbound-after-idempotent-check", expectedTargetOrder: targetOrderTaskIds }
+        { stage: "inbound-after-idempotent-check", expectedTargetOrder: targetOrderTaskIds, expectedTargetEntryOrder: targetOrderEntryIds }
       );
       this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_current_matches_before", event, {
         matches_before: !!(beforeInspection && beforeInspection.ok),
@@ -17687,6 +17903,13 @@ class TaskchutePlugin extends obsidian.Plugin {
         message: afterInspection && afterInspection.reason || ""
       }, afterInspection && afterInspection.ok ? "info" : "debug", afterInspection && afterInspection.ok ? "matched" : "not_matched");
       if (afterInspection && afterInspection.ok) {
+        if (isV4 && !samePayloadLocation) {
+          const idempotentSourceInfo = await this.getBridgeSectionOrderInfo(fromDate || occurrence.date, sourceSection.id);
+          if (idempotentSourceInfo.missingEntryIdCount || idempotentSourceInfo.duplicateEntryIds.length
+            || JSON.stringify(idempotentSourceInfo.entryIds) !== JSON.stringify(sourceOrderEntryIds)) {
+            return { ok: false, message: "TaskMoved v4 idempotent検証でsource_order_entry_idsが一致しません。" };
+          }
+        }
         this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_idempotent_after_match_detected", event, {
           inspection: afterInspection,
           decision: "noop_skipped_applied_after_registry_verify",
@@ -17704,6 +17927,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       return { ok: false, skipped: true, message: "date/sectionまたぎのTaskMoved payloadにsource_order_task_idsがありません。" };
     }
 
+    const reorderSection = (markdown, sectionName, entryOrder, taskOrder) =>
+      isV4
+        ? reorderTaskSectionByEntryIds(markdown, this.settings, sectionName, entryOrder)
+        : reorderTaskSectionByTaskIds(markdown, this.settings, sectionName, taskOrder);
     const sourcePath = occurrence.path;
     const targetPath = this.getTaskchutePath(targetDate);
     await this.ensureTaskchuteNote(targetDate);
@@ -17715,7 +17942,7 @@ class TaskchutePlugin extends obsidian.Plugin {
 
     if (sourcePath === targetPath && sameSection) {
       // target_order_task_idsが正データ。from/to indexでは再移動しない。
-      const targetReordered = reorderTaskSectionByTaskIds(occurrence.markdown, this.settings, targetSection.name, targetOrderTaskIds);
+      const targetReordered = reorderSection(occurrence.markdown, targetSection.name, targetOrderEntryIds, targetOrderTaskIds);
       if (!targetReordered.matchedCount) return { ok: false, skipped: true, message: "移動先の既知task_idを確定順序から解決できませんでした。" };
       if (targetReordered.markdown === occurrence.markdown) return { ok: false, skipped: true, noop: true, message: "既に確定順序と同じ位置です。" };
       const writeOk = await this.writeFileText(sourcePath, targetReordered.markdown, { deviceWriterOperation: "bridge-inbound-task-moved-board" });
@@ -17723,8 +17950,10 @@ class TaskchutePlugin extends obsidian.Plugin {
     } else if (sourcePath === targetPath) {
       const inserted = insertTaskIntoSectionAtIndex(sourceMarkdownAfterRemove, this.settings, targetSection.name, movedLine, null);
       let nextMarkdown = inserted.markdown;
-      nextMarkdown = reorderTaskSectionByTaskIds(nextMarkdown, this.settings, sourceSection.name, sourceOrderTaskIds).markdown;
-      const targetReordered = reorderTaskSectionByTaskIds(nextMarkdown, this.settings, targetSection.name, targetOrderTaskIds);
+      const sourceReordered = reorderSection(nextMarkdown, sourceSection.name, sourceOrderEntryIds, sourceOrderTaskIds);
+      if (isV4 && !sourceReordered.ok) return { ok: false, message: `TaskMoved v4 source entry order不一致: ${sourceReordered.reason}` };
+      nextMarkdown = sourceReordered.markdown;
+      const targetReordered = reorderSection(nextMarkdown, targetSection.name, targetOrderEntryIds, targetOrderTaskIds);
       if (!targetReordered.matchedCount) return { ok: false, skipped: true, message: "移動先の既知task_idを確定順序から解決できませんでした。" };
       if (targetReordered.markdown === occurrence.markdown) return { ok: false, skipped: true, noop: true, message: "既に確定順序と同じ位置です。" };
       const writeOk = await this.writeFileText(sourcePath, targetReordered.markdown, { deviceWriterOperation: "bridge-inbound-task-moved-board" });
@@ -17736,9 +17965,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         ? removeTaskKeyFromTaskBoardMarkdown(targetMarkdown, movedEntryId)
         : removeTaskIdFromTaskBoardMarkdown(targetMarkdown, taskId);
       const inserted = insertTaskIntoSectionAtIndex(targetMarkdown, this.settings, targetSection.name, movedLine, null);
-      const targetReordered = reorderTaskSectionByTaskIds(inserted.markdown, this.settings, targetSection.name, targetOrderTaskIds);
+      const targetReordered = reorderSection(inserted.markdown, targetSection.name, targetOrderEntryIds, targetOrderTaskIds);
       if (!targetReordered.matchedCount) return { ok: false, skipped: true, message: "移動先の既知task_idを確定順序から解決できませんでした。" };
-      const sourceReordered = reorderTaskSectionByTaskIds(sourceMarkdownAfterRemove, this.settings, sourceSection.name, sourceOrderTaskIds);
+      const sourceReordered = reorderSection(sourceMarkdownAfterRemove, sourceSection.name, sourceOrderEntryIds, sourceOrderTaskIds);
+      if (isV4 && !sourceReordered.ok) return { ok: false, message: `TaskMoved v4 source entry order不一致: ${sourceReordered.reason}` };
       const targetWriteOk = await this.writeFileText(targetPath, targetReordered.markdown, { deviceWriterOperation: "bridge-inbound-task-moved-target-board" });
       if (this.isTaskchuteWriteAborted(targetWriteOk)) return { ok: false, message: "TaskMovedの移動先保存が保存前確認で停止しました。" };
       const sourceWriteOk = await this.writeFileText(sourcePath, sourceReordered.markdown, { deviceWriterOperation: "bridge-inbound-task-moved-source-board" });
@@ -17757,12 +17987,19 @@ class TaskchutePlugin extends obsidian.Plugin {
     } catch (e) {
       return { ok: false, message: "TaskMoved反映後のindex/cache更新に失敗しました。" };
     }
+    if (isV4 && !samePayloadLocation) {
+      const savedSourceInfo = await this.getBridgeSectionOrderInfo(fromDate || occurrence.date, sourceSection.id);
+      if (savedSourceInfo.missingEntryIdCount || savedSourceInfo.duplicateEntryIds.length
+        || JSON.stringify(savedSourceInfo.entryIds) !== JSON.stringify(sourceOrderEntryIds)) {
+        return { ok: false, message: "TaskMoved v4 source_order_entry_idsの保存後検証に失敗しました。" };
+      }
+    }
     if (dateChange) {
       const verification = await this.inspectBridgeTaskMovedDateChangeVaultState(
         taskId,
         Object.assign({}, from, { date: fromDate, entry_id: fromEntryId }),
         Object.assign({}, to, { date: toDate, entry_id: toEntryId }),
-        { stage: "inbound-date-change-after-save", index: rebuiltIndex, expectedTargetOrder: targetOrderTaskIds }
+        { stage: "inbound-date-change-after-save", index: rebuiltIndex, expectedTargetOrder: targetOrderTaskIds, expectedTargetEntryOrder: targetOrderEntryIds, expectedSourceEntryOrder: isV4 ? sourceOrderEntryIds : undefined }
       );
       await this.recordBridgeTaskMovedSectionDiagnostic(verification);
       if (!verification.ok) return { ok: false, message: verification.reason || "TaskMoved日付移動の保存後検証に失敗しました。" };
@@ -21737,6 +21974,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           taskId,
           routineOccurrenceKey: alreadyRoutineFields.routine_occurrence_key || ""
         });
+        if (cleaned.taskIdFallbackBlocked) return { ok: false, message: "TaskCompleted running cleanupのtask_id fallbackが複数行に一致したため停止しました。" };
         if (cleaned.markdown !== md) {
           const cleanupWriteOk = await this.writeFileText(notePath, cleaned.markdown, { deviceWriterOperation: "bridge-inbound-task-completed-running-cleanup" });
           if (this.isTaskchuteWriteAborted(cleanupWriteOk)) return { ok: false, message: "TaskCompleted冪等確認中のrunning行cleanupが保存前確認で停止しました。" };
@@ -21794,12 +22032,16 @@ class TaskchutePlugin extends obsidian.Plugin {
     const logDaily = `- [exec_id::${execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] ${routineLogFields}`;
     md = replaceTaskCheckbox(md, entryId, true);
     if (sectionName) md = moveTaskLineToSection(md, this.settings, entryId, sectionName);
-    md = removeActiveRunningExecutionLogs(md, {
+    const runningCleanup = removeActiveRunningExecutionLogs(md, {
       execId,
       entryId,
       taskId,
       routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
-    }).markdown;
+    });
+    if (runningCleanup.taskIdFallbackBlocked) {
+      return { ok: false, message: "TaskCompleted running cleanupのtask_id fallbackが複数行に一致したため停止しました。" };
+    }
+    md = runningCleanup.markdown;
     md = appendSection(md, "Log", log);
     md = appendSection(md, "LogDaily", logDaily);
     const writeOk = await this.writeFileText(notePath, md, { deviceWriterOperation: "bridge-inbound-task-completed-board" });
@@ -24216,18 +24458,28 @@ class TaskchutePlugin extends obsidian.Plugin {
       : (sameSection ? "date-change" : "date-section-change");
     // TaskMoved payloadの順序は、移動・保存・ソート完了後のMarkdownだけを正とする。
     // 呼び出し元のDOM順、移動前配列、古いfocus indexはtarget_order_task_idsに使わない。
-    const targetOrderTaskIds = await this.getBridgeSectionOrderTaskIds(to.date, to.section_id);
-    const sourceOrderTaskIds = sameDateSection
-      ? []
-      : await this.getBridgeSectionOrderTaskIds(from.date, from.section_id);
+    const targetOrderInfo = await this.getBridgeSectionOrderInfo(to.date, to.section_id);
+    const sourceOrderInfo = sameDateSection
+      ? { entryIds: [], taskIds: [], missingEntryIdCount: 0, duplicateEntryIds: [], duplicateTaskIds: [] }
+      : await this.getBridgeSectionOrderInfo(from.date, from.section_id);
+    const targetOrderTaskIds = targetOrderInfo.taskIds.slice();
+    const sourceOrderTaskIds = sourceOrderInfo.taskIds.slice();
+    const targetOrderEntryIds = targetOrderInfo.entryIds.slice();
+    const sourceOrderEntryIds = sourceOrderInfo.entryIds.slice();
+    const targetOrderInvalid = targetOrderInfo.missingEntryIdCount > 0 || targetOrderInfo.duplicateEntryIds.length > 0;
+    const sourceOrderInvalid = !sameDateSection && (sourceOrderInfo.missingEntryIdCount > 0 || sourceOrderInfo.duplicateEntryIds.length > 0);
+    if (targetOrderInvalid || sourceOrderInvalid) {
+      return await recordFailure(`TaskMoved v4 entry orderを生成できません。${targetOrderInvalid ? "target" : "source"} entry identity invalid`);
+    }
     if (!targetOrderTaskIds.length) return await recordFailure("移動先の確定順序を取得できませんでした。");
-    const confirmedTargetIndex = targetOrderTaskIds.indexOf(taskId);
-    if (confirmedTargetIndex < 0) return await recordFailure("移動先の確定順序に対象task_idがありません。");
+    const confirmedTargetIndex = targetOrderEntryIds.indexOf(to.entry_id || entryId);
+    if (confirmedTargetIndex < 0) return await recordFailure("移動先の確定順序に対象entry_idがありません。");
     to.index = confirmedTargetIndex;
     const sectionDiagnostic = await this.inspectBridgeTaskMovedVaultState(taskId, to.entry_id || entryId, to.date || taskDate, to.section_id, {
       stage: "enqueue-before-append",
       index: rebuiltIndex,
-      expectedTargetOrder: targetOrderTaskIds
+      expectedTargetOrder: targetOrderTaskIds,
+      expectedTargetEntryOrder: targetOrderEntryIds
     });
     await this.recordBridgeTaskMovedSectionDiagnostic(sectionDiagnostic);
     if (!sectionDiagnostic.ok) return await recordFailure(sectionDiagnostic.reason);
@@ -24243,6 +24495,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       after_save_order: Array.isArray(movement.afterSaveOrder) ? movement.afterSaveOrder.slice() : targetOrderTaskIds.slice(),
       after_rebuild_order: Array.isArray(movement.afterRebuildOrder) ? movement.afterRebuildOrder.slice() : [],
       emitted_target_order_task_ids: targetOrderTaskIds.slice(),
+      source_order_entry_ids: sourceOrderEntryIds.slice(),
+      target_order_entry_ids: targetOrderEntryIds.slice(),
+      entry_order_used: true,
+      task_order_diagnostic_only: true,
       after_move_matches_save: JSON.stringify(Array.isArray(movement.afterMoveOrder) ? movement.afterMoveOrder : []) === JSON.stringify(Array.isArray(movement.afterSaveOrder) ? movement.afterSaveOrder : targetOrderTaskIds),
       after_save_matches_rebuild: JSON.stringify(Array.isArray(movement.afterSaveOrder) ? movement.afterSaveOrder : targetOrderTaskIds) === JSON.stringify(Array.isArray(movement.afterRebuildOrder) ? movement.afterRebuildOrder : []),
       after_save_matches_emitted: JSON.stringify(Array.isArray(movement.afterSaveOrder) ? movement.afterSaveOrder : targetOrderTaskIds) === JSON.stringify(targetOrderTaskIds),
@@ -24266,8 +24522,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         before: Object.assign({}, from),
         after: Object.assign({}, to),
         ...(sameDateSection ? {} : { source_order_task_ids: sourceOrderTaskIds }),
+        ...(sameDateSection ? {} : { source_order_entry_ids: sourceOrderEntryIds }),
         target_order_task_ids: targetOrderTaskIds,
-        move_payload_version: 3,
+        target_order_entry_ids: targetOrderEntryIds,
+        move_payload_version: 4,
         taskmoved_payload_source: payloadSource,
         order_diagnostic: orderDiagnostic,
         move_type: moveType,
@@ -32168,8 +32426,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     task.sectionId = afterSectionId;
     if (String(before.section_id || "").trim() === afterSectionId) return true;
 
-    const afterOrder = await this.getBridgeSectionOrderTaskIds(date, afterSectionId);
-    const afterIndex = afterOrder.indexOf(taskId);
+    const afterOrderInfo = await this.getBridgeSectionOrderInfo(date, afterSectionId);
+    const afterOrder = afterOrderInfo.taskIds;
+    const afterIndex = afterOrderInfo.entryIds.indexOf(entryId);
     if (afterIndex < 0) {
       this.settings.bridgeLastTaskMovedEnqueueAt = nowIso();
       this.settings.bridgeLastTaskMovedEnqueueOk = false;
@@ -32240,13 +32499,15 @@ class TaskchutePlugin extends obsidian.Plugin {
     const sectionId = String(section && section.id || "").trim();
     const sectionLabel = String(section && section.name || found.section || "").trim();
     if (!sectionId) return null;
+    const orderInfo = await this.getBridgeSectionOrderInfo(normalizedDate, sectionId);
     return {
       date: normalizedDate,
       entry_id: requestedEntryId || taskKeyFromTaskLine(found.line) || "",
       section_id: sectionId,
       section_label: sectionLabel,
       index: Math.max(0, Number(found.index || 0)),
-      order: await this.getBridgeSectionOrderTaskIds(normalizedDate, sectionId),
+      order: orderInfo.taskIds,
+      entry_order: orderInfo.entryIds,
       occurrence: found
     };
   }
@@ -32272,7 +32533,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     task.sectionId = after.section_id;
     if (String(before.section_id || "").trim() === String(after.section_id || "").trim()) return { ok: true, moved: false, after };
 
-    const afterIndex = Array.isArray(after.order) ? after.order.indexOf(taskId) : -1;
+    const afterIndex = Array.isArray(after.entry_order) ? after.entry_order.indexOf(entryId) : -1;
     if (afterIndex < 0) {
       this.settings.bridgeLastTaskMovedEnqueueAt = nowIso();
       this.settings.bridgeLastTaskMovedEnqueueOk = false;
@@ -34073,7 +34334,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         ? activeView.getSectionTaskOrderTaskIds(sourceItem.section)
         : sourceMarkdownOrderBefore;
       const sourceSectionOrderBefore = mergeTaskOrderWithPreferredSubset(sourceMarkdownOrderBefore, sourceViewOrderBefore);
-      const sourceSectionIndexBefore = Math.max(0, sourceSectionOrderBefore.indexOf(sourceBridgeTaskId));
+      const sourceEntryOrderBefore = getTaskSectionOrderInfoFromMarkdown(md, sourceItem.section).entryIds;
+      const sourceSectionIndexBefore = Math.max(0, sourceEntryOrderBefore.indexOf(sourceItem.id));
       const isTopProtectedItem = (item) => {
         if (!item) return false;
         const task = this.getTaskFromViewByKey(item.id, activeView);
@@ -34122,22 +34384,23 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (targetItem && sourceItem.section === targetItem.section) {
         const targetTask = this.getTaskFromViewByKey(targetItem.id, activeView);
         const targetBridgeTaskId = String(targetTask && (targetTask.taskId || targetTask.task_id) || taskIdFromTaskLine(targetItem.line) || "").trim();
-        const afterMoveOrder = sourceSectionOrderBefore.slice();
-        const fromOrderIndex = afterMoveOrder.indexOf(sourceBridgeTaskId);
-        const targetOrderIndex = afterMoveOrder.indexOf(targetBridgeTaskId);
+        const afterMoveEntryOrder = sourceEntryOrderBefore.slice();
+        const fromOrderIndex = afterMoveEntryOrder.indexOf(sourceItem.id);
+        const targetOrderIndex = afterMoveEntryOrder.indexOf(targetItem.id);
         if (fromOrderIndex < 0 || targetOrderIndex < 0) {
           new obsidian.Notice("移動直前のセクション順序を解決できませんでした");
           return false;
         }
-        const movedId = afterMoveOrder.splice(fromOrderIndex, 1)[0];
-        const insertOrderIndex = afterMoveOrder.indexOf(targetBridgeTaskId) + (direction > 0 ? 1 : 0);
-        afterMoveOrder.splice(Math.max(0, insertOrderIndex), 0, movedId);
-        const reordered = reorderTaskSectionByTaskIds(md, this.settings, sourceItem.section, afterMoveOrder);
-        if (!reordered.matchedCount) {
+        const movedId = afterMoveEntryOrder.splice(fromOrderIndex, 1)[0];
+        const insertOrderIndex = afterMoveEntryOrder.indexOf(targetItem.id) + (direction > 0 ? 1 : 0);
+        afterMoveEntryOrder.splice(Math.max(0, insertOrderIndex), 0, movedId);
+        const reordered = reorderTaskSectionByEntryIds(md, this.settings, sourceItem.section, afterMoveEntryOrder);
+        if (!reordered.ok) {
           new obsidian.Notice("移動後のセクション順序をMarkdownへ反映できませんでした");
           return false;
         }
         lines = reordered.markdown.split(/\r?\n/);
+        const afterMoveOrder = getTaskSectionOrderTaskIdsFromMarkdown(reordered.markdown, sourceItem.section);
 
         const sourceStartPlan = sourceTask && sourceTask.startPlan != null
           ? sourceTask.startPlan
@@ -37245,13 +37508,37 @@ class TaskchutePlugin extends obsidian.Plugin {
     md = appendSection(md, "Log", log);
     md = appendSection(md, "LogDaily", logDaily);
     const interruptedWriteOk = await this.writeFileText(notePath, md);
+    let confirmedContinuationSection = continuationSection;
+    if (interruptedWriteOk !== false) {
+      try {
+        const savedMarkdown = await readFileText(this.app, notePath);
+        const savedContinuation = parseTasks(savedMarkdown).find(task => taskKey(task) === continuationEntryId) || null;
+        if (savedContinuation) {
+          confirmedContinuationSection = resolveTaskSection(
+            this.settings,
+            savedContinuation.sectionId || savedContinuation.section || continuationSection.id || continuationSection.name
+          );
+        }
+      } catch (e) {}
+    }
 
     this.runtime.running = null;
     this.runtime.selectedTaskId = nextKey || "";
     if (Array.isArray(this.runtime.multiSelectedTaskIds)) {
       this.runtime.multiSelectedTaskIds = this.runtime.multiSelectedTaskIds.filter(id => id !== entryKey);
     }
-    const stopped = Object.assign({}, r, { continuationEntryId, actual, endAt: end, logStatus: "interrupted", section: interruptedSection.name, sectionId: interruptedSection.id, startActual: r.startedAt, sourceDate: date });
+    const stopped = Object.assign({}, r, {
+      continuationEntryId,
+      continuationSection: confirmedContinuationSection.name,
+      continuationSectionId: confirmedContinuationSection.id,
+      actual,
+      endAt: end,
+      logStatus: "interrupted",
+      section: interruptedSection.name,
+      sectionId: interruptedSection.id,
+      startActual: r.startedAt,
+      sourceDate: date
+    });
     if (interruptedWriteOk !== false) {
       await this.enqueueBridgeLifecycleEvent("TaskStopped", stopped, end, {
         reason: "interrupt",
@@ -37274,8 +37561,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         actualTotal: 0,
         startActual: "",
         endActual: "",
-        section: continuationSection.name,
-        sectionId: continuationSection.id,
+        section: confirmedContinuationSection.name,
+        sectionId: confirmedContinuationSection.id,
         sourceDate: date
       });
       const continuationBridgeCreated = await this.enqueueBridgeTaskCreated(continuationTask, {
@@ -37451,6 +37738,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         taskId: r.taskId,
         routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
       });
+      if (cleaned.taskIdFallbackBlocked) return false;
       if (cleaned.markdown !== md) {
         const cleanupWriteOk = await this.writeFileText(notePath, cleaned.markdown);
         if (this.isTaskchuteWriteAborted(cleanupWriteOk)) return false;
@@ -37487,12 +37775,14 @@ class TaskchutePlugin extends obsidian.Plugin {
     const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] ${routineLogFields}`;
     md = replaceTaskCheckbox(md, completedKey, true);
     md = moveTaskLineToSection(md, this.settings, completedKey, completedSection.name);
-    md = removeActiveRunningExecutionLogs(md, {
+    const runningCleanup = removeActiveRunningExecutionLogs(md, {
       execId: r.execId,
       entryId: completedKey,
       taskId: r.taskId,
       routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
-    }).markdown;
+    });
+    if (runningCleanup.taskIdFallbackBlocked) return false;
+    md = runningCleanup.markdown;
     md = appendSection(md, "Log", log);
     md = appendSection(md, "LogDaily", logDaily);
     const completeWriteOk = await this.writeFileText(notePath, md);
@@ -42240,8 +42530,8 @@ class TaskchuteView extends obsidian.ItemView {
         taskKey: interrupted.continuationEntryId,
         title: interrupted.title,
         file: interrupted.file,
-        section: interrupted.section || (payload.nextTask && payload.nextTask.section) || "",
-        sectionId: interrupted.sectionId || "",
+        section: interrupted.continuationSection || (payload.nextTask && payload.nextTask.section) || "",
+        sectionId: interrupted.continuationSectionId || "",
         estimateMin: Number(interrupted.estimateMin || this.plugin.settings.defaultEstimateMin || 15),
         checked: false,
         actualTotal: 0,
@@ -42254,6 +42544,15 @@ class TaskchuteView extends obsidian.ItemView {
       };
       this.plugin.ensureSectionExpandedForIncomingTask(continuation.sectionId || continuation.section || TC_NO_SECTION_ID);
       this.insertTaskRowBelowVisual(continuation, payload.nextTask ? taskKey(payload.nextTask) : "", { editTitle: false, select: false });
+      const insertedContinuation = (this.latestTasks || []).find(task => taskKey(task) === continuation.entryId) || null;
+      const insertedSection = resolveTaskSection(this.plugin.settings, insertedContinuation && (insertedContinuation.sectionId || insertedContinuation.section) || "");
+      const expectedSection = resolveTaskSection(this.plugin.settings, continuation.sectionId || continuation.section || "");
+      if (!insertedContinuation || insertedSection.id !== expectedSection.id) {
+        this.plugin.updateTaskRowsInViews([continuation.entryId], {
+          [continuation.entryId]: { section: expectedSection.name, sectionId: expectedSection.id }
+        });
+        this.moveTaskRowToSectionVisual(continuation.entryId, expectedSection.name, 1);
+      }
     }
     const started = payload.startedTask || this.plugin.runtime.running;
     if (started) keys.push(started.entryId || started.taskKey || started.taskId);
