@@ -5899,6 +5899,34 @@ function getTaskSectionOrderInfoFromMarkdown(markdown, sectionName) {
   };
 }
 
+function getExplicitTaskCreatedRoutineFields(source = {}) {
+  const src = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  const meta = src.entryMeta && typeof src.entryMeta === "object" && !Array.isArray(src.entryMeta) ? src.entryMeta : {};
+  const pick = (...keys) => {
+    for (const key of keys) {
+      if (src[key] != null && String(src[key]).trim() !== "") return src[key];
+      if (meta[key] != null && String(meta[key]).trim() !== "") return meta[key];
+    }
+    return "";
+  };
+  const occurrenceKey = String(pick("routine_occurrence_key", "routineOccurrenceKey") || "").trim();
+  const routineId = String(pick("generated_by_routine_id", "generatedByRoutineId", "routine_id", "routineId") || "").trim();
+  const explicitRoutineMarker = isTrueLike(pick("is_routine", "isRoutine"));
+  const generatedRoutineId = String(pick("generated_by_routine_id", "generatedByRoutineId") || "").trim();
+  if (!occurrenceKey || !(explicitRoutineMarker || generatedRoutineId)) return {};
+  const generatedForDate = String(pick("routine_generated_for_date", "routineGeneratedForDate", "routine_date", "routineDate") || "").trim();
+  return {
+    is_routine: "true",
+    routine_id: routineId,
+    generated_by_routine_id: generatedRoutineId || routineId,
+    routine_occurrence_key: occurrenceKey,
+    routine_generated_for_date: generatedForDate,
+    routine_date: String(pick("routine_date", "routineDate") || generatedForDate).trim(),
+    routine_scheduled_time: String(pick("routine_scheduled_time", "routineScheduledTime", "start_plan", "startPlan") || "").trim(),
+    routine_source: String(pick("routine_source", "routineSource", "file", "fileBase", "file_base") || "").trim()
+  };
+}
+
 function reorderTaskSectionByEntryIds(markdown, settings, sectionName, orderedEntryIds, options = {}) {
   const requested = Array.isArray(orderedEntryIds) ? orderedEntryIds.map(value => String(value || "").trim()) : [];
   const duplicateEntryIds = Array.from(new Set(requested.filter((value, index) => value && requested.indexOf(value) !== index)));
@@ -15854,19 +15882,42 @@ class TaskchutePlugin extends obsidian.Plugin {
     const title = String(link && link.alias || "").trim();
     const file = String(link && link.file || "").trim();
     if (!title) return { ok: false, message: "TaskCreated送信前検査で現在タイトルを解決できませんでした。" };
-    const changed = String(payload.title || "").trim() !== title || (!!file && String(payload.file || "").trim() !== file);
+    const routineFieldNames = [
+      "is_routine", "routine_id", "generated_by_routine_id", "routine_occurrence_key",
+      "routine_generated_for_date", "routine_date", "routine_scheduled_time", "routine_source"
+    ];
+    const markdownRoutineFields = getExplicitTaskCreatedRoutineFields({
+      entryMeta: tcMetaFromTaskLine(occurrence.line),
+      file
+    });
+    const nextPayload = Object.assign({}, payload, {
+      title,
+      ...(file ? { file } : {})
+    });
+    routineFieldNames.forEach(key => { delete nextPayload[key]; });
+    Object.assign(nextPayload, markdownRoutineFields);
+    const changed = String(payload.title || "").trim() !== title
+      || (!!file && String(payload.file || "").trim() !== file)
+      || routineFieldNames.some(key => String(payload[key] == null ? "" : payload[key]).trim()
+        !== String(nextPayload[key] == null ? "" : nextPayload[key]).trim());
     if (changed) {
       const after = payload.after && typeof payload.after === "object" && !Array.isArray(payload.after)
         ? Object.assign({}, payload.after, { title })
         : null;
-      event.payload = Object.assign({}, payload, {
-        title,
-        ...(file ? { file } : {}),
+      event.payload = Object.assign({}, nextPayload, {
         ...(after ? { after } : {})
       });
     }
     this.settings.bridgeTaskCreatedLastFinalTitleSummary = title;
-    return { ok: true, changed, taskId, entryId, title };
+    return {
+      ok: true,
+      changed,
+      taskId,
+      entryId,
+      title,
+      routine_occurrence_key: String(markdownRoutineFields.routine_occurrence_key || "").trim(),
+      routine_metadata_refreshed_from_markdown: !!markdownRoutineFields.routine_occurrence_key
+    };
   }
 
   async testBridgeManualSend() {
@@ -17071,7 +17122,33 @@ class TaskchutePlugin extends obsidian.Plugin {
     await this.ensureTaskchuteNote(date);
     const notePath = this.getTaskchutePath(date);
     let md = await readFileText(this.app, notePath);
-    if (routineOccurrenceKey && parseTasks(md).some(task =>
+    const requestedEntryId = String(payload.entry_id || "").trim();
+    const requestedEntryLines = requestedEntryId
+      ? String(md || "").split(/\r?\n/).filter(line => isTaskLine(line) && taskKeyFromTaskLine(line) === requestedEntryId)
+      : [];
+    if (requestedEntryLines.length > 1) {
+      return { ok: false, message: "TaskCreatedのentry_idに一致するTaskBoard行が複数あるためAckしません。" };
+    }
+    if (requestedEntryLines.length === 1) {
+      const expectedRoutineFields = getExplicitTaskCreatedRoutineFields(payload);
+      const actualRoutineFields = getExplicitTaskCreatedRoutineFields({
+        entryMeta: tcMetaFromTaskLine(requestedEntryLines[0]),
+        file: linkTitleFromLine(requestedEntryLines[0]) && linkTitleFromLine(requestedEntryLines[0]).file
+      });
+      const routineFieldNames = [
+        "is_routine", "routine_id", "generated_by_routine_id", "routine_occurrence_key",
+        "routine_generated_for_date", "routine_date", "routine_scheduled_time", "routine_source"
+      ];
+      const routineMetadataVerified = !expectedRoutineFields.routine_occurrence_key
+        || routineFieldNames.every(key => String(actualRoutineFields[key] || "").trim() === String(expectedRoutineFields[key] || "").trim());
+      if (!routineMetadataVerified) {
+        return { ok: false, message: "TaskCreated既存entryのRoutine metadataがpayloadと一致しないためAckしません。" };
+      }
+      this.markBridgeTaskCreatedKnown(taskId, requestedEntryId);
+      await this.recordBridgeUsedIds(taskId, requestedEntryId, "bridge-inbound-task-created-existing-id-record");
+      return { ok: true, noop: true, verified: true, message: "対象TaskBoard行は同じentry_idとmetadataで既に存在します。" };
+    }
+    if (!isContinuation && routineOccurrenceKey && parseTasks(md).some(task =>
       String(task.entryMeta && task.entryMeta.routine_occurrence_key || "").trim() === routineOccurrenceKey
       || (generatedRoutineId && String(task.entryMeta && task.entryMeta.routine_id || "").trim() === generatedRoutineId)
     )) {
@@ -17089,25 +17166,13 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (this.isTaskchuteWriteAborted(taskWriteOk)) return { ok: false, message: "タスクノート作成が保存前確認で停止しました。" };
     }
 
-    const requestedEntryId = String(payload.entry_id || "").trim();
-    if (requestedEntryId && existingTarget && Array.isArray(existingTarget.occurrences)
-      && existingTarget.occurrences.some(item => taskKeyFromTaskLine(item && item.line || "") === requestedEntryId)) {
-      this.markBridgeTaskCreatedKnown(taskId, requestedEntryId);
-      await this.recordBridgeUsedIds(taskId, requestedEntryId, "bridge-inbound-task-created-existing-id-record");
-      return { ok: true, noop: true, message: "対象TaskBoard行は既に存在します。" };
-    }
-    if (requestedEntryId && countTaskLinesMatchingKey(md, requestedEntryId) > 0) {
-      this.markBridgeTaskCreatedKnown(taskId, requestedEntryId);
-      await this.recordBridgeUsedIds(taskId, requestedEntryId, "bridge-inbound-task-created-existing-id-record");
-      return { ok: true, noop: true, message: "対象TaskBoard行は既に存在します。" };
-    }
     const entryId = requestedEntryId || await this.nextUniqueEntryId(date, md);
     const lineMeta = {
       estimate_min: estimateMin, start_plan: startPlan, end_plan: endPlan, section: sec.name || "", section_id: sec.id || "",
       project: String(payload.project || "").trim(), mode: String(payload.mode || "").trim(),
       category: String(payload.category || "").trim(), area: String(payload.area || "").trim(), client: String(payload.client || "").trim()
     };
-    ["generated_by_routine_id", "routine_occurrence_key", "routine_generated_for_date", "routine_scheduled_time", "routine_id", "is_routine", "routine_source"].forEach(key => {
+    ["generated_by_routine_id", "routine_occurrence_key", "routine_generated_for_date", "routine_date", "routine_scheduled_time", "routine_id", "is_routine", "routine_source"].forEach(key => {
       if (payload[key] != null && String(payload[key]).trim() !== "") lineMeta[key] = String(payload[key]).trim();
     });
     if (!lineMeta.routine_source && generatedRoutineId && fileBase) lineMeta.routine_source = fileBase;
@@ -17120,6 +17185,27 @@ class TaskchutePlugin extends obsidian.Plugin {
       : insertTaskIntoSection(md, this.settings, sec.name, createdLine);
     const boardWriteOk = await this.writeFileText(notePath, md, { deviceWriterOperation: "bridge-inbound-task-created-board" });
     if (this.isTaskchuteWriteAborted(boardWriteOk)) return { ok: false, message: "Taskchuteノートへの追加が保存前確認で停止しました。" };
+    const savedMarkdown = await readFileText(this.app, notePath);
+    const savedEntryLines = String(savedMarkdown || "").split(/\r?\n/)
+      .filter(line => isTaskLine(line) && taskKeyFromTaskLine(line) === entryId);
+    if (savedEntryLines.length !== 1) {
+      return { ok: false, message: "TaskCreated保存後にentry_id一致行を一意に検証できないためAckしません。" };
+    }
+    const expectedRoutineFields = getExplicitTaskCreatedRoutineFields(payload);
+    const savedLink = linkTitleFromLine(savedEntryLines[0]);
+    const savedRoutineFields = getExplicitTaskCreatedRoutineFields({
+      entryMeta: tcMetaFromTaskLine(savedEntryLines[0]),
+      file: savedLink && savedLink.file
+    });
+    const routineFieldNames = [
+      "is_routine", "routine_id", "generated_by_routine_id", "routine_occurrence_key",
+      "routine_generated_for_date", "routine_date", "routine_scheduled_time", "routine_source"
+    ];
+    const routineMetadataVerified = !expectedRoutineFields.routine_occurrence_key
+      || routineFieldNames.every(key => String(savedRoutineFields[key] || "").trim() === String(expectedRoutineFields[key] || "").trim());
+    if (!routineMetadataVerified) {
+      return { ok: false, message: "TaskCreated保存後のRoutine metadata検証に失敗したためAckしません。" };
+    }
     const startActual = String(payload.start_actual || payload.started_at || payload.start_time || payload.start_at || payload.start || "").trim();
     const endActual = String(payload.end_actual || payload.ended_at || payload.end_time || payload.end_at || payload.end || "").trim();
     if (startActual || endActual) {
@@ -24128,7 +24214,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     const deviceId = String(this.settings.bridgeDeviceId || "").trim();
     const taskId = String(task && (task.taskId || task.task_id) || "").trim();
     const entryId = String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim();
-    const generatedRoutineId = String(task && (task.generatedByRoutineId || task.generated_by_routine_id || task.routineId || task.routine_id) || "").trim();
+    const explicitRoutineFields = getExplicitTaskCreatedRoutineFields(task);
+    const generatedRoutineId = String(explicitRoutineFields.generated_by_routine_id || explicitRoutineFields.routine_id || "").trim();
     if (generatedRoutineId && this.isBridgeInboundKnownRoutineDefinition(generatedRoutineId)) {
       this.recordBridgeRoutineDiagnostic("routine_taskcreated_inbound_echo_blocked", {
         routine_id: generatedRoutineId,
@@ -24175,15 +24262,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         category: String(task && task.category || "").trim(),
         area: String(task && task.area || "").trim(),
         client: String(task && task.client || "").trim(),
-        ...(task && (task.generatedByRoutineId || task.generated_by_routine_id) ? {
-          is_routine: "true",
-          routine_id: String(task.generatedByRoutineId || task.generated_by_routine_id || "").trim(),
-          generated_by_routine_id: String(task.generatedByRoutineId || task.generated_by_routine_id || "").trim(),
-          routine_occurrence_key: String(task.routineOccurrenceKey || task.routine_occurrence_key || "").trim(),
-          routine_generated_for_date: String(task.routineGeneratedForDate || task.routine_generated_for_date || task.sourceDate || task.date || "").trim(),
-          routine_scheduled_time: String(task.routineScheduledTime || task.routine_scheduled_time || task.startPlan || task.start_plan || "").trim(),
-          routine_source: String(task.routineSource || task.routine_source || task.fileBase || task.file || task.file_base || "").trim()
-        } : {}),
+        ...explicitRoutineFields,
         ...this.getBridgeTaskTimeFields(task),
         creation_source: String(options && options.creationSource || "task-add").trim() || "task-add",
         ...(options && options.continuationOfTaskId ? { continuation_of_task_id: String(options.continuationOfTaskId || "").trim() } : {}),
@@ -37802,6 +37881,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       routine_occurrence_key: interruptedRoutineFields.routine_occurrence_key || "",
       routine_date: interruptedRoutineFields.routine_date || interruptedRoutineFields.routine_generated_for_date || "",
       routine_generated_for_date: interruptedRoutineFields.routine_generated_for_date || interruptedRoutineFields.routine_date || "",
+      routine_scheduled_time: interruptedRoutineFields.routine_scheduled_time || "",
       routine_source: interruptedRoutineFields.routine_source || r.file || ""
     } : {};
     const continuationLine = taskLine(r.file, r.title, false, continuationEntryId, continuationMeta);
@@ -37815,11 +37895,13 @@ class TaskchutePlugin extends obsidian.Plugin {
     md = appendSection(md, "LogDaily", logDaily);
     const interruptedWriteOk = await this.writeFileText(notePath, md);
     let confirmedContinuationSection = continuationSection;
+    let savedContinuationForBridge = null;
     if (interruptedWriteOk !== false) {
       try {
         const savedMarkdown = await readFileText(this.app, notePath);
         const savedContinuation = parseTasks(savedMarkdown).find(task => taskKey(task) === continuationEntryId) || null;
         if (savedContinuation) {
+          savedContinuationForBridge = savedContinuation;
           confirmedContinuationSection = resolveTaskSection(
             this.settings,
             savedContinuation.sectionId || savedContinuation.section || continuationSection.id || continuationSection.name
@@ -37872,17 +37954,24 @@ class TaskchutePlugin extends obsidian.Plugin {
         endActual: "",
         section: confirmedContinuationSection.name,
         sectionId: confirmedContinuationSection.id,
-        sourceDate: date
+        sourceDate: date,
+        entryMeta: savedContinuationForBridge && savedContinuationForBridge.entryMeta
+          ? Object.assign({}, savedContinuationForBridge.entryMeta) : {}
       });
-      const continuationBridgeCreated = await this.enqueueBridgeTaskCreated(continuationTask, {
-        creationSource: "interrupt-continuation",
-        continuationOfTaskId: r.taskId,
-        continuedFromTaskId: r.taskId,
-        continuationSourceTaskId: r.taskId,
-        continuationAfterEntryId: nextKey,
-        continuationStoppedAt: end,
-        continuationNextTaskId: nextTask && nextTask.taskId ? nextTask.taskId : ""
-      });
+      const confirmedRoutineFields = getExplicitTaskCreatedRoutineFields(continuationTask);
+      const routineContinuationConfirmed = interruptedIdentity.classification !== "routine_occurrence"
+        || !!confirmedRoutineFields.routine_occurrence_key;
+      const continuationBridgeCreated = routineContinuationConfirmed
+        ? await this.enqueueBridgeTaskCreated(Object.assign({}, continuationTask, confirmedRoutineFields), {
+          creationSource: "interrupt-continuation",
+          continuationOfTaskId: r.taskId,
+          continuedFromTaskId: r.taskId,
+          continuationSourceTaskId: r.taskId,
+          continuationAfterEntryId: nextKey,
+          continuationStoppedAt: end,
+          continuationNextTaskId: nextTask && nextTask.taskId ? nextTask.taskId : ""
+        })
+        : false;
       if (this.settings.bridgeEnabled && continuationBridgeCreated === false) {
         new obsidian.Notice("続き用タスクはローカル作成済みですが、TaskCreatedをBridge outboxへ保存できませんでした。後続イベント送信は停止されます。");
       }
