@@ -1945,26 +1945,34 @@ function removeActiveRunningExecutionLogs(markdown, identity = {}) {
   const entryId = String(identity.entryId || identity.entry_id || "").trim();
   const taskId = String(identity.taskId || identity.task_id || "").trim();
   const matchedBy = execId ? "exec_id" : occurrenceKey ? "routine_occurrence_key" : entryId ? "entry_id" : taskId ? "task_id" : "";
-  if (matchedBy === "task_id") {
-    let sectionName = "";
-    const taskMatches = lines.filter(line => {
-      const heading = String(line || "").match(/^##\s+(.+?)\s*$/);
-      if (heading) sectionName = heading[1].trim();
-      return (sectionName === "Log" || sectionName === "LogDaily")
-        && /^\s*-\s+\[exec_id::/.test(String(line || ""))
-        && isRunningExecutionLogLine(line)
-        && executionLogLineMatchesIdentity(line, identity);
-    });
-    if (taskMatches.length > 2) {
-      return {
-        markdown: String(markdown || ""),
-        removedDateLog: 0,
-        removedLogDaily: 0,
-        matchedBy,
-        taskIdFallbackBlocked: true,
-        matchingRunningRowCount: taskMatches.length
-      };
+  let scanSection = "";
+  const matchingRows = [];
+  for (const line of lines) {
+    const heading = String(line || "").match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      scanSection = heading[1].trim();
+      continue;
     }
+    if (scanSection !== "Log" && scanSection !== "LogDaily") continue;
+    if (!/^\s*-\s+\[exec_id::/.test(String(line || ""))) continue;
+    if (!isRunningExecutionLogLine(line)) continue;
+    if (executionLogLineMatchesIdentity(line, identity)) matchingRows.push({ section: scanSection, line });
+  }
+  const matchingDateLogCount = matchingRows.filter(item => item.section === "Log").length;
+  const matchingLogDailyCount = matchingRows.filter(item => item.section === "LogDaily").length;
+  const duplicateRunningDetected = matchingDateLogCount > 1 || matchingLogDailyCount > 1;
+  if (duplicateRunningDetected) {
+    return {
+      markdown: String(markdown || ""),
+      removedDateLog: 0,
+      removedLogDaily: 0,
+      matchedBy,
+      taskIdFallbackBlocked: matchedBy === "task_id",
+      duplicateRunningDetected: true,
+      matchingRunningRowCount: matchingRows.length,
+      matchingDateLogCount,
+      matchingLogDailyCount
+    };
   }
   let section = "";
   let removedDateLog = 0;
@@ -1985,7 +1993,17 @@ function removeActiveRunningExecutionLogs(markdown, identity = {}) {
     }
     out.push(line);
   }
-  return { markdown: out.join("\n"), removedDateLog, removedLogDaily, matchedBy, taskIdFallbackBlocked: false };
+  return {
+    markdown: out.join("\n"),
+    removedDateLog,
+    removedLogDaily,
+    matchedBy,
+    taskIdFallbackBlocked: false,
+    duplicateRunningDetected: false,
+    matchingRunningRowCount: matchingRows.length,
+    matchingDateLogCount,
+    matchingLogDailyCount
+  };
 }
 function hasActiveRunningExecutionLog(markdown, identity = {}, sectionName = "") {
   const targetSection = String(sectionName || "").trim();
@@ -2004,6 +2022,32 @@ function hasActiveRunningExecutionLog(markdown, identity = {}, sectionName = "")
     if (executionLogLineMatchesIdentity(line, identity)) return true;
   }
   return false;
+}
+function findExecutionLogLine(markdown, identity = {}, sectionName = "", status = "") {
+  const targetSection = String(sectionName || "").trim();
+  const targetStatus = String(status || "").trim().toLowerCase();
+  let section = "";
+  for (const line of String(markdown || "").split(/\r?\n/)) {
+    const heading = String(line || "").match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      section = heading[1].trim();
+      continue;
+    }
+    if (targetSection && section !== targetSection) continue;
+    if (section !== "Log" && section !== "LogDaily") continue;
+    if (!/^\s*-\s+\[exec_id::/.test(String(line || ""))) continue;
+    if (!executionLogLineMatchesIdentity(line, identity)) continue;
+    const statusMatch = String(line || "").match(/\[status::([^\]]+)\]/i);
+    if (targetStatus && String(statusMatch && statusMatch[1] || "").trim().toLowerCase() !== targetStatus) continue;
+    return String(line || "");
+  }
+  return "";
+}
+function executionLogLineHasFields(line, fields = {}) {
+  const text = String(line || "");
+  return Object.entries(fields || {}).every(([name, value]) =>
+    text.includes(`[${String(name || "").trim()}::${String(value == null ? "" : value).trim()}]`)
+  );
 }
 function minutesBetween(startIso, endIso) {
   const s = new Date(startIso);
@@ -21196,6 +21240,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     let endVerified = false;
     let runningDateLogCleared = false;
     let runningLogDailyCleared = false;
+    let terminalMetadataVerified = false;
     let localEntryId = "";
     let matchedBy = "";
     let identityVerified = false;
@@ -21227,6 +21272,19 @@ class TaskchutePlugin extends obsidian.Plugin {
         const runningIdentity = { execId, entryId: key, taskId, routineOccurrenceKey: occurrenceKey };
         runningDateLogCleared = !hasActiveRunningExecutionLog(markdown, runningIdentity, "Log");
         runningLogDailyCleared = !hasActiveRunningExecutionLog(markdown, runningIdentity, "LogDaily");
+        const payloadHasInterruptMetadata = Object.prototype.hasOwnProperty.call(payload, "is_interrupt")
+          || Object.prototype.hasOwnProperty.call(payload, "interrupted_task_id")
+          || Object.prototype.hasOwnProperty.call(payload, "interrupted_entry_id");
+        const expectedTerminalFields = {
+          is_interrupt: payload.is_interrupt === true || String(payload.is_interrupt || "").trim().toLowerCase() === "true" ? "true" : "false",
+          interrupted_task_id: String(payload.interrupted_task_id || "").trim(),
+          interrupted_entry_id: String(payload.interrupted_entry_id || "").trim()
+        };
+        const doneLog = findExecutionLogLine(markdown, runningIdentity, "Log", "done");
+        const doneLogDaily = findExecutionLogLine(markdown, runningIdentity, "LogDaily", "done");
+        terminalMetadataVerified = !!doneLog && !!doneLogDaily && (!payloadHasInterruptMetadata
+          || (executionLogLineHasFields(doneLog, expectedTerminalFields)
+            && executionLogLineHasFields(doneLogDaily, expectedTerminalFields)));
       }
       const running = this.normalizeRuntimeSession(this.runtime && this.runtime.running, false);
       const runningKey = runtimeSessionKey(running);
@@ -21251,9 +21309,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       endVerified = false;
       runningDateLogCleared = false;
       runningLogDailyCleared = false;
+      terminalMetadataVerified = false;
       identityVerified = false;
     }
-    const verified = !!(identityVerified && checkboxVerified && logVerified && logDailyVerified && runtimeVerified && endVerified && runningDateLogCleared && runningLogDailyCleared);
+    const verified = !!(identityVerified && checkboxVerified && logVerified && logDailyVerified && runtimeVerified && endVerified && runningDateLogCleared && runningLogDailyCleared && terminalMetadataVerified);
     const failedChecks = this.buildBridgeFailedChecks({
       post_save_identity_verified: identityVerified,
       checkbox_verified: checkboxVerified,
@@ -21262,7 +21321,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       runtime_verified: runtimeVerified,
       end_verified: endVerified,
       running_row_remaining_date_log: runningDateLogCleared,
-      running_row_remaining_logdaily: runningLogDailyCleared
+      running_row_remaining_logdaily: runningLogDailyCleared,
+      inbound_terminal_metadata_verified: terminalMetadataVerified
     });
     this.recordBridgeTaskStartedApplyDiagnostic(event, {
       task_id: taskId,
@@ -21282,9 +21342,14 @@ class TaskchutePlugin extends obsidian.Plugin {
       runtime_verified: runtimeVerified,
       end_verified: endVerified,
       running_row_cleared_date_log: runningDateLogCleared,
-      running_row_cleared_logdaily: runningLogDailyCleared
+      running_row_cleared_logdaily: runningLogDailyCleared,
+      inbound_terminal_metadata_verified: terminalMetadataVerified,
+      payload_exec_id_preserved: !!String(payload.exec_id || "").trim() && execId === String(payload.exec_id || "").trim(),
+      generated_exec_id_fallback_used: !String(payload.exec_id || "").trim(),
+      logdaily_interrupt_metadata_written: terminalMetadataVerified,
+      d1_ack_allowed: verified
     });
-    return { ok: verified, verified, failed_checks: failedChecks, post_save_identity_verified: identityVerified, checkbox_verified: checkboxVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified, end_verified: endVerified, running_row_cleared_date_log: runningDateLogCleared, running_row_cleared_logdaily: runningLogDailyCleared };
+    return { ok: verified, verified, failed_checks: failedChecks, post_save_identity_verified: identityVerified, checkbox_verified: checkboxVerified, log_verified: logVerified, logdaily_verified: logDailyVerified, runtime_verified: runtimeVerified, end_verified: endVerified, running_row_cleared_date_log: runningDateLogCleared, running_row_cleared_logdaily: runningLogDailyCleared, inbound_terminal_metadata_verified: terminalMetadataVerified };
   }
 
   normalizeBridgeInboundExecutionAliasEvent(event, nextEventType, defaults = {}) {
@@ -21437,8 +21502,11 @@ class TaskchutePlugin extends obsidian.Plugin {
     latestMarkdown = replaceTaskCheckbox(latestMarkdown, entryId, false);
     const attrPairs = await this.getTaskAttributePairs(Object.assign({}, target.task, { entryId, taskKey: entryId, sourceDate: date, section: section.name, sectionId: section.id }));
     const taskLink = `[[${fileBase}|${title}]]`;
-    const log = `- [exec_id::${execId}] [date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${startInfo.value}] [status::running] [pause_count::0] [pause_min::0] [bridge_inbound::true] ${routineLogFields}`;
-    const logDaily = `- [exec_id::${execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${startInfo.value}] [status::running] [bridge_inbound::true] ${routineLogFields}`;
+    const inboundIsInterrupt = payload.is_interrupt === true || String(payload.is_interrupt || "").trim().toLowerCase() === "true";
+    const inboundInterruptedTaskId = String(payload.interrupted_task_id || "").trim();
+    const inboundInterruptedEntryId = String(payload.interrupted_entry_id || "").trim();
+    const log = `- [exec_id::${execId}] [date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${startInfo.value}] [status::running] [pause_count::0] [pause_min::0] [is_interrupt::${inboundIsInterrupt ? "true" : "false"}] [interrupted_task_id::${inboundInterruptedTaskId}] [interrupted_entry_id::${inboundInterruptedEntryId}] [bridge_inbound::true] ${routineLogFields}`;
+    const logDaily = `- [exec_id::${execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${startInfo.value}] [status::running] [is_interrupt::${inboundIsInterrupt ? "true" : "false"}] [interrupted_task_id::${inboundInterruptedTaskId}] [interrupted_entry_id::${inboundInterruptedEntryId}] [bridge_inbound::true] ${routineLogFields}`;
     latestMarkdown = appendSection(latestMarkdown, "Log", log);
     latestMarkdown = appendSection(latestMarkdown, "LogDaily", logDaily);
     const boardWriteOk = await this.writeFileText(occurrence.path, latestMarkdown, { deviceWriterOperation: "bridge-inbound-task-started-board" });
@@ -21467,9 +21535,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       pauseCount: 0,
       pauseMin: 0,
       sourceDate: date,
-      isInterrupt: false,
-      interruptedTaskId: "",
-      interruptedEntryId: "",
+      isInterrupt: inboundIsInterrupt,
+      interruptedTaskId: inboundInterruptedTaskId,
+      interruptedEntryId: inboundInterruptedEntryId,
       bridgeInbound: true
     };
     this.runtime.selectedTaskId = entryId;
@@ -21683,13 +21751,70 @@ class TaskchutePlugin extends obsidian.Plugin {
         && (!payloadExecId || String(session.execId || "").trim() === payloadExecId)
         && (key === occurrenceKey || (!payloadEntryId && String(session.taskId || "") === taskId));
     });
-    if (!running && pausedIndex >= 0) {
+    if (!running && pausedIndex >= 0 && !isInterruptStop) {
       const pausedSession = this.normalizeRuntimeSession(paused[pausedIndex], true);
       const currentStoppedAt = pausedSession && pausedSession.pausedAt || "";
       if (this.isSameBridgeStartTime(currentStoppedAt, stopInfo.value)) {
         return { ok: true, noop: true, taskId, message: "対象タスクは同じ停止時刻で既に停止状態です。" };
       }
       return { ok: false, skipped: true, message: "対象タスクは既に停止状態です。停止時刻が異なるため安全に反映しません。" };
+    }
+    if (!running && isInterruptStop) {
+      const date = this.normalizeDate(occurrence.date || this.getDateForTask(target.task) || this.getToday());
+      const notePath = safePath(occurrence.path || this.getTaskchutePath(date));
+      let md = await readFileText(this.app, notePath);
+      const entryId = entryIdFromTaskLine(occurrence.line) || occurrenceKey || taskId;
+      const terminalIdentity = {
+        execId: payloadExecId,
+        routineOccurrenceKey: lifecycleIdentity.routineFields && lifecycleIdentity.routineFields.routine_occurrence_key || "",
+        entryId,
+        taskId
+      };
+      const cleaned = removeActiveRunningExecutionLogs(md, terminalIdentity);
+      if (cleaned.duplicateRunningDetected) {
+        return { ok: false, message: "TaskStopped冪等確認のrunning cleanupで同一identityの重複行を検出したため停止しました。" };
+      }
+      if (cleaned.markdown !== md) {
+        const cleanupWriteOk = await this.writeFileText(notePath, cleaned.markdown, { deviceWriterOperation: "bridge-inbound-task-stopped-idempotent-cleanup" });
+        if (this.isTaskchuteWriteAborted(cleanupWriteOk)) return { ok: false, message: "TaskStopped冪等確認のrunning cleanup保存が停止しました。" };
+        md = await readFileText(this.app, notePath);
+      }
+      const interruptedByTaskId = String(payload.interrupted_by_task_id || payload.next_task_id || "").trim();
+      const interruptedByEntryId = String(payload.interrupted_by_entry_id || payload.next_entry_id || "").trim();
+      const stoppedIsInterrupt = payload.is_interrupt === true || String(payload.is_interrupt || "").trim().toLowerCase() === "true";
+      const expectedFields = {
+        is_interrupt: stoppedIsInterrupt ? "true" : "false",
+        interrupted_by_task_id: interruptedByTaskId,
+        interrupted_by_entry_id: interruptedByEntryId
+      };
+      const savedLog = findExecutionLogLine(md, terminalIdentity, "Log", "interrupted");
+      const savedLogDaily = findExecutionLogLine(md, terminalIdentity, "LogDaily", "interrupted");
+      const runningAbsent = !hasActiveRunningExecutionLog(md, terminalIdentity, "Log")
+        && !hasActiveRunningExecutionLog(md, terminalIdentity, "LogDaily");
+      const metadataVerified = !!savedLog && !!savedLogDaily
+        && executionLogLineHasFields(savedLog, expectedFields)
+        && executionLogLineHasFields(savedLogDaily, expectedFields);
+      const verified = runningAbsent && metadataVerified;
+      this.recordBridgeExecutionEventDiagnostic("bridge_inbound_task_stopped_idempotent_verified", {
+        event_type: "TaskStopped",
+        event_id: String(event && event.event_id || "").trim(),
+        task_id: taskId,
+        entry_id: entryId,
+        exec_id: payloadExecId,
+        inbound_terminal_cleanup_matched_by: cleaned.matchedBy,
+        inbound_terminal_cleanup_removed_running_count: cleaned.removedDateLog + cleaned.removedLogDaily,
+        inbound_terminal_running_absent_after_save: runningAbsent,
+        inbound_terminal_metadata_verified: metadataVerified,
+        d1_ack_allowed: verified,
+        failed_checks: this.buildBridgeFailedChecks({
+          inbound_terminal_running_absent_after_save: runningAbsent,
+          inbound_terminal_metadata_verified: metadataVerified
+        }),
+        decision: verified ? "idempotent_applied" : "failed_unacked"
+      });
+      return verified
+        ? { ok: true, noop: true, verified: true, taskId, message: "TaskStoppedは同じterminal状態で適用済みです。" }
+        : { ok: false, message: "TaskStopped冪等確認のterminal検証に失敗したためAckしません。" };
     }
     if (!running) return { ok: false, skipped: true, message: "対象タスクは現在実行中ではないため、TaskStopped反映をスキップしました。" };
 
@@ -21703,7 +21828,34 @@ class TaskchutePlugin extends obsidian.Plugin {
       const date = this.normalizeDate(stopped.sourceDate || occurrence.date || this.getToday());
       const notePath = safePath(occurrence.path || this.getTaskchutePath(date));
       let md = await readFileText(this.app, notePath);
+      const beforeCleanupMarkdown = md;
       const entryId = stopped.entryId || stopped.taskKey || occurrenceKey || taskId;
+      stopped.execId = payloadExecId || String(stopped.execId || "").trim();
+      const cleanupIdentity = {
+        execId: payloadExecId,
+        routineOccurrenceKey: lifecycleIdentity.routineFields && lifecycleIdentity.routineFields.routine_occurrence_key || "",
+        entryId,
+        taskId
+      };
+      const runningCleanup = removeActiveRunningExecutionLogs(md, cleanupIdentity);
+      this.recordBridgeExecutionEventDiagnostic("inbound_terminal_cleanup_identity", {
+        event_type: "TaskStopped",
+        event_id: String(event && event.event_id || "").trim(),
+        task_id: taskId,
+        entry_id: entryId,
+        exec_id: payloadExecId,
+        inbound_terminal_cleanup_matched_by: runningCleanup.matchedBy,
+        inbound_terminal_cleanup_removed_running_count: runningCleanup.removedDateLog + runningCleanup.removedLogDaily,
+        inbound_terminal_cleanup_duplicate_running_detected: !!runningCleanup.duplicateRunningDetected,
+        decision: runningCleanup.duplicateRunningDetected ? "failed_unacked" : "cleaned"
+      });
+      if (runningCleanup.duplicateRunningDetected) {
+        return { ok: false, message: "TaskStopped running cleanupで同一identityのrunning行が同一section内に複数見つかったため停止しました。" };
+      }
+      md = runningCleanup.markdown;
+      const interruptedByTaskId = String(payload.interrupted_by_task_id || payload.next_task_id || "").trim();
+      const interruptedByEntryId = String(payload.interrupted_by_entry_id || payload.next_entry_id || "").trim();
+      const stoppedIsInterrupt = payload.is_interrupt === true || String(payload.is_interrupt || "").trim().toLowerCase() === "true";
       if (!isTaskCheckedInMarkdown(md, entryId) && !hasClosedExecutionLogForExecId(md, stopped.execId)) {
         const actual = this.calculateActualForSession(stopped, stopInfo.value);
         const pauseCount = this.normalizeRuntimeNumber(stopped.pauseCount);
@@ -21712,14 +21864,55 @@ class TaskchutePlugin extends obsidian.Plugin {
         const attrPairs = await this.getTaskAttributePairs(Object.assign({}, stopped, { section: section.name, sectionId: section.id }));
         const taskLink = `[[${stopped.file}|${stopped.title}]]`;
         const stoppedRoutineLogFields = this.formatRoutineOccurrenceExecutionLogFields(lifecycleIdentity.routineFields || {});
-        const log = `- [exec_id::${stopped.execId}] [date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${stopped.startedAt}] [end_at::${stopInfo.value}] [actual::${actual}] [status::interrupted] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::false] [interrupted_by_task_id::${String(payload.next_task_id || "").trim()}] [interrupted_by_entry_id::] [comment_count::0] ${stoppedRoutineLogFields}`;
-        const logDaily = `- [exec_id::${stopped.execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::interrupted] ${stoppedRoutineLogFields}`;
+        const log = `- [exec_id::${stopped.execId}] [date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${stopped.startedAt}] [end_at::${stopInfo.value}] [actual::${actual}] [status::interrupted] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::${stoppedIsInterrupt ? "true" : "false"}] [interrupted_by_task_id::${interruptedByTaskId}] [interrupted_by_entry_id::${interruptedByEntryId}] [comment_count::0] ${stoppedRoutineLogFields}`;
+        const logDaily = `- [exec_id::${stopped.execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::interrupted] [is_interrupt::${stoppedIsInterrupt ? "true" : "false"}] [interrupted_by_task_id::${interruptedByTaskId}] [interrupted_by_entry_id::${interruptedByEntryId}] ${stoppedRoutineLogFields}`;
         md = replaceTaskCheckbox(md, entryId, true);
         md = moveTaskLineToSection(md, this.settings, entryId, section.name);
         md = appendSection(md, "Log", log);
         md = appendSection(md, "LogDaily", logDaily);
         const writeOk = await this.writeFileText(notePath, md, { deviceWriterOperation: "bridge-inbound-task-stopped-interrupt-board" });
         if (this.isTaskchuteWriteAborted(writeOk)) return { ok: false, message: "割り込みTaskStoppedのTaskBoard保存が保存前確認で停止しました。" };
+      } else if (runningCleanup.markdown !== beforeCleanupMarkdown) {
+        const cleanupWriteOk = await this.writeFileText(notePath, md, { deviceWriterOperation: "bridge-inbound-task-stopped-running-cleanup" });
+        if (this.isTaskchuteWriteAborted(cleanupWriteOk)) return { ok: false, message: "割り込みTaskStoppedのrunning cleanup保存が保存前確認で停止しました。" };
+      }
+      const savedMarkdown = await readFileText(this.app, notePath);
+      const terminalIdentity = { execId: payloadExecId || stopped.execId, entryId, taskId };
+      const expectedInterruptFields = {
+        is_interrupt: stoppedIsInterrupt ? "true" : "false",
+        interrupted_by_task_id: interruptedByTaskId,
+        interrupted_by_entry_id: interruptedByEntryId
+      };
+      const savedLog = findExecutionLogLine(savedMarkdown, terminalIdentity, "Log", "interrupted");
+      const savedLogDaily = findExecutionLogLine(savedMarkdown, terminalIdentity, "LogDaily", "interrupted");
+      const runningAbsent = !hasActiveRunningExecutionLog(savedMarkdown, terminalIdentity, "Log")
+        && !hasActiveRunningExecutionLog(savedMarkdown, terminalIdentity, "LogDaily");
+      const metadataVerified = !!savedLog && !!savedLogDaily
+        && executionLogLineHasFields(savedLog, expectedInterruptFields)
+        && executionLogLineHasFields(savedLogDaily, expectedInterruptFields);
+      const failedChecks = this.buildBridgeFailedChecks({
+        inbound_terminal_running_absent_after_save: runningAbsent,
+        inbound_terminal_metadata_verified: metadataVerified
+      });
+      this.recordBridgeExecutionEventDiagnostic("bridge_inbound_task_stopped_terminal_verified", {
+        event_type: "TaskStopped",
+        event_id: String(event && event.event_id || "").trim(),
+        task_id: taskId,
+        entry_id: entryId,
+        exec_id: payloadExecId || stopped.execId,
+        interrupted_by_task_id: interruptedByTaskId,
+        interrupted_by_entry_id: interruptedByEntryId,
+        inbound_terminal_cleanup_matched_by: runningCleanup.matchedBy,
+        inbound_terminal_cleanup_removed_running_count: runningCleanup.removedDateLog + runningCleanup.removedLogDaily,
+        inbound_terminal_running_absent_after_save: runningAbsent,
+        inbound_terminal_metadata_verified: metadataVerified,
+        logdaily_interrupt_metadata_written: !!savedLogDaily && executionLogLineHasFields(savedLogDaily, expectedInterruptFields),
+        d1_ack_allowed: runningAbsent && metadataVerified,
+        failed_checks: failedChecks,
+        decision: runningAbsent && metadataVerified ? "verified" : "failed_unacked"
+      });
+      if (!runningAbsent || !metadataVerified) {
+        return { ok: false, message: "割り込みTaskStoppedの保存後terminal検証に失敗したためAckしません。" };
       }
       this.runtime.running = null;
       this.runtime.paused = (Array.isArray(this.runtime.paused) ? this.runtime.paused : []).filter(item => {
@@ -21974,7 +22167,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           taskId,
           routineOccurrenceKey: alreadyRoutineFields.routine_occurrence_key || ""
         });
-        if (cleaned.taskIdFallbackBlocked) return { ok: false, message: "TaskCompleted running cleanupのtask_id fallbackが複数行に一致したため停止しました。" };
+        if (cleaned.taskIdFallbackBlocked || cleaned.duplicateRunningDetected) return { ok: false, message: "TaskCompleted running cleanupで同一identityのrunning行が同一section内に複数見つかったため停止しました。" };
         if (cleaned.markdown !== md) {
           const cleanupWriteOk = await this.writeFileText(notePath, cleaned.markdown, { deviceWriterOperation: "bridge-inbound-task-completed-running-cleanup" });
           if (this.isTaskchuteWriteAborted(cleanupWriteOk)) return { ok: false, message: "TaskCompleted冪等確認中のrunning行cleanupが保存前確認で停止しました。" };
@@ -22006,7 +22199,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     const routineLogFields = this.formatRoutineOccurrenceExecutionLogFields(routineOccurrenceFields);
     const fileBase = String((activeSession && activeSession.file) || target.task.fileBase || target.task.file || link && link.file || "").trim();
     const title = String((activeSession && activeSession.title) || target.task.title || link && link.alias || "").trim();
-    const execId = String(activeSession && activeSession.execId || "").trim() || `B-${date.replace(/-/g, "")}-${taskId}-${Date.now()}`;
+    const execId = payloadExecId
+      || String(activeSession && activeSession.execId || "").trim()
+      || `B-${date.replace(/-/g, "")}-${taskId}-${Date.now()}`;
     const runtimeTask = Object.assign({}, target.task, activeSession || {}, {
       execId,
       entryId,
@@ -22017,7 +22212,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       section: sectionName,
       sectionId,
       startedAt,
-      sourceDate: date
+      sourceDate: date,
+      isInterrupt: payload.is_interrupt === true || String(payload.is_interrupt || "").trim().toLowerCase() === "true"
+        || !!(activeSession && activeSession.isInterrupt),
+      interruptedTaskId: String(payload.interrupted_task_id || activeSession && activeSession.interruptedTaskId || "").trim(),
+      interruptedEntryId: String(payload.interrupted_entry_id || activeSession && activeSession.interruptedEntryId || "").trim()
     }, routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key ? {
       isRoutine: true,
       routineId: routineOccurrenceFields.routine_id || taskId,
@@ -22029,7 +22228,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const attrPairs = await this.getTaskAttributePairs(runtimeTask);
     const taskLink = `[[${fileBase}|${title}]]`;
     const log = `- [exec_id::${execId}] [date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [start_at::${startedAt}] [end_at::${end}] [actual::${actual}] [status::done] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::${runtimeTask.isInterrupt ? "true" : "false"}] [interrupted_task_id::${runtimeTask.interruptedTaskId || ""}] [interrupted_entry_id::${runtimeTask.interruptedEntryId || ""}] [comment_count::0] ${routineLogFields}`;
-    const logDaily = `- [exec_id::${execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] ${routineLogFields}`;
+    const logDaily = `- [exec_id::${execId}] [log_date::${date}] [task_id::${taskId}] [entry_id::${entryId}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] [is_interrupt::${runtimeTask.isInterrupt ? "true" : "false"}] [interrupted_task_id::${runtimeTask.interruptedTaskId || ""}] [interrupted_entry_id::${runtimeTask.interruptedEntryId || ""}] ${routineLogFields}`;
     md = replaceTaskCheckbox(md, entryId, true);
     if (sectionName) md = moveTaskLineToSection(md, this.settings, entryId, sectionName);
     const runningCleanup = removeActiveRunningExecutionLogs(md, {
@@ -22038,8 +22237,21 @@ class TaskchutePlugin extends obsidian.Plugin {
       taskId,
       routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
     });
-    if (runningCleanup.taskIdFallbackBlocked) {
-      return { ok: false, message: "TaskCompleted running cleanupのtask_id fallbackが複数行に一致したため停止しました。" };
+    this.recordBridgeExecutionEventDiagnostic("inbound_terminal_cleanup_identity", {
+      event_type: "TaskCompleted",
+      event_id: String(event && event.event_id || "").trim(),
+      task_id: taskId,
+      entry_id: entryId,
+      exec_id: execId,
+      inbound_terminal_cleanup_matched_by: runningCleanup.matchedBy,
+      inbound_terminal_cleanup_removed_running_count: runningCleanup.removedDateLog + runningCleanup.removedLogDaily,
+      inbound_terminal_cleanup_duplicate_running_detected: !!runningCleanup.duplicateRunningDetected,
+      payload_exec_id_preserved: !!payloadExecId && execId === payloadExecId,
+      generated_exec_id_fallback_used: !payloadExecId && !(activeSession && activeSession.execId),
+      decision: runningCleanup.duplicateRunningDetected ? "failed_unacked" : "cleaned"
+    });
+    if (runningCleanup.taskIdFallbackBlocked || runningCleanup.duplicateRunningDetected) {
+      return { ok: false, message: "TaskCompleted running cleanupで同一identityのrunning行が同一section内に複数見つかったため停止しました。" };
     }
     md = runningCleanup.markdown;
     md = appendSection(md, "Log", log);
@@ -24778,14 +24990,22 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     if (String(eventType || "") === "TaskStopped" && String(options && options.reason || "").trim() === "interrupt") {
       payload.interrupted_at = timestamp;
+      payload.interrupted_by_task_id = String(options && options.interruptedByTaskId || options && options.nextTaskId || "").trim();
+      payload.interrupted_by_entry_id = String(options && options.interruptedByEntryId || options && options.nextEntryId || "").trim();
     }
     if (options && options.nextTaskId) payload.next_task_id = String(options.nextTaskId || "").trim();
+    if (options && options.nextEntryId) payload.next_entry_id = String(options.nextEntryId || "").trim();
     if (options && options.continuationEntryId) payload.continuation_entry_id = String(options.continuationEntryId || "").trim();
     if (options && options.stoppedSectionId) payload.stopped_section_id = String(options.stoppedSectionId || "").trim();
     if (options && options.stoppedSection) payload.stopped_section = String(options.stoppedSection || "").trim();
     if (options && options.hasContinuation != null) payload.has_continuation = !!options.hasContinuation;
     if (options && options.continuationSourceTaskId) payload.continuation_source_task_id = String(options.continuationSourceTaskId || "").trim();
     if (options && options.continuationNextTaskId) payload.continuation_next_task_id = String(options.continuationNextTaskId || "").trim();
+    if (String(eventType || "") === "TaskStarted" || String(eventType || "") === "TaskCompleted") {
+      payload.is_interrupt = !!(task && (task.isInterrupt || task.is_interrupt));
+      payload.interrupted_task_id = String(task && (task.interruptedTaskId || task.interrupted_task_id) || "").trim();
+      payload.interrupted_entry_id = String(task && (task.interruptedEntryId || task.interrupted_entry_id) || "").trim();
+    }
 
     const event = {
       event_id: eventId,
@@ -24812,7 +25032,22 @@ class TaskchutePlugin extends obsidian.Plugin {
       section_label: payload.section_label,
       outbox_count: outboxCount,
       reason_code: "execution_event_payload_built",
-      decision: "built"
+      decision: "built",
+      lifecycle_interrupt_metadata_included: !!(
+        payload.is_interrupt
+        || payload.interrupted_by_task_id
+        || payload.interrupted_by_entry_id
+        || payload.interrupted_task_id
+        || payload.interrupted_entry_id
+      ),
+      interrupted_by_task_id: String(payload.interrupted_by_task_id || "").trim(),
+      interrupted_by_entry_id: String(payload.interrupted_by_entry_id || "").trim(),
+      next_task_id: String(payload.next_task_id || "").trim(),
+      next_entry_id: String(payload.next_entry_id || "").trim(),
+      continuation_entry_id: String(payload.continuation_entry_id || "").trim(),
+      is_interrupt: !!payload.is_interrupt,
+      interrupted_task_id: String(payload.interrupted_task_id || "").trim(),
+      interrupted_entry_id: String(payload.interrupted_entry_id || "").trim()
     });
     this.recordBridgeExecutionEventDiagnostic("bridge_execution_event_coalesce_protected", {
       event_type: eventType,
@@ -37483,10 +37718,18 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
 
     const log = `- [exec_id::${r.execId}] [date::${date}] [task_id::${r.taskId}] [entry_id::${entryKey}] [task::${taskLink}] ${attrPairs} [start_at::${r.startedAt}] [end_at::${end}] [actual::${actual}] [status::interrupted] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::false] [interrupted_by_task_id::${nextTask && nextTask.taskId ? nextTask.taskId : ""}] [interrupted_by_entry_id::${nextKey}] [comment_count::0] ${interruptedRoutineLogFields}`;
-    const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${entryKey}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::interrupted] ${interruptedRoutineLogFields}`;
+    const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${entryKey}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::interrupted] [is_interrupt::false] [interrupted_by_task_id::${nextTask && nextTask.taskId ? nextTask.taskId : ""}] [interrupted_by_entry_id::${nextKey}] ${interruptedRoutineLogFields}`;
 
     md = replaceTaskCheckbox(md, entryKey, true);
     md = moveTaskLineToSection(md, this.settings, entryKey, interruptedSection.name);
+    const runningCleanup = removeActiveRunningExecutionLogs(md, {
+      execId: r.execId,
+      entryId: entryKey,
+      taskId: r.taskId,
+      routineOccurrenceKey: interruptedRoutineFields.routine_occurrence_key || ""
+    });
+    if (runningCleanup.taskIdFallbackBlocked || runningCleanup.duplicateRunningDetected) return null;
+    md = runningCleanup.markdown;
 
     const continuationEntryId = await this.nextUniqueEntryId(date, md);
     const continuationMeta = interruptedIdentity.classification === "routine_occurrence" ? {
@@ -37544,6 +37787,9 @@ class TaskchutePlugin extends obsidian.Plugin {
         reason: "interrupt",
         stopReason: "auto-stopped-by-starting-another-task",
         nextTaskId: nextTask && nextTask.taskId ? nextTask.taskId : "",
+        nextEntryId: nextKey,
+        interruptedByTaskId: nextTask && nextTask.taskId ? nextTask.taskId : "",
+        interruptedByEntryId: nextKey,
         continuationEntryId,
         stoppedSectionId: interruptedSection.id,
         stoppedSection: interruptedSection.name,
@@ -37738,7 +37984,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         taskId: r.taskId,
         routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
       });
-      if (cleaned.taskIdFallbackBlocked) return false;
+      if (cleaned.taskIdFallbackBlocked || cleaned.duplicateRunningDetected) return false;
       if (cleaned.markdown !== md) {
         const cleanupWriteOk = await this.writeFileText(notePath, cleaned.markdown);
         if (this.isTaskchuteWriteAborted(cleanupWriteOk)) return false;
@@ -37772,7 +38018,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const routineOccurrenceFields = Object.assign({}, completionIdentity.routineFields || {});
     const routineLogFields = this.formatRoutineOccurrenceExecutionLogFields(routineOccurrenceFields);
     const log = `- [exec_id::${r.execId}] [date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [start_at::${r.startedAt}] [end_at::${end}] [actual::${actual}] [status::done] [pause_count::${pauseCount}] [pause_min::${pauseMin}] [is_interrupt::${r.isInterrupt ? "true" : "false"}] [interrupted_task_id::${r.interruptedTaskId || ""}] [interrupted_entry_id::${r.interruptedEntryId || ""}] [comment_count::0] ${routineLogFields}`;
-    const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] ${routineLogFields}`;
+    const logDaily = `- [exec_id::${r.execId}] [log_date::${date}] [task_id::${r.taskId}] [entry_id::${r.entryId || r.taskKey || ""}] [task::${taskLink}] ${attrPairs} [actual::${actual}] [status::done] [is_interrupt::${r.isInterrupt ? "true" : "false"}] [interrupted_task_id::${r.interruptedTaskId || ""}] [interrupted_entry_id::${r.interruptedEntryId || ""}] ${routineLogFields}`;
     md = replaceTaskCheckbox(md, completedKey, true);
     md = moveTaskLineToSection(md, this.settings, completedKey, completedSection.name);
     const runningCleanup = removeActiveRunningExecutionLogs(md, {
@@ -37781,7 +38027,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       taskId: r.taskId,
       routineOccurrenceKey: routineOccurrenceFields.routine_occurrence_key || ""
     });
-    if (runningCleanup.taskIdFallbackBlocked) return false;
+    if (runningCleanup.taskIdFallbackBlocked || runningCleanup.duplicateRunningDetected) return false;
     md = runningCleanup.markdown;
     md = appendSection(md, "Log", log);
     md = appendSection(md, "LogDaily", logDaily);
