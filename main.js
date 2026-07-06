@@ -5899,10 +5899,11 @@ function getTaskSectionOrderInfoFromMarkdown(markdown, sectionName) {
   };
 }
 
-function reorderTaskSectionByEntryIds(markdown, settings, sectionName, orderedEntryIds) {
+function reorderTaskSectionByEntryIds(markdown, settings, sectionName, orderedEntryIds, options = {}) {
   const requested = Array.isArray(orderedEntryIds) ? orderedEntryIds.map(value => String(value || "").trim()) : [];
   const duplicateEntryIds = Array.from(new Set(requested.filter((value, index) => value && requested.indexOf(value) !== index)));
-  if (!requested.length || requested.some(value => !value) || duplicateEntryIds.length) {
+  const allowEmpty = !!(options && options.allowEmpty);
+  if (requested.some(value => !value) || duplicateEntryIds.length) {
     return { markdown: String(markdown || ""), changed: false, matchedCount: 0, ok: false, reason: duplicateEntryIds.length ? "duplicate_entry_id" : "invalid_entry_id" };
   }
   const lines = ensureTasksSkeleton(markdown, settings).split(/\r?\n/);
@@ -5930,6 +5931,23 @@ function reorderTaskSectionByEntryIds(markdown, settings, sectionName, orderedEn
     byEntryId.set(entryId, line);
   }
   const physicalEntryIds = Array.from(byEntryId.keys());
+  if (!requested.length) {
+    if (!allowEmpty) {
+      return { markdown: String(markdown || ""), changed: false, matchedCount: 0, ok: false, reason: "empty_entry_order_not_allowed", physicalEntryIds };
+    }
+    if (physicalEntryIds.length) {
+      return { markdown: String(markdown || ""), changed: false, matchedCount: 0, ok: false, reason: "entry_set_mismatch", physicalEntryIds };
+    }
+    return {
+      markdown: lines.join("\n"),
+      changed: false,
+      matchedCount: 0,
+      ok: true,
+      reason: "source_empty_after_move_allowed",
+      physicalEntryIds,
+      sourceEmptyAfterMoveAllowed: true
+    };
+  }
   if (requested.length !== physicalEntryIds.length || requested.some(value => !byEntryId.has(value))) {
     return { markdown: String(markdown || ""), changed: false, matchedCount: 0, ok: false, reason: "entry_set_mismatch", physicalEntryIds };
   }
@@ -17834,7 +17852,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         return { ok: false, message: `TaskMoved v4 entry orderが不正です。${invalidTarget ? "target_order_entry_ids" : "source_order_entry_ids"}` };
       }
     }
-    if (!targetOrderTaskIds.length) return { ok: false, skipped: true, message: "TaskMoved payloadにtarget_order_task_idsがありません。" };
+    if (!isV4 && !targetOrderTaskIds.length) return { ok: false, skipped: true, message: "TaskMoved payloadにtarget_order_task_idsがありません。" };
     this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_apply_started", event, {
       move_type: String(payload.move_type || "").trim(),
       move_payload_version: payload.move_payload_version == null ? null : Math.max(0, Math.floor(Number(payload.move_payload_version || 0))),
@@ -17866,7 +17884,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         section_id: String(to.section_id || to.section || to.section_label || "").trim(),
         index: to.index == null ? null : Math.max(0, Math.floor(Number(to.index || 0)))
       },
-      target_order_task_ids_count: targetOrderTaskIds.length
+      target_order_task_ids_count: targetOrderTaskIds.length,
+      source_order_entry_ids: sourceOrderEntryIds.slice(),
+      target_order_entry_ids: targetOrderEntryIds.slice(),
+      legacy_task_order_guard_skipped_for_v4: isV4
     }, "info", "expected");
     const occurrence = await this.findBridgeLocalTaskMoveOccurrence(
       taskId,
@@ -17967,7 +17988,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         };
       }
     }
-    if ((!sameDate || !sameSection) && !hasSourceOrderTaskIds) {
+    if (!isV4 && (!sameDate || !sameSection) && !hasSourceOrderTaskIds) {
       return { ok: false, skipped: true, message: "date/sectionまたぎのTaskMoved payloadにsource_order_task_idsがありません。" };
     }
 
@@ -17983,9 +18004,23 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (dateChange) movedLine = setTaskLineTcMeta(movedLine, { entry_id: toEntryId });
     sourceLines.splice(occurrence.lineIndex, 1);
     const sourceMarkdownAfterRemove = sourceLines.join("\n");
+    const sourcePhysicalInfoBefore = getTaskSectionOrderInfoFromMarkdown(occurrence.markdown, sourceSection.name);
+    const sourcePhysicalInfoAfter = getTaskSectionOrderInfoFromMarkdown(sourceMarkdownAfterRemove, sourceSection.name);
+    if (isV4 && !samePayloadLocation) {
+      this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_v4_source_entry_order_prepared", event, {
+        source_physical_entry_ids_before: sourcePhysicalInfoBefore.entryIds.slice(),
+        source_physical_entry_ids_after: sourcePhysicalInfoAfter.entryIds.slice(),
+        source_order_entry_ids: sourceOrderEntryIds.slice(),
+        target_order_entry_ids: targetOrderEntryIds.slice(),
+        source_empty_after_move_allowed: sourceOrderEntryIds.length === 0 && sourcePhysicalInfoAfter.entryIds.length === 0,
+        entry_order_invalid_reason: "",
+        legacy_task_order_guard_skipped_for_v4: true,
+        failed_checks: []
+      }, "info", "prepared");
+    }
 
     if (sourcePath === targetPath && sameSection) {
-      // target_order_task_idsが正データ。from/to indexでは再移動しない。
+      // v4はentry order、旧payloadはtask orderを正として、from/to indexでは再移動しない。
       const targetReordered = reorderSection(occurrence.markdown, targetSection.name, targetOrderEntryIds, targetOrderTaskIds);
       if (!targetReordered.matchedCount) return { ok: false, skipped: true, message: "移動先の既知task_idを確定順序から解決できませんでした。" };
       if (targetReordered.markdown === occurrence.markdown) return { ok: false, skipped: true, noop: true, message: "既に確定順序と同じ位置です。" };
@@ -17994,8 +18029,22 @@ class TaskchutePlugin extends obsidian.Plugin {
     } else if (sourcePath === targetPath) {
       const inserted = insertTaskIntoSectionAtIndex(sourceMarkdownAfterRemove, this.settings, targetSection.name, movedLine, null);
       let nextMarkdown = inserted.markdown;
-      const sourceReordered = reorderSection(nextMarkdown, sourceSection.name, sourceOrderEntryIds, sourceOrderTaskIds);
-      if (isV4 && !sourceReordered.ok) return { ok: false, message: `TaskMoved v4 source entry order不一致: ${sourceReordered.reason}` };
+      const sourceReordered = isV4
+        ? reorderTaskSectionByEntryIds(nextMarkdown, this.settings, sourceSection.name, sourceOrderEntryIds, { allowEmpty: true })
+        : reorderSection(nextMarkdown, sourceSection.name, sourceOrderEntryIds, sourceOrderTaskIds);
+      if (isV4 && !sourceReordered.ok) {
+        this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_v4_source_entry_order_invalid", event, {
+          source_physical_entry_ids_before: sourcePhysicalInfoBefore.entryIds.slice(),
+          source_physical_entry_ids_after: Array.isArray(sourceReordered.physicalEntryIds) ? sourceReordered.physicalEntryIds.slice() : sourcePhysicalInfoAfter.entryIds.slice(),
+          source_order_entry_ids: sourceOrderEntryIds.slice(),
+          target_order_entry_ids: targetOrderEntryIds.slice(),
+          source_empty_after_move_allowed: false,
+          entry_order_invalid_reason: String(sourceReordered.reason || "unknown"),
+          legacy_task_order_guard_skipped_for_v4: true,
+          failed_checks: ["source_entry_order"]
+        }, "error", "failed_unacked");
+        return { ok: false, message: `TaskMoved v4 source entry order不一致: ${sourceReordered.reason}` };
+      }
       nextMarkdown = sourceReordered.markdown;
       const targetReordered = reorderSection(nextMarkdown, targetSection.name, targetOrderEntryIds, targetOrderTaskIds);
       if (!targetReordered.matchedCount) return { ok: false, skipped: true, message: "移動先の既知task_idを確定順序から解決できませんでした。" };
@@ -18011,8 +18060,22 @@ class TaskchutePlugin extends obsidian.Plugin {
       const inserted = insertTaskIntoSectionAtIndex(targetMarkdown, this.settings, targetSection.name, movedLine, null);
       const targetReordered = reorderSection(inserted.markdown, targetSection.name, targetOrderEntryIds, targetOrderTaskIds);
       if (!targetReordered.matchedCount) return { ok: false, skipped: true, message: "移動先の既知task_idを確定順序から解決できませんでした。" };
-      const sourceReordered = reorderSection(sourceMarkdownAfterRemove, sourceSection.name, sourceOrderEntryIds, sourceOrderTaskIds);
-      if (isV4 && !sourceReordered.ok) return { ok: false, message: `TaskMoved v4 source entry order不一致: ${sourceReordered.reason}` };
+      const sourceReordered = isV4
+        ? reorderTaskSectionByEntryIds(sourceMarkdownAfterRemove, this.settings, sourceSection.name, sourceOrderEntryIds, { allowEmpty: true })
+        : reorderSection(sourceMarkdownAfterRemove, sourceSection.name, sourceOrderEntryIds, sourceOrderTaskIds);
+      if (isV4 && !sourceReordered.ok) {
+        this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_v4_source_entry_order_invalid", event, {
+          source_physical_entry_ids_before: sourcePhysicalInfoBefore.entryIds.slice(),
+          source_physical_entry_ids_after: Array.isArray(sourceReordered.physicalEntryIds) ? sourceReordered.physicalEntryIds.slice() : sourcePhysicalInfoAfter.entryIds.slice(),
+          source_order_entry_ids: sourceOrderEntryIds.slice(),
+          target_order_entry_ids: targetOrderEntryIds.slice(),
+          source_empty_after_move_allowed: false,
+          entry_order_invalid_reason: String(sourceReordered.reason || "unknown"),
+          legacy_task_order_guard_skipped_for_v4: true,
+          failed_checks: ["source_entry_order"]
+        }, "error", "failed_unacked");
+        return { ok: false, message: `TaskMoved v4 source entry order不一致: ${sourceReordered.reason}` };
+      }
       const targetWriteOk = await this.writeFileText(targetPath, targetReordered.markdown, { deviceWriterOperation: "bridge-inbound-task-moved-target-board" });
       if (this.isTaskchuteWriteAborted(targetWriteOk)) return { ok: false, message: "TaskMovedの移動先保存が保存前確認で停止しました。" };
       const sourceWriteOk = await this.writeFileText(sourcePath, sourceReordered.markdown, { deviceWriterOperation: "bridge-inbound-task-moved-source-board" });
