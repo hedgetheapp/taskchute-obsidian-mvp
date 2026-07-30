@@ -2023,6 +2023,54 @@ function hasActiveRunningExecutionLog(markdown, identity = {}, sectionName = "")
   }
   return false;
 }
+function hasExecutionLogForIdentity(markdown, identity = {}, statuses = null) {
+  const normalizedStatuses = Array.isArray(statuses)
+    ? new Set(statuses.map(status => String(status || "").trim().toLowerCase()).filter(Boolean))
+    : null;
+  let section = "";
+  const lines = String(markdown || "").split(/\r?\n/);
+  for (const line of lines) {
+    const heading = String(line || "").match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      section = heading[1].trim();
+      continue;
+    }
+    if (section !== "Log" && section !== "LogDaily") continue;
+    if (!/^\s*-\s+\[exec_id::/.test(String(line || ""))) continue;
+    if (!executionLogLineMatchesIdentity(line, identity)) continue;
+    if (!normalizedStatuses) return true;
+    const statusMatch = String(line || "").match(/\[status::([^\]]+)\]/i);
+    const status = statusMatch ? String(statusMatch[1] || "").trim().toLowerCase() : "";
+    if (normalizedStatuses.has(status)) return true;
+  }
+  return false;
+}
+function inspectTaskCreatedRoutineRekeySafety(markdown, line, payload = {}) {
+  const meta = tcMetaFromTaskLine(line);
+  const oldEntryId = String(meta.entry_id || "").trim();
+  const occurrenceKey = String(meta.routine_occurrence_key || payload.routine_occurrence_key || "").trim();
+  const taskId = String(payload.task_id || taskIdFromTaskLine(line) || "").trim();
+  const failedChecks = [];
+  if (!oldEntryId) failedChecks.push("existing_entry_id_missing");
+  if (/^\s*-\s+\[[xX]\]/.test(String(line || ""))) failedChecks.push("task_checked");
+  const runState = String(meta.run_state || "").trim().toLowerCase();
+  if (runState && !["not_started", "not-started", "none"].includes(runState)) failedChecks.push("run_state_not_pristine");
+  ["start_actual", "end_actual", "started_at", "ended_at", "completed_at", "interrupted_at", "paused_at", "deleted_at"].forEach(key => {
+    if (String(meta[key] || "").trim()) failedChecks.push(`${key}_present`);
+  });
+  if (String(meta.is_running || "").trim().toLowerCase() === "true") failedChecks.push("is_running_true");
+  if (String(meta.is_completed || "").trim().toLowerCase() === "true") failedChecks.push("is_completed_true");
+  if (String(meta.deleted || meta.is_deleted || "").trim().toLowerCase() === "true") failedChecks.push("deleted_true");
+  const entryIdentity = { taskId, entryId: oldEntryId };
+  const occurrenceIdentity = occurrenceKey ? { taskId, routineOccurrenceKey: occurrenceKey } : null;
+  if (hasActiveRunningExecutionLog(markdown, entryIdentity) || (occurrenceIdentity && hasActiveRunningExecutionLog(markdown, occurrenceIdentity))) {
+    failedChecks.push("active_running_log_present");
+  }
+  if (hasExecutionLogForIdentity(markdown, entryIdentity) || (occurrenceIdentity && hasExecutionLogForIdentity(markdown, occurrenceIdentity))) {
+    failedChecks.push("execution_log_reference_present");
+  }
+  return { ok: failedChecks.length === 0, failedChecks, oldEntryId, occurrenceKey, taskId };
+}
 function findExecutionLogLine(markdown, identity = {}, sectionName = "", status = "") {
   const targetSection = String(sectionName || "").trim();
   const targetStatus = String(status || "").trim().toLowerCase();
@@ -16386,8 +16434,12 @@ class TaskchutePlugin extends obsidian.Plugin {
           const markdown = await readFileText(this.app, this.getTaskchutePath(date));
           const generatedRoutineId = String(payload.generated_by_routine_id || payload.routine_id || "").trim();
           verified = parseTasks(markdown).some(task =>
-            String(task.entryMeta && task.entryMeta.routine_occurrence_key || "").trim() === String(payload.routine_occurrence_key || "").trim()
-            || (generatedRoutineId && String(task.entryMeta && task.entryMeta.routine_id || "").trim() === generatedRoutineId)
+            String(task.entryId || task.entryMeta && task.entryMeta.entry_id || "").trim() === entryId
+            && String(task.taskId || "").trim() === taskId
+            && (
+              String(task.entryMeta && task.entryMeta.routine_occurrence_key || "").trim() === String(payload.routine_occurrence_key || "").trim()
+              || (generatedRoutineId && String(task.entryMeta && task.entryMeta.routine_id || "").trim() === generatedRoutineId)
+            )
           );
         } else {
           const occurrence = await this.findBridgeLocalTaskMoveOccurrence(taskId, [payload.date], entryId);
@@ -17130,6 +17182,24 @@ class TaskchutePlugin extends obsidian.Plugin {
       return { ok: false, message: "TaskCreatedのentry_idに一致するTaskBoard行が複数あるためAckしません。" };
     }
     if (requestedEntryLines.length === 1) {
+      const actualTaskId = taskIdFromTaskLine(requestedEntryLines[0]);
+      if (actualTaskId && actualTaskId !== taskId) {
+        this.recordBridgeStructuredDiagnostic({
+          level: "error",
+          category: "apply",
+          phase: "taskcreated_entry_id_collision",
+          reason: "entry_id_collision",
+          event,
+          status: "failed_unacked",
+          message: "TaskCreated entry_id collision: existing row belongs to another task_id.",
+          detail: {
+            payload_task_id: taskId,
+            payload_entry_id: requestedEntryId,
+            existing_task_id: actualTaskId
+          }
+        });
+        return { ok: false, message: "TaskCreated entry_id_collision: same entry_id already belongs to another task_id." };
+      }
       const expectedRoutineFields = getExplicitTaskCreatedRoutineFields(payload);
       const actualRoutineFields = getExplicitTaskCreatedRoutineFields({
         entryMeta: tcMetaFromTaskLine(requestedEntryLines[0]),
@@ -17148,7 +17218,134 @@ class TaskchutePlugin extends obsidian.Plugin {
       await this.recordBridgeUsedIds(taskId, requestedEntryId, "bridge-inbound-task-created-existing-id-record");
       return { ok: true, noop: true, verified: true, message: "対象TaskBoard行は同じentry_idとmetadataで既に存在します。" };
     }
-    if (!isContinuation && routineOccurrenceKey && parseTasks(md).some(task =>
+    if (!isContinuation && routineOccurrenceKey) {
+      const parsedTasks = parseTasks(md);
+      const sameOccurrenceTasks = parsedTasks.filter(task =>
+        String(task.entryMeta && task.entryMeta.routine_occurrence_key || "").trim() === routineOccurrenceKey
+      );
+      if (sameOccurrenceTasks.length > 1) {
+        this.recordBridgeStructuredDiagnostic({
+          level: "error",
+          category: "apply",
+          phase: "taskcreated_routine_duplicate_ambiguous",
+          reason: "routine_occurrence_duplicate_ambiguous",
+          event,
+          status: "failed_unacked",
+          message: "TaskCreated routine occurrence duplicate is ambiguous.",
+          detail: {
+            routine_id: generatedRoutineId,
+            routine_occurrence_key: routineOccurrenceKey,
+            payload_entry_id: requestedEntryId,
+            existing_entry_ids: sameOccurrenceTasks.map(task => String(task.entryId || "").trim()).filter(Boolean)
+          }
+        });
+        return { ok: false, message: "TaskCreated routine occurrence duplicate is ambiguous." };
+      }
+      if (sameOccurrenceTasks.length === 1) {
+        const existingOccurrence = sameOccurrenceTasks[0];
+        const existingEntryId = String(existingOccurrence.entryId || existingOccurrence.entryMeta && existingOccurrence.entryMeta.entry_id || "").trim();
+        if (requestedEntryId && existingEntryId === requestedEntryId) {
+          this.recordBridgeRoutineDiagnostic("routine_taskcreated_duplicate_occurrence_entry_acked", {
+            routine_id: generatedRoutineId,
+            occurrence_key: routineOccurrenceKey,
+            entry_id: requestedEntryId,
+            event_type: "TaskCreated"
+          }, "info", "skipped_applied");
+          return { ok: true, noop: true, routineOccurrenceDuplicate: true, message: "Same Routine occurrence and entry_id already exist." };
+        }
+        const payloadEntryOccupied = !!(requestedEntryId && parsedTasks.some(task =>
+          String(task.entryId || task.entryMeta && task.entryMeta.entry_id || "").trim() === requestedEntryId
+          && String(task.taskId || "").trim() !== taskId
+        ));
+        if (payloadEntryOccupied) {
+          this.recordBridgeStructuredDiagnostic({
+            level: "error",
+            category: "apply",
+            phase: "taskcreated_entry_id_collision",
+            reason: "entry_id_collision",
+            event,
+            status: "failed_unacked",
+            message: "TaskCreated payload entry_id is already used by another task.",
+            detail: {
+              routine_id: generatedRoutineId,
+              routine_occurrence_key: routineOccurrenceKey,
+              payload_entry_id: requestedEntryId,
+              existing_occurrence_entry_id: existingEntryId
+            }
+          });
+          return { ok: false, message: "TaskCreated entry_id_collision: payload entry_id is already used by another task." };
+        }
+        const safety = inspectTaskCreatedRoutineRekeySafety(md, existingOccurrence.line, payload);
+        if (!requestedEntryId || !safety.ok) {
+          this.recordBridgeStructuredDiagnostic({
+            level: "warn",
+            category: "apply",
+            phase: "taskcreated_routine_rekey_blocked",
+            reason: "routine_occurrence_entry_id_mismatch",
+            event,
+            status: "failed_unacked",
+            message: "Routine TaskCreated occurrence key matched but entry_id differed; safe rekey was not allowed.",
+            detail: {
+              routine_id: generatedRoutineId,
+              routine_occurrence_key: routineOccurrenceKey,
+              payload_entry_id: requestedEntryId,
+              existing_entry_id: existingEntryId,
+              failed_checks: safety.failedChecks || []
+            }
+          });
+          return { ok: false, message: "Routine TaskCreated occurrence key matched but entry_id differed; Ack is blocked." };
+        }
+        const mdLines = String(md || "").split(/\r?\n/);
+        const matchIndexes = [];
+        for (let i = 0; i < mdLines.length; i++) {
+          if (isTaskLine(mdLines[i])
+            && taskIdFromTaskLine(mdLines[i]) === taskId
+            && String(tcMetaFromTaskLine(mdLines[i]).routine_occurrence_key || "").trim() === routineOccurrenceKey
+            && taskKeyFromTaskLine(mdLines[i]) === existingEntryId) {
+            matchIndexes.push(i);
+          }
+        }
+        if (matchIndexes.length !== 1) {
+          return { ok: false, message: "Routine TaskCreated rekey target was not unique." };
+        }
+        mdLines[matchIndexes[0]] = setTaskLineTcMeta(mdLines[matchIndexes[0]], { entry_id: requestedEntryId });
+        const rekeyWriteOk = await this.writeFileText(notePath, mdLines.join("\n"), { deviceWriterOperation: "bridge-inbound-task-created-routine-rekey" });
+        if (this.isTaskchuteWriteAborted(rekeyWriteOk)) return { ok: false, message: "Routine TaskCreated rekey save was aborted before write." };
+        const reloaded = await readFileText(this.app, notePath);
+        const verifiedLine = String(reloaded || "").split(/\r?\n/).find(line =>
+          isTaskLine(line)
+          && taskIdFromTaskLine(line) === taskId
+          && taskKeyFromTaskLine(line) === requestedEntryId
+          && String(tcMetaFromTaskLine(line).routine_occurrence_key || "").trim() === routineOccurrenceKey
+        );
+        if (!verifiedLine) {
+          return { ok: false, message: "Routine TaskCreated rekey post-save verification failed." };
+        }
+        this.recordBridgeStructuredDiagnostic({
+          level: "info",
+          category: "apply",
+          phase: "taskcreated_routine_rekeyed",
+          reason: "routine_occurrence_entry_id_rekeyed",
+          event,
+          status: "applied",
+          message: "Routine TaskCreated existing occurrence was safely rekeyed to payload entry_id.",
+          detail: {
+            routine_id: generatedRoutineId,
+            routine_occurrence_key: routineOccurrenceKey,
+            old_entry_id: existingEntryId,
+            payload_entry_id: requestedEntryId
+          }
+        });
+        this.markBridgeTaskCreatedKnown(taskId, requestedEntryId);
+        await this.recordBridgeUsedIds(taskId, requestedEntryId, "bridge-inbound-task-created-routine-rekey-id-record");
+        return {
+          ok: true,
+          routineOccurrenceRekeyed: true,
+          task: { taskId, entryId: requestedEntryId, taskKey: requestedEntryId, title, file: fileBase, section: existingOccurrence.section || sec.name, sectionId: sec.id || "", estimateMin, checked: false, sourceDate: date, notePath }
+        };
+      }
+    }
+    if (false && !isContinuation && routineOccurrenceKey && parseTasks(md).some(task =>
       String(task.entryMeta && task.entryMeta.routine_occurrence_key || "").trim() === routineOccurrenceKey
       || (generatedRoutineId && String(task.entryMeta && task.entryMeta.routine_id || "").trim() === generatedRoutineId)
     )) {
