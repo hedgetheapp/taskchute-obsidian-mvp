@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.57`を基準とする。v0.6.57はv0.6.56へAuto Flush lost wake-up修正を追加した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.58`を基準とする。v0.6.58はinbound server Ackとlocal cursor persistenceを分離し、cursor-only reconciliationを追加した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -171,19 +171,24 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - `GET /events/pending`をcursor付きで取得する。
 - `server_sequence ASC, event_id ASC`で処理する。
 - event registryがvalidate、resolve、apply、post-save verify、before-Ack guardを管理する。
-- 成功時だけ`POST /events/{event_id}/applied`を呼ぶ。
+- 保存後検証成功時だけ`POST /events/{event_id}/applied`を呼ぶ。
+- HTTP 2xxは`serverAcked=true`として扱い、後続のlocal cursor保存失敗をserver Ack失敗へ戻さない。
+- inbound Ack cursorは専用trusted persistenceで最新data.jsonへmergeし、sequenceを後退させず、acked sequenceをunionし、他設定やoutboxを古いsnapshotで巻き戻さない。
+- Ack responseがnetwork error等で曖昧な場合はbounded retryし、なお不明ならrecoverable recordとしてserver状態のreconcileを待つ。401 / 403はhard failureとする。
+- server Ack済みと確認できたeventはMarkdownへ再適用せず、cursor-only reconciliationを行う。
 - failed_unacked、unknown event、unsupported version、保存後検証失敗ではAckせずcursorを進めない。
 
 ### mobile resume
 
 - hidden中はpending fetch / apply / Ackを開始しない。
 - visible復帰後にdeferred drainを再開する。
+- recoverableなAck / cursor停止はserver Ack状態とcursorをreconcileしてからruntimeをenabledへ戻し、pending drainを再開する。
 - in-flight、write in progress、network error、空pending到着遅延に対するretry / watch windowがある。
 - OSによりprocess自体が停止している期間の保証は要確認。
 
 ### API server
 
-clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/applied`である。server実装・D1 schemaはこのrepositoryに含まれないため詳細は要確認。
+clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/applied`である。server実装・D1 schemaはこのrepositoryに含まれないため詳細は要確認。cacheやlocal diagnosticが失われた過去のambiguous Ackを任意に確認するapplied-status endpointは現行client契約にないため、そのcold recoveryは要確認。
 
 ## 15. 保存と履歴
 
@@ -200,5 +205,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.57を本番版とみなす条件。現状は実Vault未試験のPrereleaseである。
+- v0.6.58を本番版とみなす条件。現状は実Vault / 実mobile未試験のPrereleaseである。
 - Widget、Watch、MCP/API、外部calendarの仕様。

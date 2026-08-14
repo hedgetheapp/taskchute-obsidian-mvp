@@ -86,6 +86,7 @@ const DEFAULT_SETTINGS = {
   bridgeDeviceId: "",
   bridgeLogicalClock: 0,
   bridgeCursorByDeviceId: {},
+  bridgeInboundAckRecoveryRecords: [],
   bridgeLastAppliedServerSequence: 0,
   bridgeLastAppliedServerSequenceDeviceId: "",
   bridgeUsedTaskIds: [],
@@ -1486,6 +1487,65 @@ function isTaskRoutineActive(task) {
 function nowIso() {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function normalizeBridgeInboundCursorRecord(value) {
+  const src = value && typeof value === "object" ? value : {};
+  const cursor = Math.max(0, Math.floor(Number(src.last_applied_server_sequence || 0)));
+  return {
+    last_applied_server_sequence: cursor,
+    last_ack_event_id: String(src.last_ack_event_id || "").trim(),
+    updated_at: normalizeBridgeUtcIso(src.updated_at),
+    acked_server_sequences: Array.from(new Set((Array.isArray(src.acked_server_sequences) ? src.acked_server_sequences : [])
+      .map(item => Math.max(0, Math.floor(Number(item || 0))))
+      .filter(item => item > cursor))).sort((a, b) => a - b).slice(-200)
+  };
+}
+function mergeBridgeInboundCursorRecords(records, acknowledgedSequences = [], eventId = "", updatedAt = "") {
+  const normalized = (Array.isArray(records) ? records : []).map(normalizeBridgeInboundCursorRecord);
+  let cursor = normalized.reduce((max, item) => Math.max(max, item.last_applied_server_sequence), 0);
+  const acked = new Set();
+  normalized.forEach(item => item.acked_server_sequences.forEach(sequence => {
+    if (sequence > cursor) acked.add(sequence);
+  }));
+  (Array.isArray(acknowledgedSequences) ? acknowledgedSequences : [acknowledgedSequences]).forEach(value => {
+    const sequence = Math.max(0, Math.floor(Number(value || 0)));
+    if (sequence > cursor) acked.add(sequence);
+  });
+  while (acked.has(cursor + 1)) {
+    acked.delete(cursor + 1);
+    cursor += 1;
+  }
+  return {
+    last_applied_server_sequence: cursor,
+    last_ack_event_id: String(eventId || normalized.slice().reverse().find(item => item.last_ack_event_id)?.last_ack_event_id || "").trim(),
+    updated_at: normalizeBridgeUtcIso(updatedAt) || nowIso(),
+    acked_server_sequences: Array.from(acked).filter(sequence => sequence > cursor).sort((a, b) => a - b).slice(-200)
+  };
+}
+function normalizeBridgeInboundAckRecoveryRecords(value) {
+  const source = Array.isArray(value) ? value : [];
+  const byEventId = new Map();
+  source.forEach(item => {
+    const src = item && typeof item === "object" ? item : {};
+    const eventId = String(src.event_id || "").trim();
+    const eventType = String(src.event_type || "").trim();
+    const serverSequence = Math.max(0, Math.floor(Number(src.server_sequence || 0)));
+    if (!eventId || !eventType || !serverSequence) return;
+    byEventId.set(eventId, {
+      event_id: eventId,
+      event_type: eventType,
+      server_sequence: serverSequence,
+      source_device_id: String(src.source_device_id || "").trim(),
+      apply_status: ["applied", "skipped_applied", "conflict_copied"].includes(String(src.apply_status || "")) ? String(src.apply_status) : "applied",
+      diagnostic_id: String(src.diagnostic_id || "").trim(),
+      message: sanitizeBridgeSafeMessage(src.message || "verified; Ack reconciliation pending"),
+      failure_kind: String(src.failure_kind || "ack_response_ambiguous").trim(),
+      server_acked: !!src.server_acked,
+      recorded_at: normalizeBridgeUtcIso(src.recorded_at) || nowIso(),
+      retry_count: Math.max(0, Math.floor(Number(src.retry_count || 0)))
+    });
+  });
+  return Array.from(byEventId.values()).sort((a, b) => a.server_sequence - b.server_sequence).slice(-50);
 }
 function getApproxJsonBytes(value) {
   try {
@@ -10814,15 +10874,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       : {};
     this.settings.bridgeCursorByDeviceId = Object.fromEntries(Object.entries(rawCursorMap).map(([deviceId, cursor]) => {
       const id = String(deviceId || "").trim();
-      const src = cursor && typeof cursor === "object" ? cursor : {};
-      return [id, {
-        last_applied_server_sequence: Math.max(0, Math.floor(Number(src.last_applied_server_sequence || 0))),
-        last_ack_event_id: String(src.last_ack_event_id || "").trim(),
-        updated_at: normalizeBridgeUtcIso(src.updated_at),
-        acked_server_sequences: Array.from(new Set((Array.isArray(src.acked_server_sequences) ? src.acked_server_sequences : [])
-          .map(value => Math.max(0, Math.floor(Number(value || 0)))).filter(value => value > 0))).sort((a, b) => a - b).slice(-200)
-      }];
+      return [id, normalizeBridgeInboundCursorRecord(cursor)];
     }).filter(([deviceId]) => deviceId));
+    this.settings.bridgeInboundAckRecoveryRecords = normalizeBridgeInboundAckRecoveryRecords(this.settings.bridgeInboundAckRecoveryRecords);
     const currentCursor = this.settings.bridgeCursorByDeviceId[this.settings.bridgeDeviceId];
     const legacyCursorDeviceId = String(this.settings.bridgeLastAppliedServerSequenceDeviceId || "").trim();
     const legacyServerSequence = legacyCursorDeviceId === this.settings.bridgeDeviceId
@@ -11639,6 +11693,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!text) return "unknown";
     if (/401|403|unauthorized|forbidden|authorization|認証|アクセスが拒否/.test(text)) return "auth_error";
     if (/未設定|入力してください|missing .*api|missing .*token|missing .*url|api token.*(未設定|入力)|api base url.*(未設定|入力)|正しいurl|invalid .*url|404|endpoint.*not found|エンドポイント.*見つかりません/.test(text)) return "config_error";
+    if (/cursor_persist_failed|ack_response_ambiguous|applied_events登録に失敗|server ack.*cursor|ローカル受信cursor|ack通信に失敗/.test(text)) return "recoverable_ack_cursor";
     if (/保存後検証|false[-_ ]?applied|cursor|server_sequence|failed_unacked|unknown event|unsupported payload|missing prerequisite|不整合|一致しません|複数見つか|重複|duplicate|ambiguous|対象.*見つかりません|taskcreated|taskupdated|taskmoved|taskdeleted|taskstarted|taskstopped|taskcompleted|taskcommentadded|entry_id|task_id/.test(text)) return "data_integrity_error";
     if (/通信に失敗|network|fetch|timeout|aborterror|typeerror|http status 0|status 0|offline|ネットワーク/.test(text)) return "transient_network";
     return "unknown";
@@ -11660,7 +11715,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const busy = !!(src.in_flight || src.write_in_progress || src.drain_active);
     const blockedEventId = String(this.settings && this.settings.bridgeInboundAutoApplyBlockedEventId || "").trim();
     const blockedServerSequence = Math.max(0, Math.floor(Number(this.settings && this.settings.bridgeInboundAutoApplyBlockedServerSequence || 0)));
-    if (stopReasonClass !== "transient_network") return { ok: false, reason: `stop-class-${stopReasonClass || "unknown"}` };
+    if (!['transient_network', 'recoverable_ack_cursor'].includes(stopReasonClass)) return { ok: false, reason: `stop-class-${stopReasonClass || "unknown"}` };
     if (!src.is_mobile) return { ok: false, reason: "not-mobile" };
     if (src.app_visible !== true) return { ok: false, reason: "app-not-visible" };
     if (src.network_online === false) return { ok: false, reason: "network-offline" };
@@ -12732,6 +12787,17 @@ class TaskchutePlugin extends obsidian.Plugin {
       this._bridgeMobileResumeInboundDrainQueued = false;
       recoveryEarlyStop("disabled", "Bridgeまたは受信自動反映が無効のためrecovery drainを開始しませんでした。");
       return { ok: false, skipped: true, reason: "disabled" };
+    }
+    if (String(this.settings.bridgeInboundAutoApplyRuntimeStatus || "") !== "enabled" && isRecovery) {
+      const reconciled = await this.reconcileBridgeInboundAckCursor({ reason: "mobile-rescue-before-runtime-restore" });
+      if (reconciled && reconciled.ok && reconciled.attempted && reconciled.reconciledCount > 0) {
+        this.setBridgeInboundAutoApplyRuntimeState("enabled", "", "mobile-recovery-ack-cursor-reconciled");
+        runtimeRestoredForRecovery = true;
+        this.recordBridgeInboundRuntimeRecoveryDiagnostic("bridge_mobile_resume_ack_cursor_reconciled", {
+          source, runId, decision: "reconciled", reconcile_attempted: true,
+          reconcile_result: "success", message: "Ack/cursorを再適用なしで修復し、runtimeをenabledへ復帰しました。"
+        }, "info", "restored");
+      }
     }
     if (String(this.settings.bridgeInboundAutoApplyRuntimeStatus || "") !== "enabled") {
       if (isRecovery) {
@@ -16179,10 +16245,150 @@ class TaskchutePlugin extends obsidian.Plugin {
     return Math.max(0, Math.floor(Number(map[deviceId] && map[deviceId].last_applied_server_sequence || 0)));
   }
 
+  async persistBridgeInboundCursorTrusted(event, options = {}) {
+    const deviceId = String(this.settings && this.settings.bridgeDeviceId || "").trim();
+    const sequence = Math.max(0, Math.floor(Number(event && event.server_sequence || options.serverSequence || 0)));
+    const eventId = String(event && event.event_id || options.eventId || "").trim();
+    const cursorBefore = this.getBridgeInboundCurrentCursor();
+    const guardDecision = "trusted-cursor-only-persistence";
+    const guardReason = "verified-inbound-server-ack";
+    if (!deviceId || !sequence) {
+      return { ok: false, cursorBefore, cursorAfter: cursorBefore, deviceGuardDecision: guardDecision, deviceGuardReason: guardReason, message: "server_sequenceまたはDevice IDがないためcursorを保存できません。" };
+    }
+    const save = async () => {
+      const loaded = await this.loadData();
+      const diskData = loaded && typeof loaded === "object" ? loaded : {};
+      const diskMap = diskData.bridgeCursorByDeviceId && typeof diskData.bridgeCursorByDeviceId === "object"
+        ? diskData.bridgeCursorByDeviceId
+        : {};
+      const memoryMap = this.settings && this.settings.bridgeCursorByDeviceId && typeof this.settings.bridgeCursorByDeviceId === "object"
+        ? this.settings.bridgeCursorByDeviceId
+        : {};
+      const mergedCursor = mergeBridgeInboundCursorRecords([
+        diskMap[deviceId],
+        memoryMap[deviceId]
+      ], [sequence], eventId, nowIso());
+      const nextMap = {};
+      new Set([...Object.keys(diskMap), ...Object.keys(memoryMap)]).forEach(id => {
+        nextMap[id] = id === deviceId
+          ? mergedCursor
+          : mergeBridgeInboundCursorRecords([diskMap[id], memoryMap[id]], [], "", nowIso());
+      });
+      nextMap[deviceId] = mergedCursor;
+      const dataToSave = Object.assign({}, Object.keys(diskData).length ? diskData : this.buildSyncedPluginDataForSave(), {
+        bridgeCursorByDeviceId: nextMap,
+        bridgeLastAppliedServerSequence: Math.max(
+          String(diskData.bridgeLastAppliedServerSequenceDeviceId || "").trim() === deviceId
+            ? Math.max(0, Math.floor(Number(diskData.bridgeLastAppliedServerSequence || 0)))
+            : 0,
+          mergedCursor.last_applied_server_sequence
+        ),
+        bridgeLastAppliedServerSequenceDeviceId: deviceId
+      });
+      this.lastInternalDataSaveAt = Date.now();
+      await this.saveData(dataToSave);
+      this.settings.bridgeCursorByDeviceId = nextMap;
+      this.settings.bridgeLastAppliedServerSequence = mergedCursor.last_applied_server_sequence;
+      this.settings.bridgeLastAppliedServerSequenceDeviceId = deviceId;
+      await this.updatePluginDataStatBaseline();
+      return mergedCursor;
+    };
+    try {
+      const pending = Promise.resolve(this.pluginDataSaveQueue).then(save, save);
+      this.pluginDataSaveQueue = pending.catch(() => {});
+      const mergedCursor = await pending;
+      return {
+        ok: true,
+        cursorBefore,
+        cursorAfter: mergedCursor.last_applied_server_sequence,
+        advanced: mergedCursor.last_applied_server_sequence >= sequence,
+        deviceGuardDecision: guardDecision,
+        deviceGuardReason: guardReason
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        cursorBefore,
+        cursorAfter: this.getBridgeInboundCurrentCursor(),
+        advanced: false,
+        deviceGuardDecision: guardDecision,
+        deviceGuardReason: guardReason,
+        message: "Ack後cursorのtrusted保存に失敗しました。",
+        error: sanitizeBridgeSafeMessage(e && e.message || e || "cursor persistence failed")
+      };
+    }
+  }
+
+  async persistBridgeInboundAckRecoveryRecordsTrusted(records, operation = "ack-recovery-update") {
+    const normalized = normalizeBridgeInboundAckRecoveryRecords(records);
+    const save = async () => {
+      const loaded = await this.loadData();
+      const diskData = loaded && typeof loaded === "object" ? loaded : {};
+      const mergedRecords = normalizeBridgeInboundAckRecoveryRecords(
+        normalizeBridgeInboundAckRecoveryRecords(diskData.bridgeInboundAckRecoveryRecords).concat(normalized)
+      );
+      const clearedEventId = String(operation || "").startsWith("ack-recovery-cleared:")
+        ? String(operation).slice("ack-recovery-cleared:".length).trim()
+        : "";
+      const dataToSave = Object.assign({}, Object.keys(diskData).length ? diskData : this.buildSyncedPluginDataForSave(), {
+        bridgeInboundAckRecoveryRecords: clearedEventId
+          ? mergedRecords.filter(item => item.event_id !== clearedEventId)
+          : mergedRecords
+      });
+      this.lastInternalDataSaveAt = Date.now();
+      await this.saveData(dataToSave);
+      this.settings.bridgeInboundAckRecoveryRecords = dataToSave.bridgeInboundAckRecoveryRecords;
+      await this.updatePluginDataStatBaseline();
+      return true;
+    };
+    try {
+      const pending = Promise.resolve(this.pluginDataSaveQueue).then(save, save);
+      this.pluginDataSaveQueue = pending.catch(() => {});
+      return await pending;
+    } catch (e) {
+      this.recordBridgeStructuredDiagnostic({
+        level: "error", category: "ack", phase: "ack_recovery_persist_failed", reason: operation,
+        status: "recoverable", message: "Ack recovery recordのtrusted保存に失敗しました。",
+        detail: { failure_kind: "ack_recovery_persist_failed", device_guard_decision: "trusted-ack-recovery-only-persistence", device_guard_reason: operation }
+      });
+      return false;
+    }
+  }
+
+  async queueBridgeInboundAckRecovery(event, applyResult, failureKind, serverAcked = false) {
+    const record = {
+      event_id: String(event && event.event_id || "").trim(),
+      event_type: String(event && event.event_type || "").trim(),
+      server_sequence: Math.max(0, Math.floor(Number(event && event.server_sequence || 0))),
+      source_device_id: String(event && (event.source_device_id || event.device_id) || "").trim(),
+      apply_status: String(applyResult && applyResult.apply_status || "applied").trim(),
+      diagnostic_id: String(applyResult && applyResult.diagnostic_id || "").trim(),
+      message: sanitizeBridgeSafeMessage(applyResult && applyResult.message || "verified; Ack reconciliation pending"),
+      failure_kind: String(failureKind || "ack_response_ambiguous").trim(),
+      server_acked: !!serverAcked,
+      recorded_at: nowIso(),
+      retry_count: 0
+    };
+    const current = normalizeBridgeInboundAckRecoveryRecords(this.settings && this.settings.bridgeInboundAckRecoveryRecords);
+    const next = normalizeBridgeInboundAckRecoveryRecords(current.concat(record));
+    this.settings.bridgeInboundAckRecoveryRecords = next;
+    return await this.persistBridgeInboundAckRecoveryRecordsTrusted(next, "ack-recovery-queued");
+  }
+
+  async clearBridgeInboundAckRecovery(eventId) {
+    const id = String(eventId || "").trim();
+    const current = normalizeBridgeInboundAckRecoveryRecords(this.settings && this.settings.bridgeInboundAckRecoveryRecords);
+    if (!id || !current.some(item => item.event_id === id)) return true;
+    const next = current.filter(item => item.event_id !== id);
+    this.settings.bridgeInboundAckRecoveryRecords = next;
+    return await this.persistBridgeInboundAckRecoveryRecordsTrusted(next, `ack-recovery-cleared:${id}`);
+  }
+
   async recordBridgeInboundAckCursor(event) {
     const deviceId = String(this.settings && this.settings.bridgeDeviceId || "").trim();
     const sequence = Math.max(0, Math.floor(Number(event && event.server_sequence || 0)));
-    if (!deviceId || !sequence) return { ok: false, advanced: false, message: "server_sequenceまたはDevice IDがないためカーソルを更新できません。" };
+    const cursorBefore = this.getBridgeInboundCurrentCursor();
+    if (!deviceId || !sequence) return { ok: false, advanced: false, cursorBefore, cursorAfter: cursorBefore, message: "server_sequenceまたはDevice IDがないためカーソルを更新できません。" };
     this.recordBridgeStructuredDiagnostic({
       level: "info",
       category: "cursor",
@@ -16191,31 +16397,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       event,
       status: "started",
       message: "Ack成功後のcursor保存を開始しました。",
-      detail: { current_cursor: this.getBridgeInboundCurrentCursor() }
+      detail: { cursor_before: cursorBefore, cursor_save_attempted: true, device_guard_decision: "trusted-cursor-only-persistence", device_guard_reason: "verified-inbound-server-ack" }
     });
-    const map = this.settings.bridgeCursorByDeviceId && typeof this.settings.bridgeCursorByDeviceId === "object"
-      ? this.settings.bridgeCursorByDeviceId
-      : {};
-    const current = map[deviceId] && typeof map[deviceId] === "object" ? map[deviceId] : {};
-    let cursor = Math.max(0, Math.floor(Number(current.last_applied_server_sequence || 0)));
-    const acked = new Set((Array.isArray(current.acked_server_sequences) ? current.acked_server_sequences : [])
-      .map(value => Math.max(0, Math.floor(Number(value || 0)))).filter(value => value > cursor));
-    acked.add(sequence);
-    while (acked.has(cursor + 1)) {
-      acked.delete(cursor + 1);
-      cursor += 1;
-    }
-    map[deviceId] = {
-      last_applied_server_sequence: cursor,
-      last_ack_event_id: String(event && event.event_id || "").trim(),
-      updated_at: nowIso(),
-      acked_server_sequences: Array.from(acked).sort((a, b) => a - b).slice(-200)
-    };
-    this.settings.bridgeCursorByDeviceId = map;
-    this.settings.bridgeLastAppliedServerSequence = cursor;
-    this.settings.bridgeLastAppliedServerSequenceDeviceId = deviceId;
-    const saved = await this.savePluginData({ deviceWriterOperation: "bridge-inbound-cursor-after-ack" });
-    if (saved === false) {
+    const persisted = await this.persistBridgeInboundCursorTrusted(event);
+    if (!persisted.ok) {
       this.recordBridgeStructuredDiagnostic({
         level: "error",
         category: "cursor",
@@ -16224,9 +16409,13 @@ class TaskchutePlugin extends obsidian.Plugin {
         event,
         status: "error",
         message: "Ack後カーソルの保存が停止しました。",
-        detail: { cursor, advanced: false }
+        detail: {
+          cursor_save_attempted: true, cursor_save_result: "failed", cursor_before: cursorBefore,
+          cursor_after: persisted.cursorAfter, device_guard_decision: persisted.deviceGuardDecision,
+          device_guard_reason: persisted.deviceGuardReason, failure_kind: "cursor_persist_failed"
+        }
       });
-      return { ok: false, advanced: false, message: "Ack後カーソルの保存が停止しました。" };
+      return Object.assign({}, persisted, { ok: false, advanced: false, failureKind: "cursor_persist_failed", message: "server Ackは成功しましたが、ローカル受信cursorの保存に失敗しました。再同期でcursor修復を試みます。" });
     }
     this.recordBridgeStructuredDiagnostic({
       level: "info",
@@ -16236,9 +16425,130 @@ class TaskchutePlugin extends obsidian.Plugin {
       event,
       status: "acknowledged",
       message: "Ack成功後のcursor保存が完了しました。",
-      detail: { cursor, advanced: cursor >= sequence }
+      detail: {
+        cursor_save_attempted: true, cursor_save_result: "saved", cursor_before: cursorBefore,
+        cursor_after: persisted.cursorAfter, device_guard_decision: persisted.deviceGuardDecision,
+        device_guard_reason: persisted.deviceGuardReason, failure_kind: ""
+      }
     });
-    return { ok: true, advanced: cursor >= sequence, cursor };
+    return { ok: true, advanced: persisted.advanced, cursor: persisted.cursorAfter, cursorBefore, cursorAfter: persisted.cursorAfter, deviceGuardDecision: persisted.deviceGuardDecision, deviceGuardReason: persisted.deviceGuardReason };
+  }
+
+  getBridgeInboundLegacyAckRecoveryRecord() {
+    const blocked = getBridgeCurrentBlockedIdentity(this.settings || {});
+    if (!blocked.eventId || !blocked.serverSequence) return null;
+    const reason = String(this.settings && (this.settings.bridgeInboundAutoApplyRuntimeReason || this.settings.bridgeInboundAutoApplyLastStoppedReason || this.settings.bridgeInboundAutoApplyStoppedReason) || "");
+    if (!/applied_events登録に失敗|ack.*(失敗|fail)|cursor.*(保存|persist)|受信cursor/i.test(reason)) return null;
+    const events = normalizeBridgeInboundDryRunEvents(this.settings && this.settings.bridgeInboundDryRunEvents, String(this.settings && this.settings.bridgeDeviceId || ""));
+    const event = events.find(item => String(item && item.event_id || "") === blocked.eventId
+      && Math.max(0, Math.floor(Number(item && item.server_sequence || 0))) === blocked.serverSequence);
+    if (!event) return null;
+    const diagnostics = Array.isArray(this.settings && this.settings.bridgeInboundAutoApplyRuntimeDiagnostics)
+      ? this.settings.bridgeInboundAutoApplyRuntimeDiagnostics
+      : [];
+    const verified = diagnostics.some(item => String(item && item.event_id || "") === blocked.eventId
+      && Math.max(0, Math.floor(Number(item && item.server_sequence || 0))) === blocked.serverSequence
+      && String(item && item.phase || "") === "save_verify_ok");
+    if (!verified) return null;
+    return {
+      event,
+      applyResult: {
+        ok: true,
+        verified: true,
+        apply_status: "applied",
+        event_id: blocked.eventId,
+        event_type: String(event.event_type || "").trim(),
+        server_sequence: blocked.serverSequence,
+        message: "legacy verified inbound event; Ack-only reconciliation"
+      },
+      legacy: true
+    };
+  }
+
+  async reconcileBridgeInboundAckCursor(options = {}) {
+    const records = normalizeBridgeInboundAckRecoveryRecords(this.settings && this.settings.bridgeInboundAckRecoveryRecords);
+    const candidates = records.map(record => ({
+      event: {
+        event_id: record.event_id,
+        event_type: record.event_type,
+        server_sequence: record.server_sequence,
+        source_device_id: record.source_device_id
+      },
+      applyResult: {
+        ok: true,
+        verified: true,
+        apply_status: record.apply_status,
+        event_id: record.event_id,
+        event_type: record.event_type,
+        server_sequence: record.server_sequence,
+        diagnostic_id: record.diagnostic_id,
+        message: record.message
+      },
+      legacy: false
+    }));
+    if (!candidates.length) {
+      const legacy = this.getBridgeInboundLegacyAckRecoveryRecord();
+      if (legacy) candidates.push(legacy);
+    }
+    if (!candidates.length) {
+      const blocked = getBridgeCurrentBlockedIdentity(this.settings || {});
+      const runtimeReason = String(this.settings && (this.settings.bridgeInboundAutoApplyRuntimeReason || this.settings.bridgeInboundAutoApplyLastStoppedReason) || "");
+      if (blocked.eventId && blocked.serverSequence && /applied_events登録に失敗|ack.*(失敗|fail)|cursor.*(保存|persist)|受信cursor/i.test(runtimeReason)) {
+        this.recordBridgeStructuredDiagnostic({
+          level: "warn", category: "ack", phase: "ack_cursor_reconcile_unavailable", reason: String(options.reason || "inbound-recovery"),
+          event_id: blocked.eventId, server_sequence: blocked.serverSequence, status: "recoverable",
+          message: "検証済みevent cacheがないためclient単独ではserver Ack状態を安全に確認できません。sync-apiのapplied status照会が必要です。",
+          detail: { ack_http_status: 0, server_ack_committed: false, cursor_save_attempted: false, cursor_before: this.getBridgeInboundCurrentCursor(), cursor_after: this.getBridgeInboundCurrentCursor(), reconcile_attempted: true, reconcile_result: "server-status-unavailable", failure_kind: "server_applied_status_unavailable" }
+        });
+        return { ok: false, attempted: true, reconciledCount: 0, recoverable: true, hardStop: false, failureKind: "server_applied_status_unavailable", message: "server Ack状態を確認するためsync-apiのapplied status照会が必要です。" };
+      }
+      return { ok: true, attempted: false, reconciledCount: 0, reason: "no-recovery-candidate" };
+    }
+    let reconciledCount = 0;
+    let lastFailure = null;
+    for (const candidate of candidates) {
+      const cursorBefore = this.getBridgeInboundCurrentCursor();
+      this.recordBridgeStructuredDiagnostic({
+        level: "info", category: "ack", phase: "ack_cursor_reconcile_started", reason: String(options.reason || "inbound-recovery"),
+        event: candidate.event, status: "started", message: "検証済みeventのAck/cursor reconciliationを開始しました。",
+        detail: { ack_http_status: 0, server_ack_committed: false, cursor_save_attempted: false, cursor_before: cursorBefore, cursor_after: cursorBefore, reconcile_attempted: true, reconcile_result: "started", failure_kind: "" }
+      });
+      const ack = await this.ackBridgeInboundEvent(candidate.event, candidate.applyResult, {
+        reconcile: true,
+        skipRecoveryRecord: true
+      });
+      this.recordBridgeStructuredDiagnostic({
+        level: ack && ack.serverAcked && ack.cursorPersisted ? "info" : ack && ack.recoverable ? "warn" : "error",
+        category: "ack", phase: "ack_cursor_reconcile_finished", reason: String(options.reason || "inbound-recovery"),
+        event: candidate.event, status: ack && ack.serverAcked && ack.cursorPersisted ? "reconciled" : ack && ack.recoverable ? "recoverable" : "error",
+        message: ack && ack.message || "Ack/cursor reconciliationに失敗しました。",
+        detail: {
+          ack_http_status: Math.max(0, Math.floor(Number(ack && ack.httpStatus || 0))),
+          server_ack_committed: !!(ack && ack.serverAcked), cursor_save_attempted: !!(ack && ack.serverAcked),
+          cursor_save_result: ack && ack.cursorPersisted ? "saved" : ack && ack.serverAcked ? "failed" : "not-attempted",
+          cursor_before: cursorBefore, cursor_after: this.getBridgeInboundCurrentCursor(),
+          device_guard_decision: "trusted-cursor-only-persistence", device_guard_reason: "ack-cursor-reconciliation",
+          reconcile_attempted: true, reconcile_result: ack && ack.serverAcked && ack.cursorPersisted ? "success" : "failed",
+          failure_kind: String(ack && ack.failureKind || "")
+        }
+      });
+      if (ack && ack.serverAcked && ack.cursorPersisted) {
+        reconciledCount++;
+        await this.clearBridgeInboundAckRecovery(candidate.event.event_id);
+      } else {
+        lastFailure = ack || { failureKind: "reconcile_failed", message: "Ack/cursor reconciliationに失敗しました。" };
+        break;
+      }
+    }
+    return {
+      ok: !lastFailure,
+      attempted: true,
+      reconciledCount,
+      recoverable: !!(lastFailure && lastFailure.recoverable),
+      hardStop: !!(lastFailure && lastFailure.hardStop),
+      failureKind: String(lastFailure && lastFailure.failureKind || ""),
+      message: lastFailure && lastFailure.message || "Ack/cursor reconciliation OK"
+    };
   }
 
   getBridgeEventRegistry() {
@@ -17440,7 +17750,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     return { ok: true, task: { taskId, entryId, taskKey: entryId, title, file: fileBase, section: sec.name, sectionId: sec.id, estimateMin, checked: false, sourceDate: date, notePath } };
   }
 
-  async ackBridgeInboundEvent(event, applyResult) {
+  async ackBridgeInboundEvent(event, applyResult, options = {}) {
     const baseUrl = normalizeBridgeApiBaseUrl(this.settings && this.settings.bridgeApiBaseUrl);
     const token = String(this.settings && this.settings.bridgeApiToken || "");
     const deviceId = String(this.settings && this.settings.bridgeDeviceId || "").trim();
@@ -17466,42 +17776,64 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!id) return { ok: false, message: "ack対象のevent_idがありません。" };
     if (!eventType) return { ok: false, message: "ack対象のevent_typeがありません。" };
     if (!serverSequence) return { ok: false, message: "ack対象のserver_sequenceがありません。" };
+    const cursorBefore = this.getBridgeInboundCurrentCursor();
     try {
       const parsedUrl = new URL(baseUrl);
       if (!["http:", "https:"].includes(parsedUrl.protocol)) return { ok: false, message: "API Base URLはhttp://またはhttps://で始まる正しいURLを入力してください。" };
       const url = `${baseUrl}/events/${encodeURIComponent(id)}/applied`;
-      const res = await obsidian.requestUrl({
-        url,
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-          "Content-Type": "application/json"
-        },
+      const requestOptions = {
+        url, method: "POST",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({
-          device_id: deviceId,
-          event_id: id,
-          event_type: eventType,
-          server_sequence: serverSequence,
+          device_id: deviceId, event_id: id, event_type: eventType, server_sequence: serverSequence,
           apply_status: result.apply_status,
           diagnostic_id: String(result.diagnostic_id || "").trim() || undefined,
           message: sanitizeBridgeSafeMessage(result.message || "applied and verified").split(token).join("[redacted]")
         }),
         throw: false
-      });
-      const status = Number(res && res.status || 0);
+      };
+      let status = 0;
+      let lastError = null;
+      const maxAttempts = options && options.singleAttempt ? 1 : 2;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const res = await obsidian.requestUrl(requestOptions);
+          status = Number(res && res.status || 0);
+          lastError = null;
+        } catch (e) {
+          lastError = e;
+          status = Number(e && (e.status || e.statusCode) || 0);
+        }
+        const retryableStatus = !status || status === 408 || status === 429 || status >= 500;
+        if ((status >= 200 && status < 300) || !retryableStatus || attempt >= maxAttempts) break;
+        this.recordBridgeStructuredDiagnostic({
+          level: "warn", category: "ack", phase: "ack_retry_scheduled", reason: lastError ? "network-error" : `http-${status}`,
+          event, status: "recoverable", message: "Ack応答が不確定なため冪等retryを行います。",
+          detail: { ack_http_status: status, server_ack_committed: false, cursor_save_attempted: false, cursor_before: cursorBefore, cursor_after: cursorBefore, reconcile_attempted: false, reconcile_result: "not-yet", failure_kind: "ack_response_ambiguous", attempt }
+        });
+        await sleepTaskchute(400 * attempt);
+      }
       if (status >= 200 && status < 300) {
         const cursor = await this.recordBridgeInboundAckCursor(event);
-        if (!cursor.ok) return { ok: false, message: "ack成功後の受信カーソル保存に失敗しました。" };
+        const cursorPersisted = !!cursor.ok;
         this.recordBridgeStructuredDiagnostic({
-          level: "info",
+          level: cursorPersisted ? "info" : "warn",
           category: "ack",
           phase: "ack_finished",
-          reason: "ack-ok",
+          reason: cursorPersisted ? "ack-ok" : "cursor-persist-failed",
           event,
-          status: "acknowledged",
-          message: "ack OK",
-          detail: { cursor: cursor.cursor, cursor_advanced: !!cursor.advanced }
+          status: cursorPersisted ? "acknowledged" : "recoverable",
+          message: cursorPersisted ? "server Ackとcursor保存が完了しました。" : "server Ackは成功しましたが、ローカル受信cursorの保存に失敗しました。再同期でcursor修復を試みます。",
+          detail: {
+            ack_http_status: status, server_ack_committed: true, cursor_save_attempted: true,
+            cursor_save_result: cursorPersisted ? "saved" : "failed", cursor_before: cursorBefore,
+            cursor_after: cursor.cursorAfter == null ? this.getBridgeInboundCurrentCursor() : cursor.cursorAfter,
+            device_guard_decision: cursor.deviceGuardDecision || "trusted-cursor-only-persistence",
+            device_guard_reason: cursor.deviceGuardReason || "verified-inbound-server-ack",
+            reconcile_attempted: !!(options && options.reconcile),
+            reconcile_result: options && options.reconcile ? (cursorPersisted ? "success" : "cursor-persist-failed") : "not-needed",
+            failure_kind: cursorPersisted ? "" : "cursor_persist_failed"
+          }
         });
         if (this.isBridgeRoutineOccurrenceOnlyTaskUpdatedEvent(event)) {
           const payload = parseBridgeEventPayload(event);
@@ -17520,10 +17852,24 @@ class TaskchutePlugin extends obsidian.Plugin {
             post_save_alias_verified: true,
             d1_ack_allowed: true,
             d1_acked: true,
-            cursor: cursor.cursor
+            cursor: cursor.cursorAfter == null ? this.getBridgeInboundCurrentCursor() : cursor.cursorAfter
           }, "info", "acknowledged");
         }
-        return { ok: true, message: "ack OK", cursor: cursor.cursor, cursorAdvanced: cursor.advanced };
+        if (cursorPersisted) await this.clearBridgeInboundAckRecovery(id);
+        else if (!(options && options.skipRecoveryRecord)) await this.queueBridgeInboundAckRecovery(event, result, "cursor_persist_failed", true);
+        return {
+          ok: true,
+          recoverable: !cursorPersisted,
+          serverAcked: true,
+          cursorPersisted,
+          failureKind: cursorPersisted ? "" : "cursor_persist_failed",
+          httpStatus: status,
+          cursorBefore,
+          cursorAfter: cursor.cursorAfter == null ? this.getBridgeInboundCurrentCursor() : cursor.cursorAfter,
+          cursor: cursor.cursorAfter == null ? this.getBridgeInboundCurrentCursor() : cursor.cursorAfter,
+          cursorAdvanced: !!cursor.advanced,
+          message: cursorPersisted ? "ack OK" : "server Ackは成功しましたが、ローカル受信cursorの保存に失敗しました。再同期でcursor修復を試みます。"
+        };
       }
       this.recordBridgeStructuredDiagnostic({
         level: "error",
@@ -17534,13 +17880,19 @@ class TaskchutePlugin extends obsidian.Plugin {
         status: "error",
         message: `ackに失敗しました（HTTP ${status || "unknown"}）。`
       });
-      if (status === 401) return { ok: false, message: "認証に失敗しました（401）。API Tokenを確認してください。" };
-      if (status === 403) return { ok: false, message: "アクセスが拒否されました（403）。API Tokenまたは権限を確認してください。" };
-      if (status === 404) return { ok: false, message: "ackエンドポイントまたはevent_idが見つかりません（404）。" };
-      return { ok: false, message: `ackに失敗しました（HTTP ${status || "unknown"}）。` };
+      if (status === 401) return { ok: false, hardStop: true, serverAcked: false, cursorPersisted: false, failureKind: "auth_error", httpStatus: status, cursorBefore, cursorAfter: cursorBefore, message: "認証に失敗しました（401）。API Tokenを確認してください。" };
+      if (status === 403) return { ok: false, hardStop: true, serverAcked: false, cursorPersisted: false, failureKind: "auth_error", httpStatus: status, cursorBefore, cursorAfter: cursorBefore, message: "アクセスが拒否されました（403）。API Tokenまたは権限を確認してください。" };
+      if (status === 404) return { ok: false, hardStop: true, serverAcked: false, cursorPersisted: false, failureKind: "ack_endpoint_not_found", httpStatus: status, cursorBefore, cursorAfter: cursorBefore, message: "ackエンドポイントまたはevent_idが見つかりません（404）。" };
+      const ambiguous = !status || status === 408 || status === 429 || status >= 500 || !!lastError;
+      if (ambiguous) {
+        if (!(options && options.skipRecoveryRecord)) await this.queueBridgeInboundAckRecovery(event, result, "ack_response_ambiguous", false);
+        return { ok: false, recoverable: true, serverAcked: false, cursorPersisted: false, ackOutcomeAmbiguous: true, failureKind: "ack_response_ambiguous", httpStatus: status, cursorBefore, cursorAfter: cursorBefore, message: "Ack応答を確認できませんでした。Markdownは再適用せず、冪等Ack retryで確認します。" };
+      }
+      return { ok: false, hardStop: true, serverAcked: false, cursorPersisted: false, failureKind: `ack_http_${status || "unknown"}`, httpStatus: status, cursorBefore, cursorAfter: cursorBefore, message: `ackに失敗しました（HTTP ${status || "unknown"}）。` };
     } catch (e) {
-      this.recordBridgeStructuredDiagnostic({ level: "error", category: "ack", phase: "ack_finished", reason: "network-error", event, status: "error", message: "ack通信に失敗しました。" });
-      return { ok: false, message: "ack通信に失敗しました。API Base URLとネットワーク接続を確認してください。" };
+      if (!(options && options.skipRecoveryRecord)) await this.queueBridgeInboundAckRecovery(event, result, "ack_response_ambiguous", false);
+      this.recordBridgeStructuredDiagnostic({ level: "warn", category: "ack", phase: "ack_finished", reason: "network-error", event, status: "recoverable", message: "Ack応答が不確定です。Markdownは再適用せずAck reconciliationを待ちます。", detail: { ack_http_status: 0, server_ack_committed: false, cursor_save_attempted: false, cursor_before: cursorBefore, cursor_after: cursorBefore, reconcile_attempted: false, reconcile_result: "queued", failure_kind: "ack_response_ambiguous" } });
+      return { ok: false, recoverable: true, serverAcked: false, cursorPersisted: false, ackOutcomeAmbiguous: true, failureKind: "ack_response_ambiguous", httpStatus: 0, cursorBefore, cursorAfter: cursorBefore, message: "Ack応答を確認できませんでした。Markdownは再適用せず、冪等Ack retryで確認します。" };
     }
   }
 
@@ -17692,7 +18044,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!ack || !ack.ok) {
             failedCount++;
             ackFailedEventIds.push(eventId);
-            lastFailureDetail = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗しました。");
+            lastFailureDetail = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗しました。"));
             continue;
           }
           appliedCount++;
@@ -18476,7 +18828,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!ack || !ack.ok) {
             failedCount++;
             ackFailedEventIds.push(eventId);
-            lastFailureDetail = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗しました。");
+            lastFailureDetail = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗しました。"));
             continue;
           }
           appliedCount++;
@@ -20164,7 +20516,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!ack || !ack.ok) {
             failedCount++;
             ackFailedEventIds.push(eventId);
-            lastFailureDetail = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗しました。");
+            lastFailureDetail = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗しました。"));
             continue;
           }
           appliedCount++;
@@ -20546,7 +20898,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           const ack = await this.ackBridgeInboundAppliedEvent(event, result);
           if (!ack || !ack.ok) {
             failedCount++;
-            stoppedReason = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗したため停止しました。");
+            stoppedReason = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗したため停止しました。"));
             break;
           }
           appliedCount++;
@@ -20689,6 +21041,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     let stoppedReason = "";
     let message = "";
     let refreshNeeded = false;
+    let recoverableFailureKind = "";
+    let recoverableFailureMessage = "";
     const mobileResumeDrain = !!(options && options.mobileResumeDrain);
     const mobileResumeRunId = String(options && options.runId || this._bridgeMobileResumeCurrentDrainRunId || "").trim();
     let deferredUntilVisible = false;
@@ -20707,13 +21061,29 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.bridgeInboundApplyInProgress = true;
     this.settings.bridgeInboundApplyInProgress = true;
     try {
+      const reconciliation = await this.reconcileBridgeInboundAckCursor({ reason: "before-inbound-auto-apply" });
+      if (reconciliation && reconciliation.attempted && !reconciliation.ok) {
+        if (reconciliation.hardStop) {
+          failedCount = 1;
+          stoppedReason = reconciliation.message || "Ack/cursor reconciliationでhard failureを検出しました。";
+        } else {
+          recoverableFailureKind = reconciliation.failureKind || "ack_cursor_reconcile_failed";
+          recoverableFailureMessage = reconciliation.message || "Ack/cursor reconciliationを次回再試行します。";
+        }
+      }
       let fetched = null;
       try {
+        if (failedCount > 0 || recoverableFailureKind) throw new Error("bridge-inbound-reconcile-blocked-fetch");
         fetched = await this.fetchBridgeInboundDryRunEvents({ limit: 100, requestMode: "apply" });
       } catch (e) {
-        fetched = { ok: false, message: "pending取得中にエラーが発生しました。" };
+        fetched = failedCount > 0 || recoverableFailureKind
+          ? { ok: false, reconcileBlocked: true, message: stoppedReason || recoverableFailureMessage }
+          : { ok: false, message: "pending取得中にエラーが発生しました。" };
       }
       if (!fetched || !fetched.ok) {
+        if (fetched && fetched.reconcileBlocked) {
+          message = fetched.message || "Ack/cursor reconciliationを待機しています。";
+        } else
         if (mobileResumeDrain && this.isBridgeMobileResumeHidden()
           && String(fetched && fetched.errorKind || "") === "network_error") {
           deferredUntilVisible = true;
@@ -20887,22 +21257,41 @@ class TaskchutePlugin extends obsidian.Plugin {
             message: ack && ack.message || ""
           });
           if (eventType === "TaskMoved") {
-            this.recordBridgeTaskMovedInboundDiagnostic(ack && ack.ok ? "taskmoved_ack_finished" : "taskmoved_ack_skipped_reason", event, {
+            this.recordBridgeTaskMovedInboundDiagnostic(ack && ack.serverAcked ? "taskmoved_ack_finished" : "taskmoved_ack_skipped_reason", event, {
               cursor_after: this.getBridgeInboundCurrentCursor(),
               cursor_advanced: !!(ack && ack.cursorAdvanced),
-              reason_code: ack && ack.ok ? "ack_ok" : "ack_failed",
+              server_ack_committed: !!(ack && ack.serverAcked),
+              cursor_save_result: ack && ack.cursorPersisted ? "saved" : ack && ack.serverAcked ? "failed" : "not-attempted",
+              reason_code: String(ack && ack.failureKind || (ack && ack.serverAcked ? "ack_ok" : "ack_failed")),
               message: ack && ack.message || ""
-            }, ack && ack.ok ? "info" : "error", ack && ack.ok ? "acknowledged" : "error");
+            }, ack && ack.serverAcked ? (ack.cursorPersisted ? "info" : "warn") : "error", ack && ack.serverAcked ? (ack.cursorPersisted ? "acknowledged" : "recoverable") : "error");
           }
           if (!ack || !ack.ok) {
+            if (ack && ack.recoverable) {
+              recoverableFailureKind = String(ack.failureKind || "ack_response_ambiguous");
+              recoverableFailureMessage = String(ack.message || "Ack/cursorを次回再同期で修復します。");
+              this.recordBridgeStructuredDiagnostic({
+                level: "warn", category: "ack", phase: "ack_recoverable_deferred", reason: recoverableFailureKind,
+                event, status: "recoverable", message: recoverableFailureMessage,
+                detail: {
+                  ack_http_status: Math.max(0, Math.floor(Number(ack.httpStatus || 0))),
+                  server_ack_committed: !!ack.serverAcked, cursor_save_attempted: !!ack.serverAcked,
+                  cursor_save_result: ack.cursorPersisted ? "saved" : ack.serverAcked ? "failed" : "not-attempted",
+                  cursor_before: ack.cursorBefore == null ? this.getBridgeInboundCurrentCursor() : ack.cursorBefore,
+                  cursor_after: ack.cursorAfter == null ? this.getBridgeInboundCurrentCursor() : ack.cursorAfter,
+                  reconcile_attempted: false, reconcile_result: "queued", failure_kind: recoverableFailureKind
+                }
+              });
+              break;
+            }
             if (eventType === "TaskMoved") {
               this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_safe_stop_reason", event, {
-                reason_code: "ack_failed",
-                message: "ローカル反映済みですが、applied_events登録に失敗したため停止しました。"
+                reason_code: String(ack && ack.failureKind || "ack_failed"),
+                message: String(ack && ack.message || "server Ackに失敗したため停止しました。")
               }, "error", "stopped");
             }
             failedCount++;
-            stoppedReason = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗したため停止しました。");
+            stoppedReason = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗したため停止しました。"));
             break;
           }
           appliedCount++;
@@ -20914,6 +21303,9 @@ class TaskchutePlugin extends obsidian.Plugin {
 
       if (deferredUntilVisible) {
         message = "mobile hidden中のためvisible復帰まで受信反映を延期しました。";
+      } else if (recoverableFailureKind) {
+        this.setBridgeInboundAutoApplyRuntimeState(this.settings.bridgeInboundAutoApplyEnabled ? "enabled" : "disabled", "", "auto-apply-recoverable-ack-cursor");
+        message = recoverableFailureMessage || "Ack/cursorの一時的失敗を次回再同期で修復します。";
       } else if (failedCount > 0) {
         this.setBridgeInboundAutoApplyRuntimeState(this.classifyBridgeInboundAutoApplyStopStatus(stoppedReason), stoppedReason || "受信イベント反映に失敗したため安全停止しました。", "auto-apply-failed");
         message = `自動受信・自動反映は設定ONのまま安全停止しました。反映 ${appliedCount}件 / スキップ ${skippedCount}件 / 失敗 ${failedCount}件。`;
@@ -20969,7 +21361,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         try { await this.refreshViews({ preserveScroll: true }); } catch (ignored) {}
       }
     }
-    return { ok: failedCount === 0 && !deferredUntilVisible, message, appliedCount, skippedCount, failedCount, appliedEventIds, stoppedReason, deferred: deferredUntilVisible };
+    return { ok: failedCount === 0 && !deferredUntilVisible && !recoverableFailureKind, recoverable: !!recoverableFailureKind, failureKind: recoverableFailureKind, message, appliedCount, skippedCount, failedCount, appliedEventIds, stoppedReason, deferred: deferredUntilVisible };
   }
 
   getBridgeInboundAppliedTaskDeletedEventIds() {
@@ -21276,7 +21668,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!ack || !ack.ok) {
             failedCount++;
             ackFailedEventIds.push(eventId);
-            lastFailureDetail = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗しました。");
+            lastFailureDetail = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗しました。"));
             continue;
           }
           appliedCount++;
@@ -21989,7 +22381,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!ack || !ack.ok) {
             failedCount++;
             ackFailedEventIds.push(eventId);
-            lastFailureDetail = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗しました。");
+            lastFailureDetail = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗しました。"));
             continue;
           }
           appliedCount++;
@@ -22383,7 +22775,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!ack || !ack.ok) {
             failedCount++;
             ackFailedEventIds.push(eventId);
-            lastFailureDetail = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗しました。");
+            lastFailureDetail = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗しました。"));
             continue;
           }
           appliedCount++;
@@ -22723,7 +23115,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!ack || !ack.ok) {
             failedCount++;
             ackFailedEventIds.push(eventId);
-            lastFailureDetail = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗しました。");
+            lastFailureDetail = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗しました。"));
             continue;
           }
           appliedCount++;
@@ -22868,7 +23260,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         const ack = await this.ackBridgeInboundAppliedEvent(event, result);
         if (!ack || !ack.ok) {
           failedCount++;
-          lastFailureDetail = formatBridgeInboundApplyFailure(event, "ローカル反映済みですが、applied_events登録に失敗しました。");
+          lastFailureDetail = formatBridgeInboundApplyFailure(event, String(ack && ack.message || "server Ackに失敗しました。"));
           continue;
         }
         appliedCount++;

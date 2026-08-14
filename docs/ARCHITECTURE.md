@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.57。v0.6.56を基準にoutbound Auto Flushのpending wake-up / reschedule制御を追加した実機試験用Prereleaseである。
+調査基準: v0.6.58。inbound server Ackとlocal cursor persistenceを分離し、cursor-only reconciliationを追加した実機試験用Prereleaseである。
 
 ## 1. 概要
 
@@ -27,7 +27,7 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。約53,147行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.56`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.58`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
@@ -116,7 +116,7 @@ task edit/add、comments、confirm、Routine rule picker、Routine history / cal
 
 - settings。
 - runtime.running / paused。
-- Bridge outbox、cursor、known / used IDs、applied cache、diagnostics。
+- Bridge outbox、cursor、known / used IDs、applied cache、Ack recovery records、diagnostics。
 - Rotation Routine定義。
 - UI共有設定の一部。
 
@@ -174,10 +174,12 @@ timer / mobile resume / manual action
   -> Vault再読込によるverify
   -> before-Ack guards
   -> POST applied
-  -> contiguous cursor update
+  -> server Ack resultを確定
+  -> trusted persistenceでcontiguous cursorをlatest dataへmerge
+  -> 必要時はMarkdown再applyなしでAck-only reconcile
 ```
 
-apply失敗、verification失敗、Ack失敗ではcursorを跨がない。
+apply失敗、verification失敗、hard Ack失敗ではcursorを跨がない。server Ack成功後のcursor persistence失敗とambiguous network responseはrecoverableとして記録し、同じMarkdownを再適用せずreconcileする。
 
 ### External Vault change
 

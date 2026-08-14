@@ -84,7 +84,7 @@ node --check .\main.js
 
 ## Release workflow
 
-Releaseは次の順序で進める。
+BRAT実機試験用Prereleaseは次の順序で進める。
 
 1. versionを決定する。
 2. canonical docsを現行状態へ更新する。
@@ -96,15 +96,17 @@ Releaseは次の順序で進める。
 8. base `main`、head `feature/v6.6-routine-sync`のPull Requestを作成する。
 9. PRのdiff、files、checksを確認する。
 10. feature branchからmainへfast-forwardし、Integratedとする。
-11. runtime、UI、Bridge変更がある場合、ユーザー実機確認とTEST_MATRIXのcurrent evidenceを確認する。
-12. Verifiedなmain上のrelease commitへ新規tagを作成・pushする。
-13. GitHub Releaseを作成する。
-14. 必須assetsを確認し、Releasedとする。
+11. runtime、UI、Bridge変更がある場合、未実施の実機項目がTEST_MATRIXで`NOT_VERIFIED`であることを確認する。
+12. main上のrelease commitへ新規tagを作成・pushする。
+13. GitHub Prereleaseを作成する。
+14. 必須assetsを確認し、Prereleased / Test-distributedとする。
 15. feature branchへ戻す。
+16. 公開した同一assetsをBRATで実Vault / 実mobile試験する。
+17. current evidenceをTEST_MATRIXへ通常PRで記録し、Verified判定する。
 
-CHANGELOGには主要変更、runtime変更の有無、事実として確認できたverification、tag、release commitを簡潔に記録する。Git履歴の全commitやhistorical docsを転載しない。release後のdocs cleanup commitは公開済みtagへ含めず、tagやReleaseを移動・上書きしない。
+CHANGELOGには主要変更、runtime変更の有無、事実として確認できたverification、tag、release commitを簡潔に記録する。Git履歴の全commitやhistorical docsを転載しない。Prerelease後のverification記録やdocs cleanup commitは公開済みtagへ含めず、tag、Release、assetsを移動・置換・上書きしない。不具合は次versionで修正する。
 
-通常のPR作成、review gate、delivery state、main反映方法は[`DEVELOPMENT_WORKFLOW.md`](DEVELOPMENT_WORKFLOW.md)を正とする。Docs-only releaseはruntime、UI、Bridge diffが0の場合に限り、実機確認を省略できる。
+通常のPR作成、review gate、4つのdelivery state、main反映方法は[`DEVELOPMENT_WORKFLOW.md`](DEVELOPMENT_WORKFLOW.md)を正とする。BRAT Prereleaseは実機試験前の固定配布を許可するが、Verifiedとは扱わない。Docs-only releaseはruntime、UI、Bridge diffが0の場合に限り、実機確認を省略できる。
 
 ---
 

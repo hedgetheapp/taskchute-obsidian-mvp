@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current release: `v0.6.57` BRAT Prerelease for device testing.
-- v0.6.57 adds the outbound Auto Flush lost wake-up fix. AF-LWU-01 through AF-LWU-03 remain `NOT_VERIFIED` until real Vault testing is recorded.
+- Current release candidate: `v0.6.58` BRAT Prerelease for device testing.
+- v0.6.58 separates inbound server Ack from local cursor persistence and adds cursor-only reconciliation. Real Vault and mobile recovery tests remain `NOT_VERIFIED` until current evidence is recorded.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 
@@ -55,7 +55,7 @@ Otherwise leave the event unacked and record a diagnostic such as identity confl
 - Keep `PASS`, `FAIL`, `BLOCKED`, and `NOT_VERIFIED` distinct. Unknown or mixed test data is not PASS.
 - Update root `CHANGELOG.md` for every release/version change. Keep it to release-level summaries; it does not replace Git history, and historical docs must not be copied into it wholesale.
 - Treat `docs/TEST_MATRIX.md` as the authority for current test state, including when writing CHANGELOG verification notes.
-- Keep Integrated, Verified, and Released distinct. Main integration alone proves neither device verification nor release.
+- Keep Integrated, Prereleased / Test-distributed, Verified, and Released distinct. Main integration and Prerelease publication do not prove device verification.
 - Do not mark TEST_MATRIX rows PASS from implementation completion, syntax checks, or local helper tests. PASS requires user device verification and recorded current evidence; use FAIL, BLOCKED, or NOT_VERIFIED otherwise.
 - Do not independently change user-visible behavior, identity/sync/Ack/lifecycle semantics, or destructive migration policy. Stop and report when such a product or data-semantics decision is not already authorized by the user and canonical docs.
 - Do not modify tags, releases, D1 data, Cloudflare resources, or real Vault data unless the user explicitly requests it.
@@ -73,5 +73,6 @@ node --check .\main.js
 - When the PR is clean and fast-forward integration is possible, continue through main integration in the same task instead of leaving the PR open for routine user approval.
 - Prefer `--ff-only`; do not rebase, force push, squash, or create an unnecessary merge commit.
 - Return to `feature/v6.6-routine-sync` after main integration and confirm both remote branches and a clean worktree.
-- Runtime, UI, or Bridge changes may be integrated into main after review, but do not create a tag or GitHub Release until the user completes device verification and TEST_MATRIX contains current evidence. Docs-only releases may omit device verification when runtime/UI/Bridge diff is zero.
+- Runtime, UI, or Bridge changes may be integrated into main and published as an immutable BRAT Prerelease before device verification when BRAT is required to distribute the test build. Record that state as Prereleased / Test-distributed, keep affected TEST_MATRIX rows `NOT_VERIFIED`, and test the exact published assets.
+- After publication, never move the tag or replace the GitHub Release assets for the same version. If testing finds a defect, fix and publish the next version.
 - Follow `docs/DEVELOPMENT_WORKFLOW.md` for the complete procedure.

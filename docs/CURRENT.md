@@ -2,15 +2,15 @@
 
 ## 調査基準
 
-- 調査日: 2026-08-14
-- manifest version: `0.6.57`
+- 調査日: 2026-08-15
+- manifest version: `0.6.58`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: `c08bfca0b4fb7793eca1f096d7ae18c447ec01af`
-- release tag: `v0.6.57`（実機試験用Prerelease。release commitはtag targetを参照）
-- 調査開始時のworktree: clean
+- canonical docs checkpoint: `v0.6.58` tag target
+- release tag: `v0.6.58`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
+- release準備開始時のworktree: `main.js`にv0.6.58候補の未commit差分あり
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在と実機試験済みであることは分けて扱う。v0.6.57はv0.6.56へAuto Flush lost wake-up修正を追加した実機試験用Prereleaseであり、Verified済み安定版ではない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.58はinbound Ack / cursor recoveryを追加したBRAT実機試験用Prereleaseであり、Verified済み安定版ではない。
 
 ## 文書運用
 
@@ -22,10 +22,11 @@
 ## Delivery state
 
 - **Integrated**: main反映済み。実機確認未完了の場合がある。
+- **Prereleased / Test-distributed**: Integratedなcommitを新規tagとGitHub Prereleaseの固定assetsとして試験配布済み。実機確認未完了でもよい。
 - **Verified**: ユーザー実機確認済みで、current evidenceを`TEST_MATRIX.md`へ反映済み。
-- **Released**: Verifiedなrelease commitへtagとGitHub Releaseを作成済み。
+- **Released**: Verifiedな配布物を安定配布対象として公開済み。
 
-main反映、実装完了、syntax checkだけではVerifiedまたはReleasedとしない。runtime、UI、Bridge変更のreleaseはユーザー実機確認後に行う。docs-only変更はruntime、UI、Bridge diffが0なら例外とする。詳細は[`DEVELOPMENT_WORKFLOW.md`](DEVELOPMENT_WORKFLOW.md)を参照する。
+main反映、実装完了、syntax check、BRAT Prerelease公開だけではVerifiedまたはReleasedとしない。BRAT試験ではPrereleaseを先に固定配布し、同一assetsの実機証跡を後からTEST_MATRIXへ記録できる。公開済みtag / Release / assetsは差し替えず、不具合は次versionで修正する。詳細は[`DEVELOPMENT_WORKFLOW.md`](DEVELOPMENT_WORKFLOW.md)を参照する。
 
 ## 現在の開発状況
 
@@ -34,6 +35,8 @@ main反映、実装完了、syntax checkだけではVerifiedまたはReleasedと
 v0.6.55公開後に`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`、`DECISIONS.md`、`TEST_MATRIX.md`の6文書をcanonical documentation baselineとして固定した。READMEとdocs索引も現行入口へ更新した。v0.6.56はこのbaselineとversion metadataをBRAT配布versionとして固定する。v0.6.42からv0.6.54の個別試験結果にはrepository内で統合証跡になっていないものがあり、未確認項目は引き続き試験不足として扱う。
 
 v0.6.57では、Auto Flush実行中にenqueueされたeventのwake-up要求を保持し、終了後に送信可能なpending eventが残る場合だけ再scheduleする。synthetic scheduler checkは成功しているが、AF-LWU-01からAF-LWU-03の実Vault端末間試験は未実施である。
+
+v0.6.58では、inbound server Ackとlocal cursor persistenceを分離し、Ack済みeventをMarkdownへ再適用しないcursor-only reconciliation、bounded Ack retry、recoverable mobile rescueを追加した。ACK-CURSOR-GUARD-01、ACK-AMBIG-01、ACK-AUTH-01、CURSOR-GAP-01、CURSOR-MERGE-01、MOBILE-RESCUE-01相当のsynthetic / structural試験は成功しているが、実Vault / 実mobile試験は未実施である。
 
 ## 実装済み
 
@@ -77,6 +80,8 @@ v0.6.57では、Auto Flush実行中にenqueueされたeventのwake-up要求を�
 
 - v0.6.56 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
 - v0.6.57 Auto Flush lost wake-upのAF-LWU-01 / AF-LWU-02 / AF-LWU-03実Vault回帰。
+- v0.6.58 inbound Ack / cursor recoveryの実mobile回帰。
+- AF-LWU-01、TMV4-BASIC-01、TMV4-EMPTY-SOURCE-01のv0.6.58実Vault回帰。
 - v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の日付移動、section移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
@@ -107,12 +112,12 @@ v0.6.57では、Auto Flush実行中にenqueueされたeventのwake-up要求を�
 
 ## 現在確認できる問題点
 
-- 現行統合文書はv0.6.57へ整合したが、旧詳細資料には過去versionの記述が残る。
+- 現行統合文書はv0.6.58へ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。v0.6.57は実機試験用Prereleaseであり、本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。v0.6.58は実機試験用Prereleaseであり、本番可否は要確認。
 
 ## 将来候補・明示的対象外
 

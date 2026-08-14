@@ -8,6 +8,35 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.58 - 2026-08-15
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- inbound server Ackとlocal cursor persistenceの結果を分離した。
+- Ack 2xx後のcursor保存をinbound専用trusted persistenceへ限定し、latest `data.json`へのmonotonic mergeを追加した。
+- server Ack済みeventをMarkdownへ再適用しないcursor-only reconciliationとrecoverable mobile rescueを追加した。
+- ambiguous Ack responseへbounded retry / reconciliationを追加し、401 / 403等のhard failureと分離した。
+- diagnosticsへAck HTTP、server commit、cursor保存、device guard、reconcile、failure kindを追加した。
+- delivery stateをIntegrated / Prereleased or Test-distributed / Verified / Releasedの4状態へ整理した。
+- `manifest.json`を`0.6.58`へ更新した。
+
+### Verification
+
+- `node --check .\main.js`: OK
+- `git diff --check`: OK
+- ACK-CURSOR-GUARD-01 / ACK-AMBIG-01 / ACK-AUTH-01 / CURSOR-GAP-01 / CURSOR-MERGE-01 / MOBILE-RESCUE-01相当のsynthetic / structural check: OK
+- 実Vault / 実mobile Ack / cursor recovery: `NOT_VERIFIED`
+- AF-LWU-01 / TMV4-BASIC-01 / TMV4-EMPTY-SOURCE-01実Vault回帰: `NOT_VERIFIED`
+
+Tag: `v0.6.58`
+GitHub Release: [v0.6.58 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.58)
+Assets: `main.js`, `manifest.json`, `styles.css`
+Release notes: [`docs/release/v0.6.58.md`](docs/release/v0.6.58.md)
+
+---
+
 ## v0.6.57 - 2026-08-14
 
 Type: Runtime BRAT Prerelease for device testing

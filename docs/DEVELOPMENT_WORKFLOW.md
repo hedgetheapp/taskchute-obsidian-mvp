@@ -4,13 +4,16 @@
 
 ## Delivery states
 
-変更の状態は次の3つを区別する。
+変更の状態は次の4つを区別する。
 
 - **Integrated**: feature commitがPR review gateを通過し、mainへ反映済み。実機確認は未完了の場合がある。
+- **Prereleased / Test-distributed**: Integratedなcommitへ新規tagを作成し、GitHub Prereleaseと固定assetsをBRAT試験用に公開済み。実機確認は未完了でもよい。
 - **Verified**: ユーザーが対象versionを実機で確認し、current evidenceが`TEST_MATRIX.md`へ反映済み。
-- **Released**: Verifiedなrelease commitへtagを作成し、GitHub Releaseと配布assetsを公開済み。
+- **Released**: Verifiedな配布物を安定配布対象として公開済み。Prereleaseを同一versionのまま差し替えてReleasedへ昇格させない。
 
-mainへ入っただけの変更をVerifiedまたはReleasedとして扱わない。syntax check、helper test、PR mergeも実機証跡の代替にはならない。
+mainへ入っただけの変更やPrerelease公開だけをVerifiedまたはReleasedとして扱わない。syntax check、helper test、PR merge、GitHub Prereleaseも実機証跡の代替にはならない。
+
+BRATで実機試験するruntime、UI、Bridge変更は、Integrated後に同一配布物を固定したPrereleaseを先に公開してよい。公開後のtag、GitHub Release、assetsは移動・置換・上書きしない。不具合が見つかった場合は次versionで修正する。
 
 Docs-only変更は、runtime、UI、Bridge挙動に影響しないことをdiffで確認できた場合、実機確認なしでreleaseしてよい。
 
@@ -26,9 +29,10 @@ Docs-only変更は、runtime、UI、Bridge挙動に影響しないことをdiff�
 6. PRのdiff、files、checksを確認する。
 7. 問題がなければmainへ反映し、状態をIntegratedとする。
 8. feature branchへ戻し、originと同期する。
-9. runtime、UI、Bridge変更はユーザー実機確認後にTEST_MATRIXへcurrent evidenceを記録し、Verifiedとする。
+9. BRAT配布が必要なら新規tagとGitHub Prereleaseを作成し、Prereleased / Test-distributedとする。
+10. 公開した同一assetsをユーザーが実機確認し、TEST_MATRIXへcurrent evidenceを記録してVerifiedとする。
 
-PRはレビュー履歴と変更記録を残すために必ず作成する。安全条件を満たす通常作業では、PRをopenのままユーザー確認待ちにせず、main反映まで同じ作業内で進める。実機確認を待つのはVerifiedまたはruntime releaseへ進む段階であり、Integratedへの反映とは分ける。
+PRはレビュー履歴と変更記録を残すために必ず作成する。安全条件を満たす通常作業では、PRをopenのままユーザー確認待ちにせず、main反映まで同じ作業内で進める。実機確認を待つのはVerified判定の段階であり、IntegratedおよびBRAT test distributionとは分ける。
 
 ## PR review gate
 
@@ -73,7 +77,7 @@ git push origin main
 - merge commitを不要に作る。
 - rebase、force push、squashを通常手順として使う。
 - test failureやunexpected diffを無視してmainへ反映する。
-- IntegratedをVerifiedまたはReleasedと表示する。
+- IntegratedまたはPrereleasedをVerifiedまたはReleasedと表示する。
 
 ## TEST_MATRIX update rule
 
@@ -82,17 +86,23 @@ git push origin main
 - 明示的な不合格は`FAIL`、前提や環境により判定不能なら`BLOCKED`、未確認なら`NOT_VERIFIED`とする。
 - historical PASSをcurrent versionへ自動継承しない。
 
-## Release workflow
+## BRAT Prerelease workflow
 
-Runtime、UI、Bridge変更を含むreleaseは次の順序で進める。
+Runtime、UI、Bridge変更をBRATで実機試験する場合は次の順序で進める。
 
-1. featureで実装し、testとstatic checkを実行する。
-2. commit、feature push、PR reviewを経てmainへ反映し、Integratedとする。
-3. ユーザー実機確認を行う。成功したcurrent evidenceをTEST_MATRIXへ記録する。
-4. version、CHANGELOG、canonical docs、manifestをrelease対象へ更新する。
-5. release commitをPR経由でmainへ反映し、Verifiedであることを再確認する。
-6. main上のrelease commitへ新規tagを作成する。
-7. GitHub Releaseを作成してassetsを確認し、Releasedとする。
-8. featureへ戻る。
+1. featureで実装し、version、CHANGELOG、canonical docs、manifestを試験対象versionへ更新する。
+2. synthetic / structural testとstatic checkを実行し、実機未確認項目はTEST_MATRIXで`NOT_VERIFIED`のままにする。
+3. commit、feature push、PR reviewを経てmainへfast-forward反映し、Integratedとする。
+4. main上のcommitへ新規tagを作成し、GitHub Prereleaseと`main.js`、`manifest.json`、`styles.css`を公開する。
+5. tag targetとassetsを確認し、Prereleased / Test-distributedとする。
+6. featureへ戻し、remote branch SHAとclean worktreeを確認する。
+7. ユーザーが公開済みの同一assetsを実Vault / 実mobileで試験する。
+8. current evidenceをTEST_MATRIXへ通常PRで記録し、条件を満たした項目をVerifiedとする。
 
-Docs-only releaseはruntime、UI、Bridge diffが0であることを確認できれば、手順3の実機確認を省略できる。Release後のdocs-only cleanupも通常PR運用でmainへ反映する。公開済みtagやGitHub Releaseは移動・上書きしない。
+公開済みtag、GitHub Release、assetsは同一versionのまま移動・置換・上書きしない。Prereleaseで不具合が見つかった場合は次versionで修正し、新しいtagとPrereleaseを作成する。
+
+## Stable release workflow
+
+安定配布としてReleasedにする場合は、Verifiedな証跡と対象配布物を確認し、新しいversionとして通常のfeature / PR / fast-forward手順を通す。同じPrereleaseのtagやassetsを書き換えて安定版へ見せ替えない。
+
+Docs-only releaseはruntime、UI、Bridge diffが0であることを確認できれば、実機確認を省略できる。Release後のdocs-only cleanupも通常PR運用でmainへ反映する。

@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current baseline: v0.6.57 BRAT Prerelease. It adds the outbound Auto Flush lost wake-up fix to the v0.6.56 baseline and remains unverified on real Vaults.
+Current baseline: v0.6.58 BRAT Prerelease. It separates inbound server Ack from local cursor persistence and adds cursor-only reconciliation. Synthetic and structural checks passed; real Vault and mobile verification remain pending.
 
 ## Current Canonical
 
@@ -32,7 +32,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
-- [v0.6.57 BRAT Prerelease](release/v0.6.57.md)
+- [v0.6.58 BRAT Prerelease](release/v0.6.58.md)
 - [BRAT release operation](brat-release-operation.md)
 - [Release checklist](release-checklist.md)
 

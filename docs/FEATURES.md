@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.57の現行feature inventoryである。v0.6.57はv0.6.56を基準にAuto Flush lost wake-up修正を追加した実機試験用Prereleaseである。
+この一覧はv0.6.58の現行feature inventoryである。v0.6.58はinbound server Ackとlocal cursor persistenceの分離、cursor-only reconciliation、recoverable mobile rescueを追加した実機試験用Prereleaseである。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.57で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.58で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -109,9 +109,12 @@
 | inbound registry | 実装済み | eventごとにapply・verify・Ack guardを登録。 |
 | post-save verification | 実装済み | Markdownやruntimeを再読込してからAckする。 |
 | safe stop | 実装済み | failed_unackedでAck・cursor進行を止める。 |
+| Ack / cursor result separation | 実装済み・実機未試験 | server Ack成功とlocal cursor保存結果を別状態で返し、cursor保存失敗をserver Ack失敗と表示しない。 |
+| trusted cursor persistence | 実装済み・実機未試験 | inbound Ack cursorだけに限定した保存経路で最新data.jsonへmonotonic mergeする。 |
+| cursor-only reconciliation | 一部実装 | server Ack済みeventをMarkdownへ再適用せずcursorへ反映する。現行client記録またはlegacy cache / diagnostic証跡を使う。cold cacheでの任意server照会はAPI未実装。 |
 | TaskMoved v4 | 実装済み | `target_order_entry_ids` / `source_order_entry_ids`を正とする。 |
 | lifecycle classifier | 実装済み | normal / routine_occurrence / identity_conflict。 |
-| mobile resume drain | 実装済み | hidden延期、visible recovery、watch window、retry。 |
+| mobile resume drain | 実装済み・実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。 |
 | オフライン復帰 | 一部実装 | network error分類と再試行はある。長時間実機試験は要確認。 |
 | D1 schema管理 | 要確認 | clientはHTTP APIのみ利用。Worker / D1 schemaはこのrepoにない。 |
 

@@ -154,17 +154,29 @@
 - 根拠: repositoryの文書運用ルールとrelease checklist。
 - 理由: Git履歴は完全な技術履歴だが、人がversion間の主要差分を短時間で把握する用途とは分けるため。CHANGELOGはGit履歴や現行仕様、TEST_MATRIXの代替にはしない。
 
-## D-026: Integrated / Verified / Releasedを分離する
+## D-026: Integrated / Prereleased / Verified / Releasedを分離する
 
-- 判断: main反映、実機検証、配布公開を別状態として管理する。
+- 判断: main反映、BRAT試験配布、実機検証、安定配布を別状態として管理する。
 - 根拠: `DEVELOPMENT_WORKFLOW.md`と`TEST_MATRIX.md`の運用ルール。
-- 理由: 実装またはmain反映だけで、実機保証や配布済みと誤認することを防ぐため。runtime、UI、Bridge releaseはユーザー実機確認とcurrent evidence記録後に行い、docs-onlyはruntime影響なしを確認できた場合だけ例外とする。
+- 理由: BRAT試験には固定配布物が先に必要だが、公開だけで実機保証済みと誤認してはならないため。Prereleaseのtag / Release / assetsはimmutableとし、不具合は次versionで修正する。
 
 ## D-027: 意味論を変える判断はユーザー承認を必要とする
 
 - 判断: ユーザー挙動、identity、sync、Ack、lifecycle、destructive migrationの意味変更をCodexが独断で決めない。
 - 根拠: canonical docsと開発フローの仕様権限ルール。
 - 理由: 軽微な内部実装と、製品・データ互換性に関わる設計判断を分離するため。未決定または矛盾がある場合は推測で実装せず停止して報告する。
+
+## D-028: server Ackとlocal cursor persistenceを別結果として扱う
+
+- 判断: applied endpointのHTTP 2xx後はserver Ack成功を保持し、local cursor保存失敗だけでAck失敗へ戻さない。
+- 根拠: `ackBridgeInboundEvent()`、`persistBridgeInboundCursorTrusted()`、`reconcileBridgeInboundAckCursor()`。
+- 理由: D1 applied済みなのにclientだけsafe-stopし、後続drainが停止するfalse-negativeを防ぐため。
+
+## D-029: Ack済みeventの復旧ではMarkdownを再適用しない
+
+- 判断: server Ack済みを確認できるeventはAck recovery recordまたは検証済みlegacy evidenceからcursorだけをreconcileする。
+- 根拠: inbound Ack recovery helpersとmobile rescue path。
+- 理由: terminal lifecycleやTaskMoved等を二重適用せず、cursor gapだけを解消するため。server状態を確認できないcold legacy caseは推測で進めない。
 
 ## Legacy観測（設計判断ではない）
 

@@ -17,9 +17,9 @@
 - [ ] PRのchanged filesとdiffがrelease scopeどおり
 - [ ] PR checks成功または問題なしを確認
 - [ ] mainへfast-forward反映後のrelease commitを確認
-- [ ] runtime / UI / Bridge変更時はユーザー実機確認済み
-- [ ] runtime / UI / Bridge変更時はTEST_MATRIXにcurrent evidenceを記録済み
-- [ ] tag作成前にrelease commitがVerifiedであることを確認
+- [ ] BRAT Prereleaseの場合、runtime / UI / Bridgeの未実施項目をTEST_MATRIXで`NOT_VERIFIED`としている
+- [ ] BRAT Prereleaseの場合、titleと本文に実機試験用であり未Verifiedであることを明記
+- [ ] stable releaseの場合、ユーザー実機確認とTEST_MATRIXのcurrent evidenceを確認
 - [ ] docs-onlyで実機確認を省略する場合はruntime / UI / Bridge diff 0を確認
 - [ ] tagが `v{manifest.version}` 形式
 - [ ] tagがmain反映後のrelease commitを指す
@@ -35,6 +35,7 @@
 - [ ] バックアップファイルを含めていない
 - [ ] 個人データ・実運用ログを含めていない
 - [ ] release後cleanupは公開済みtagへ含めず、tag / Releaseを移動・上書きしない
+- [ ] 公開後に同一versionのassetsを差し替えず、不具合時は次versionにする
 - [ ] main反映後にfeature branchへ戻り、両remote SHAとclean worktreeを確認
 
 ---
