@@ -61,3 +61,13 @@ Minimum runtime syntax check:
 ```powershell
 node --check .\main.js
 ```
+
+## Git And Pull Request Workflow
+
+- Work and commit on `feature/v6.6-routine-sync`; do not create implementation commits directly on `main`.
+- After checks pass, push feature, create a PR to `main`, and review its base/head, files, diff, and checks.
+- When the PR is clean and fast-forward integration is possible, continue through main integration in the same task instead of leaving the PR open for routine user approval.
+- Prefer `--ff-only`; do not rebase, force push, squash, or create an unnecessary merge commit.
+- Return to `feature/v6.6-routine-sync` after main integration and confirm both remote branches and a clean worktree.
+- For releases, create the tag and GitHub Release only after the release commit has been integrated into main.
+- Follow `docs/git-pr-operation.md` for the complete procedure.

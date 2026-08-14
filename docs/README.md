@@ -31,6 +31,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 ## Release
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
+- [Git and Pull Request operation](git-pr-operation.md)
 - [v0.6.56 BRAT Prerelease](release/v0.6.56.md)
 - [BRAT release operation](brat-release-operation.md)
 - [Release checklist](release-checklist.md)

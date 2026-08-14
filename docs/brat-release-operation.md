@@ -93,12 +93,17 @@ Releaseは次の順序で進める。
 5. static checksを実行する。
 6. release commitを作成する。
 7. branchをpushする。
-8. 新規tagを作成・pushする。
-9. GitHub Releaseを作成する。
-10. 必須assetsを確認する。
-11. feature branchからmainへfast-forwardする。
+8. base `main`、head `feature/v6.6-routine-sync`のPull Requestを作成する。
+9. PRのdiff、files、checksを確認する。
+10. feature branchからmainへfast-forwardする。
+11. mainへ反映されたrelease commitへ新規tagを作成・pushする。
+12. GitHub Releaseを作成する。
+13. 必須assetsを確認する。
+14. feature branchへ戻す。
 
 CHANGELOGには主要変更、runtime変更の有無、事実として確認できたverification、tag、release commitを簡潔に記録する。Git履歴の全commitやhistorical docsを転載しない。release後のdocs cleanup commitは公開済みtagへ含めず、tagやReleaseを移動・上書きしない。
+
+通常のPR作成、review gate、main反映方法は[`git-pr-operation.md`](git-pr-operation.md)を正とする。
 
 ---
 

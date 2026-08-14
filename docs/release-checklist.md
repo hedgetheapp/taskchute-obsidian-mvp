@@ -12,7 +12,13 @@
 - [ ] CHANGELOGにruntime変更の有無、verification、tag、release commitを記録
 - [ ] `node --check .\main.js` 成功
 - [ ] `manifest.json` の `version` 確認
+- [ ] feature branchをpush
+- [ ] base `main` / head `feature/v6.6-routine-sync`でPR作成
+- [ ] PRのchanged filesとdiffがrelease scopeどおり
+- [ ] PR checks成功または問題なしを確認
+- [ ] mainへfast-forward反映後のrelease commitを確認
 - [ ] tagが `v{manifest.version}` 形式
+- [ ] tagがmain反映後のrelease commitを指す
 - [ ] release titleにBridge世代・RC名を記載
 - [ ] Release assetsに `main.js` を個別添付
 - [ ] Release assetsに `manifest.json` を個別添付
@@ -25,6 +31,7 @@
 - [ ] バックアップファイルを含めていない
 - [ ] 個人データ・実運用ログを含めていない
 - [ ] release後cleanupは公開済みtagへ含めず、tag / Releaseを移動・上書きしない
+- [ ] main反映後にfeature branchへ戻り、両remote SHAとclean worktreeを確認
 
 ---
 
