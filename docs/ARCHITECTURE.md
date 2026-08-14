@@ -1,5 +1,7 @@
 # Architecture
 
+調査基準: v0.6.55 / commit `ef857645f149158a9fa2021e9e7c2fe0ac160daf`。v0.6.55では実行コードを変更していないため、runtime architectureはv0.6.54と同一である。
+
 ## 1. 概要
 
 このprojectはObsidian Community Plugin形式のJavaScript applicationである。build systemやpackage manifestをrepositoryに持たず、配布物は`main.js`、`manifest.json`、`styles.css`の3ファイルである。
@@ -25,8 +27,8 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。約53,147行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.54`。 |
-| `README.md` | project説明。ただし現行実装より古い。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.55`。 |
+| `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
 

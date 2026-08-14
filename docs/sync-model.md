@@ -9,7 +9,7 @@ RC3はdev / remote / mobileの三端末起点による最終スモーク通過�
 - [RC3 Release Lock](Taskchute_Bridge_v6.5_RC3_RELEASE_LOCK.md)
 - [RC3 FIXED仕様メモ](Taskchute_Bridge_仕様メモ_v6.5_RC3_FIXED.md)
 - [RC3 FIXED引継ぎ](Taskchute_Bridge_引継ぎ_v6.5_RC3_FIXED.md)
-- [RC3 FIXEDリリースノート](../release/taskchute-bridge-v6.5-rc3-fixed.md)
+- [RC3 FIXED配布メモ](rc3-fixed-distribution-notes.md)
 
 RC3固定原則:
 
@@ -25,20 +25,20 @@ RC3固定原則:
 ## v6.5 RC1
 
 - [同期モデル](sync-model.md)
-- [Identityと削除](identity-and-delete.md)
+- [Identityと削除](bridge/Task_Identity_and_Delete_Semantics_v6.5_RC1.md)
 - [TaskCreated前提guard](task-created-guard.md)
 - [TaskStartedと開始前戻し](task-started-and-reset.md)
-- [diagnostics保持上限](diagnostics-retention.md)
-- [回帰試験チェックリスト](../regression/bridge-v6.5-rc1-checklist.md)
-- [リリースノート](../release/taskchute-bridge-v6.5-rc1.md)
+- [diagnostics保持上限](identity-and-delete.md)（legacy filename）
+- [回帰試験チェックリスト](bridge-v6.5-rc1-checklist.md)
+- [リリースノート](taskchute-bridge-v6.5-rc1.md)
 
 ## v6.5 RC2
 
 v6.5 RC2固定候補では、RC1固定後のPC 2 Vault運用試験で検出したTaskStarted開始時セクション不整合を修正済み仕様として扱う。
 
 - [TaskStartedと開始前戻し](task-started-and-reset.md)
-- [v6.5 RC2回帰試験チェックリスト](../regression/bridge-v6.5-rc2-checklist.md)
-- [v6.5 RC2リリースノート](../release/taskchute-bridge-v6.5-rc2.md)
+- v6.5 RC2回帰試験チェックリスト: repository内に独立fileなし
+- [v6.5 RC2リリースノート](taskchute-bridge-v6.5-rc2.md)
 
 RC2差分:
 

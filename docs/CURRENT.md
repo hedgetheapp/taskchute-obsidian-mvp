@@ -2,21 +2,21 @@
 
 ## 調査基準
 
-- 調査日: 2026-08-12
-- manifest version: `0.6.54`
+- 調査日: 2026-08-14
+- manifest version: `0.6.55`
 - branch: `feature/v6.6-routine-sync`
-- HEAD: `f8842d0b5c73129c6eefcd4f0516db381fc15fc9`
-- tag: `v0.6.54`
+- HEAD: `ef857645f149158a9fa2021e9e7c2fe0ac160daf`
+- tag: `v0.6.55`
 - 調査開始時のworktree: clean
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は上記commitの実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在と実機試験済みであることは分けて扱う。
+この文書は上記commitの実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在と実機試験済みであることは分けて扱う。v0.6.55は文書統合releaseであり、`main.js`と`styles.css`の実行内容はv0.6.54と同一である。
 
 ## 現在の開発状況
 
 アプリ本体とBridge同期は広範囲に実装済みである。Bridgeの基礎部分はv6.5 RC3でdev / remote / mobile三端末スモークを通過した記録がある。その後、v0.6.16以降にRoutine同期、Routine occurrence、TaskMoved v4、lifecycle identity、割り込みcontinuation、safe rekeyが追加された。
 
-一方、現行のREADME・v6.6仕様書・回帰チェックリストは主にv0.6.16からv0.6.17時点で止まっている。v0.6.42からv0.6.54の実装差分と試験結果は、Git commitとコードには存在するが、統合仕様・試験記録としては未整理である。
+v0.6.55で`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`、`DECISIONS.md`の5統合文書を追加した。本変更ではREADMEとdocs索引を現行入口へ更新し、実機保証状態を`TEST_MATRIX.md`へ分離する。v0.6.42からv0.6.54の個別試験結果にはrepository内で統合証跡になっていないものがあり、未確認項目は引き続き試験不足として扱う。
 
 ## 実装済み
 
@@ -58,12 +58,12 @@
 
 次はコード上は実装済みだが、現行HEADを対象とする統合試験結果がリポジトリに記録されていない。
 
-- v0.6.54 safe rekeyの実Vault回帰。過去データ混在により現在保留。
-- v0.6.48からv0.6.54をまとめた三端末full regression。
+- v0.6.55 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
+- v0.6.48からv0.6.55をまとめた三端末full regression。
 - TaskMoved v4の日付移動、section移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
 - Routine定義同期とRoutine occurrenceの三端末同時起動・オフライン復帰試験。
-- TaskCommentAdded、Section、Category / Area / Clientのv0.6.54上での回帰。
+- TaskCommentAdded、Section、Category / Area / Clientのv0.6.55上での回帰。
 - mobile長時間hidden、OS強制停止、通信断・圏外復帰。
 
 `docs/regression/試験チェックリスト_v6.6_Routine同期_v1.md`は全項目未チェックのため、コードが存在することだけをもって試験済みとは扱わない。
@@ -72,8 +72,7 @@
 
 - `main.js:17348`に旧Routine duplicate guardが`if (false && ...)`として残る。到達不能だが削除されていない。
 - `TaskLinksModal` (`main.js:7579`) は定義以外の参照が見つからない。現在のリンクUIはpopover / menu経路を使用しているため、未使用候補。削除可否は要確認。
-- `docs/README.md`はdocs索引ではなくTask identity資料になっている。文書入口として未整備。
-- READMEとv6.6 docsが現行version・TaskMoved v4・lifecycle classifier・safe rekeyを反映していない。
+- v6.6の旧詳細仕様・引継ぎ・回帰チェックリストはv0.6.16からv0.6.17時点の記述を含む。現行統合文書と併読する場合はHistorical資料として扱う。
 - 自動テスト基盤が存在しない。確認可能なtestファイルはリリース文書と手動回帰チェックリストのみ。
 - `projectNoteMeta`は名前キー中心の互換層を残す。`project_id`中心への全面移行は未実装と既存docsに記載されている。
 
@@ -81,22 +80,21 @@
 
 優先度順:
 
-1. v0.6.54の統合仕様と回帰マトリクスをこの文書群に追記・運用する。
-2. cleanな試験identityでsafe rekey以外のfull regressionを先に実施する。
-3. safe rekey用の隔離された試験データを用意して再試験する。
-4. mobile長時間・通信断復帰試験を行う。
-5. `section_id`と`section_label`の表示名揺れを調査する。
-6. 到達不能な旧duplicate guardと未使用候補クラスを、回帰試験後に整理する。
-7. README・既存v6.6仕様書・回帰チェックリストを現行仕様へ更新する。
+1. `TEST_MATRIX.md`を運用し、cleanな試験identityでsafe rekey以外のfull regressionを先に実施する。
+2. safe rekey用の隔離された試験データを用意して再試験する。
+3. mobile長時間・通信断復帰試験を行う。
+4. `section_id`と`section_label`の表示名揺れを調査する。
+5. 到達不能な旧duplicate guardと未使用候補クラスを、回帰試験後に整理する。
+6. 旧v6.6詳細仕様と回帰手順を、現行統合文書を参照する形へ段階的に整理する。
 
 ## 現在確認できる問題点
 
-- 文書上の最新versionが実装より大きく遅れている。
+- 現行統合文書はv0.6.55へ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。現行v0.6.54の本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。現行v0.6.55の本番可否は要確認。
 
 ## 将来候補・明示的対象外
 

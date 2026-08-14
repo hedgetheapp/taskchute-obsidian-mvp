@@ -1,94 +1,58 @@
-# Task Identity and Delete Semantics
+# Documentation Index
 
-作成: 2026-06-14 12:28:11 JST
-ステータス: v6.5 RC1 docs反映用
+このディレクトリはTaskChute Obsidian MVPの現行仕様、実装状況、試験状態、履歴資料への入口である。現行基準はv0.6.55。実行挙動はv0.6.54と同一である。
 
-## Identity
+## Current Documentation
 
-Task identityは原則 `task_id + entry_id` とする。
+- [Current status](CURRENT.md): 現在地、未試験、保留、TODO。
+- [Feature inventory](FEATURES.md): 実装済み・一部実装・未実装の機能一覧。
+- [Behavior specification](SPEC.md): 現行コードから確認できる動作仕様。
+- [Architecture](ARCHITECTURE.md): 構成、保存先、主要クラス、データフロー。
+- [Design decisions](DECISIONS.md): コードから確認できる設計判断。
+- [Test matrix](TEST_MATRIX.md): 実機保証状態と証跡。
 
-同一 `task_id` でも、日付行や発生単位が異なる `entry_id` は別entryとして扱う。
+上記6文書を現行統合文書として優先する。不明事項は推測せず「要確認」または`NOT_VERIFIED`として扱う。
 
-Task系イベントでは、可能な限り `task_id` と `entry_id` の両方をpayloadに含める。
+## Bridge Detail Docs
 
-対象イベント例:
+- [v6.6 Routine同期 仕様書 v1](bridge/Taskchute_Bridge_v6.6_Routine同期_仕様書_v1.md)
+- [v6.6 Routine同期 実装仕様](bridge/Taskchute_Bridge_v6.6_Routine同期_実装仕様.md)
+- [v6.6 Routine同期 引継ぎ](bridge/Taskchute_Bridge_v6.6_Routine同期_引継ぎ.md)
+- [Task Identity and Delete Semantics v6.5 RC1](bridge/Task_Identity_and_Delete_Semantics_v6.5_RC1.md)
+- [Sync model](sync-model.md)
+- [TaskCreated guard](task-created-guard.md)
+- [TaskStarted and reset](task-started-and-reset.md)
+- [Settings cleanup inventory](bridge/Taskchute_Settings_Cleanup_v0.6.22_Inventory.md)
 
-- TaskCreated
-- TaskUpdated
-- TaskMoved v3
-- TaskDeleted
-- TaskStarted
-- TaskStopped
-- TaskCompleted
-- TaskCommentAdded
+Bridge詳細資料には作成時点のversion固有記述が残る。現行統合文書と矛盾する場合は、`SPEC.md`、`ARCHITECTURE.md`、`DECISIONS.md`と現行コードを優先する。
 
-## 禁止事項
+## Regression Procedures
 
-以下は禁止する。
+- [v6.6 Routine同期 試験チェックリスト](regression/試験チェックリスト_v6.6_Routine同期_v1.md)
+- [v6.5 RC1/RC3 checklist and evidence](bridge-v6.5-rc1-checklist.md)
+- [Release checklist](release-checklist.md)
 
-- `entry_id` があるpayloadで `task_id` だけを根拠に同一task扱いする
-- 同一 `task_id` の別 `entry_id` を既知扱いしてAckする
-- TaskDeleted missing targetを `knownTaskIds.has(taskId)` だけでskipped_appliedにする
+チェックボックスが未完了の手順書は、項目が存在するだけではPASS証跡にならない。現行保証状態は`TEST_MATRIX.md`を参照する。
 
-## TaskDeleted Missing Target
+## Release Docs
 
-TaskDeleted applyで対象行が見つからない場合は、冪等成功か未Ackかを安全側に判定する。
+- [BRAT release operation](brat-release-operation.md)
+- [BRAT実機試験用 Release作成チェックリスト](release/BRAT実機試験用_Release作成チェックリスト_v6.6_Routine同期.md)
+- [v6.6 Routine Sync Test 1 release note](release/taskchute-bridge-v6.6-routine-sync-test-1.md)
+- [v6.6 Routine Sync Test 2 release note](release/taskchute-bridge-v6.6-routine-sync-test2.md)
+- [RC3 FIXED distribution notes](rc3-fixed-distribution-notes.md)
 
-payloadに `entry_id` がある場合:
+## Legacy / Historical Docs
 
-```text
-known = knownEntryIds.has(entryId)
-```
+- [v6.5 RC3 Release Lock](Taskchute_Bridge_v6.5_RC3_RELEASE_LOCK.md)
+- [v6.5 RC3 FIXED specification memo](Taskchute_Bridge_仕様メモ_v6.5_RC3_FIXED.md)
+- [v6.5 RC3 FIXED handoff](Taskchute_Bridge_引継ぎ_v6.5_RC3_FIXED.md)
+- [v6.5 RC2 notes](taskchute-bridge-v6.5-rc2.md)
+- [v6.5 RC1 notes](taskchute-bridge-v6.5-rc1.md)
+- [v6.4 RC1 Release Lock](Taskchute_Bridge_v6.4_RC1_RELEASE_LOCK.md)
+- [v6.4 RC1 Codex operation](Taskchute_Bridge_Codex運用手順_v6.4_RC1.md)
+- [main.js split plan](main-js-split-plan.md)
+- [main.js split map](main-js-split-map.md)
+- [Codex split instructions](codex-main-js-split-instructions.md)
 
-payloadに `entry_id` がない旧payloadのみ:
-
-```text
-known = knownTaskIds.has(taskId)
-```
-
-禁止:
-
-```text
-entry_idありpayloadで task_id 既知だけを根拠に skipped_applied する
-```
-
-task_idだけ既知・entry_id未知の場合:
-
-```text
-missing_target_task_id_only_rejected_entry_id_required
-```
-
-として未Ack側へ回す。
-
-## 通常削除
-
-通常削除では、Markdown上の対象entryを削除する。
-
-remote側は保存後にMarkdownを再読込し、対象 `entry_id` が消えていることを検証する。
-検証成功時のみAckする。
-
-## Create Then Delete
-
-タスク作成直後に削除した場合でも、remoteへ削除意図を届ける。
-
-送信順序:
-
-```text
-TaskCreated -> TaskDeleted
-```
-
-TaskDeleted payloadには `task_id` と `entry_id` を含める。
-
-TaskCreated適用後にTaskDeletedを適用できるようにする。
-
-## Bulk Delete / Delete All
-
-全件削除 / 一括削除では、削除しながらlive entries / DOM / runtime rowsを反復してはいけない。
-
-v6.5 RC1仕様:
-
-- `bulkDeleteTasks()` 開始時点で削除前Markdown snapshotを作る
-- snapshotから削除対象の `task_id / entry_id / date / section / rowMarkdown` を取得する
-- 削除後live配列に依存せずTaskDeletedをenqueueする
-- 削除件数ぶんTaskDeletedをD1へ送信する
-- `isBridgeTaskCreatedPending(taskId, entryId)` は `task_id + entry_id` identityで判定する
+Historical資料は削除せず、当時の判断と試験記録を保存するために残す。現行versionの案内としては使用しない。
