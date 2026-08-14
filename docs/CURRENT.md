@@ -12,6 +12,13 @@
 
 この文書は上記checkpointの実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在と実機試験済みであることは分けて扱う。v0.6.56はdocs/release metadataのみのreleaseであり、`main.js`と`styles.css`はv0.6.55から変更せず、Bridge/runtime logicはv0.6.54と同一である。
 
+## 文書運用
+
+- 現行仕様と現在地はcanonical 6文書を正とする。
+- release/version単位の変更履歴はroot [`CHANGELOG.md`](../CHANGELOG.md)を参照する。
+- 現行versionの検証状態は[`TEST_MATRIX.md`](TEST_MATRIX.md)を正とする。
+- 過去versionの詳細資料は[`archive/`](archive/README.md)へ保存し、現行仕様の根拠には使わない。
+
 ## 現在の開発状況
 
 アプリ本体とBridge同期は広範囲に実装済みである。Bridgeの基礎部分はv6.5 RC3でdev / remote / mobile三端末スモークを通過した記録がある。その後、v0.6.16以降にRoutine同期、Routine occurrence、TaskMoved v4、lifecycle identity、割り込みcontinuation、safe rekeyが追加された。

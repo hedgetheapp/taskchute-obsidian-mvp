@@ -13,6 +13,8 @@ Use these documents as the current source of truth. Implementation presence and 
 - [Design decisions](DECISIONS.md)
 - [Test matrix](TEST_MATRIX.md)
 
+These documents describe current behavior and current status. They do not serve as the version-by-version release history.
+
 ## Current Detail
 
 - [Task Identity and Delete Semantics](bridge/Task_Identity_and_Delete_Semantics_v6.5_RC1.md)
@@ -28,9 +30,12 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 ## Release
 
+- [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [v0.6.56 BRAT Prerelease](release/v0.6.56.md)
 - [BRAT release operation](brat-release-operation.md)
 - [Release checklist](release-checklist.md)
+
+GitHub Releases preserve the distribution history. Git history remains the complete technical history.
 
 ## Archive
 

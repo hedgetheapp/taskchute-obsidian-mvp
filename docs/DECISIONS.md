@@ -148,6 +148,12 @@
 - 根拠: `runTaskchuteOneClickRepair()`。
 - 理由: 重複identityやBridge競合で破壊的な自動修復を避けるため。
 
+## D-025: release-level summaryとしてCHANGELOGを維持する
+
+- 判断: release/versionごとの変更要約をroot `CHANGELOG.md`へ記録する。
+- 根拠: repositoryの文書運用ルールとrelease checklist。
+- 理由: Git履歴は完全な技術履歴だが、人がversion間の主要差分を短時間で把握する用途とは分けるため。CHANGELOGはGit履歴や現行仕様、TEST_MATRIXの代替にはしない。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

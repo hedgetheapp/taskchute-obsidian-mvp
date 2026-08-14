@@ -7,6 +7,9 @@
 
 ## 1. 必須チェック
 
+- [ ] canonical docsをrelease対象versionへ更新
+- [ ] root `CHANGELOG.md`の先頭へrelease-level summaryを追加
+- [ ] CHANGELOGにruntime変更の有無、verification、tag、release commitを記録
 - [ ] `node --check .\main.js` 成功
 - [ ] `manifest.json` の `version` 確認
 - [ ] tagが `v{manifest.version}` 形式
@@ -21,6 +24,7 @@
 - [ ] `Taskchute/_system/index.json` を含めていない
 - [ ] バックアップファイルを含めていない
 - [ ] 個人データ・実運用ログを含めていない
+- [ ] release後cleanupは公開済みtagへ含めず、tag / Releaseを移動・上書きしない
 
 ---
 

@@ -21,6 +21,7 @@ v0.6.56はcanonical documentation baselineとversion metadataを固定するdocs
 - [Design decisions](docs/DECISIONS.md)
 - [Test matrix](docs/TEST_MATRIX.md)
 - [Documentation index](docs/README.md)
+- [Changelog](CHANGELOG.md): release/versionごとの変更履歴
 
 実装済みであることと、現行versionで実機試験済みであることは分けて扱います。保証状態は`TEST_MATRIX.md`を参照してください。不明事項は推測せず「要確認」または`NOT_VERIFIED`とします。
 
@@ -38,6 +39,6 @@ v0.6.56はcanonical documentation baselineとversion metadataを固定するdocs
 
 ## Historical Documentation
 
-過去versionの設計、試験、release資料は[Documentation Archive](docs/archive/README.md)へ保存しています。現行実装判断の正本には使用しません。
+過去versionの設計、試験、release資料は[Documentation Archive](docs/archive/README.md)へ保存しています。現行実装判断の正本には使用しません。版数ごとの変更要約は[Changelog](CHANGELOG.md)を参照してください。
 
 配布・リリース手順は[BRAT release operation](docs/brat-release-operation.md)と[Release checklist](docs/release-checklist.md)を参照してください。

@@ -52,6 +52,8 @@ Otherwise leave the event unacked and record a diagnostic such as identity confl
 - Do not weaken post-save verification, false-applied prevention, cursor safety, mobile hidden drain guards, or identity collision guards.
 - Runtime or Bridge changes require reviewing the affected rows in `docs/TEST_MATRIX.md` and recording real verification state. Do not promote historical PASS results to the current release without current evidence.
 - Keep `PASS`, `FAIL`, `BLOCKED`, and `NOT_VERIFIED` distinct. Unknown or mixed test data is not PASS.
+- Update root `CHANGELOG.md` for every release/version change. Keep it to release-level summaries; it does not replace Git history, and historical docs must not be copied into it wholesale.
+- Treat `docs/TEST_MATRIX.md` as the authority for current test state, including when writing CHANGELOG verification notes.
 - Do not modify tags, releases, D1 data, Cloudflare resources, or real Vault data unless the user explicitly requests it.
 
 Minimum runtime syntax check:
