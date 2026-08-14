@@ -8,6 +8,35 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.59 - 2026-08-15
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- 同一sectionのtask-row D&DでMarkdownだけが更新されTaskMovedが生成されない経路を修正した。
+- D&D前後のentry/task orderを明示取得し、保存後Markdown検証後にTaskMoved v4を1件enqueueするようにした。
+- 同一section D&D payloadへsource / targetのentry ID順とtask ID順、正しいfrom / to index、専用payload sourceを保持するようにした。
+- order不変のdropではTaskMovedを生成せず、D&D 1操作の専用enqueue siteを1箇所へ限定した。
+- drag detection、before / after order、enqueue attempt / skip / resultのdiagnosticsを追加した。
+- `manifest.json`を`0.6.59`へ更新した。
+
+### Verification
+
+- `node --check .\main.js`: OK
+- `git diff --check`: OK
+- TMV4-BASIC-01 synthetic: PASS
+- TMV4 no-op / duplicate prevention synthetic: PASS
+- 実Vault TMV4-BASIC-01再試験: `NOT_VERIFIED`
+- AF-LWU-01 / TaskUpdated / inbound TaskMoved v4 / empty-source / Routine identity実機回帰: `NOT_VERIFIED`
+
+Tag: `v0.6.59`
+GitHub Release: [v0.6.59 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.59)
+Assets: `main.js`, `manifest.json`, `styles.css`
+Release notes: [`docs/release/v0.6.59.md`](docs/release/v0.6.59.md)
+
+---
+
 ## v0.6.58 - 2026-08-15
 
 Type: Runtime BRAT Prerelease for device testing
@@ -28,7 +57,9 @@ Type: Runtime BRAT Prerelease for device testing
 - `git diff --check`: OK
 - ACK-CURSOR-GUARD-01 / ACK-AMBIG-01 / ACK-AUTH-01 / CURSOR-GAP-01 / CURSOR-MERGE-01 / MOBILE-RESCUE-01相当のsynthetic / structural check: OK
 - 実Vault / 実mobile Ack / cursor recovery: `NOT_VERIFIED`
-- AF-LWU-01 / TMV4-BASIC-01 / TMV4-EMPTY-SOURCE-01実Vault回帰: `NOT_VERIFIED`
+- AF-LWU-01実Vault回帰: `PASS`。T-0586 / E-20260815-0004、seq 2162-2164、remote / mobile applied、手動flushなし、3端末UI一致。
+- TMV4-BASIC-01実Vault回帰: `FAIL`。T-0589 / E-20260815-0007の同一section D&D後、devだけ更新され、対象TaskMovedは0件。
+- TMV4-EMPTY-SOURCE-01実Vault回帰: `NOT_VERIFIED`
 
 Tag: `v0.6.58`
 GitHub Release: [v0.6.58 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.58)

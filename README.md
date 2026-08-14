@@ -4,13 +4,13 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current release: `v0.6.58` BRAT Prerelease
+- Current release: `v0.6.59` BRAT Prerelease
 - Current branch: `feature/v6.6-routine-sync`
-- Canonical docs checkpoint: `v0.6.58` tag target
-- Release commit: Git tag `v0.6.58`のtargetを参照
+- Canonical docs checkpoint: `v0.6.59` tag target
+- Release commit: Git tag `v0.6.59`のtargetを参照
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.58はinboundのserver Ackとlocal cursor保存を分離し、Ack済みeventをMarkdownへ再適用せずcursorだけ修復する経路を追加した実機試験用BRAT Prereleaseです。synthetic / structural試験は完了していますが、実Vault / 実mobileでは`NOT_VERIFIED`であり、Verified済み安定版ではありません。
+v0.6.59は、同一section内のtask-row D&DでMarkdownだけが更新されTaskMoved v4が欠落するv0.6.58回帰を修正する実機試験用BRAT Prereleaseです。synthetic / structural試験は完了していますが、実Vault / 実mobileでは`NOT_VERIFIED`であり、Verified済み安定版ではありません。
 
 ## Canonical Documentation
 

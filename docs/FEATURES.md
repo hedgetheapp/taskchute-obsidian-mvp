@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.58の現行feature inventoryである。v0.6.58はinbound server Ackとlocal cursor persistenceの分離、cursor-only reconciliation、recoverable mobile rescueを追加した実機試験用Prereleaseである。
+この一覧はv0.6.59の現行feature inventoryである。v0.6.59は同一sectionのtask-row D&Dからoutbound TaskMoved v4へ接続する保存後検証済みhandoffを追加した実機試験用Prereleaseである。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.58で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.59で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -97,7 +97,7 @@
 | 整合性診断 | 実装済み | folder、ID、frontmatter、duplicate、runtime等を検査。 |
 | one-click repair | 実装済み | backupとreportを作り、安全と判断した項目だけ修復。 |
 | error log管理 | 実装済み | Taskchute由来logの保存・cleanup・診断表示。 |
-| 自動テスト | 未実装 | test runner・test sourceは見つからない。 |
+| 自動テスト | 一部実装 | `tests/tmv4-basic-v0659.js`で同一section D&Dのv4 payload、no-op、単一enqueue、coalesce保持をsynthetic確認する。汎用test runnerと広範な自動回帰は未実装。 |
 
 ## Bridge
 
@@ -112,7 +112,7 @@
 | Ack / cursor result separation | 実装済み・実機未試験 | server Ack成功とlocal cursor保存結果を別状態で返し、cursor保存失敗をserver Ack失敗と表示しない。 |
 | trusted cursor persistence | 実装済み・実機未試験 | inbound Ack cursorだけに限定した保存経路で最新data.jsonへmonotonic mergeする。 |
 | cursor-only reconciliation | 一部実装 | server Ack済みeventをMarkdownへ再適用せずcursorへ反映する。現行client記録またはlegacy cache / diagnostic証跡を使う。cold cacheでの任意server照会はAPI未実装。 |
-| TaskMoved v4 | 実装済み | `target_order_entry_ids` / `source_order_entry_ids`を正とする。 |
+| TaskMoved v4 | 実装済み・実機未試験 | `target_order_entry_ids` / `source_order_entry_ids`を正とする。同一section D&Dは移動前後のentry順と保存後Markdownを検証して1件enqueueする。v0.6.59実Vault回帰は未実施。 |
 | lifecycle classifier | 実装済み | normal / routine_occurrence / identity_conflict。 |
 | mobile resume drain | 実装済み・実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。 |
 | オフライン復帰 | 一部実装 | network error分類と再試行はある。長時間実機試験は要確認。 |

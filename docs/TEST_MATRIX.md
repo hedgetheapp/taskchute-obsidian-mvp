@@ -2,11 +2,11 @@
 
 ## 基準と読み方
 
-- 対象release: v0.6.58 BRAT Prerelease
-- canonical docs checkpoint: `v0.6.58` tag target
-- v0.6.58はinbound server Ackとlocal cursor persistenceの分離、cursor-only reconciliation、recoverable mobile rescueを追加した実機試験用version。
+- 対象release: v0.6.59 BRAT Prerelease
+- canonical docs checkpoint: `v0.6.59` tag target
+- v0.6.59は同一section D&Dのoutbound TaskMoved v4欠落を修正する実機試験用version。
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
-- dev / remote / mobile列と`Status`列は、いずれもv0.6.58についての判定を示す。
+- dev / remote / mobile列と`Status`列は、いずれもv0.6.59についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
 - Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
@@ -22,11 +22,20 @@
 | `NOT_VERIFIED` | 実装は存在し得るが、対象versionの十分な実機証跡がない。 |
 | `NOT_APPLICABLE` | 対象端末またはtest caseに適用されない。 |
 
-## Current v0.6.58 Matrix
+## v0.6.58 Device Evidence
+
+| Test case | Result | Evidence |
+|---|---|---|
+| AF-LWU-01 | `PASS` | `T-0586 / E-20260815-0004`。seq 2162 TaskCreated、2163 TaskUpdated、2164 TaskUpdatedがremote / mobileともapplied。手動flushなし。dev / remote / mobileの最終titleとUIが一致。 |
+| TMV4-BASIC-01 | `FAIL` | A `T-0587 / E-20260815-0005`、B `T-0588 / E-20260815-0006`、C `T-0589 / E-20260815-0007`。devでCを同一section最下部から最上部へD&Dし、dev Markdown orderは更新。remote / mobileは未反映。payloadにE-20260815-0007を含むTaskMovedは0件、server_sequence > 2171かつdevice_id=devのTaskMovedも0件。outbound D&D TaskMoved enqueue欠落。 |
+
+この証跡はv0.6.58についての判定であり、v0.6.59へ自動継承しない。
+
+## Current v0.6.59 Matrix
 
 | Area | Test case | dev | remote | mobile | Last verified version | Status | Evidence / Notes |
 |---|---|---|---|---|---|---|---|
-| Auto Flush lost wake-up | AF-LWU-01: create直後renameを手動flushなしで両event送信 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | scheduler helperのsynthetic checkはOK。実Vault / D1 / remote / mobile確認は未実施。 |
+| Auto Flush lost wake-up | AF-LWU-01: create直後renameを手動flushなしで両event送信 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.58 | `NOT_VERIFIED` | v0.6.58で実機PASS。v0.6.59のcurrent evidenceへは未昇格。Auto Flush実装はv0.6.58から変更なし。 |
 | Auto Flush lost wake-up | AF-LWU-02: flush中の複数enqueueを終了後に再schedule | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic checkのみ。実機で同時flushなし・全送信を要確認。 |
 | Auto Flush lost wake-up | AF-LWU-03: failedのみでloopせず新規pendingは送信 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic checkのみ。実outboxでmax retry failedとの共存を要確認。 |
 | Inbound Ack / cursor | ACK-CURSOR-GUARD-01: Ack 2xx後のcursor保存失敗をreconcile | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic PASS。実mobileでMarkdown二重applyなし、永久safe-stopなしを未確認。 |
@@ -38,8 +47,8 @@
 | TaskCreated | 通常taskを作成し、他2端末のMarkdown/UIとAckを確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | `bridge-v6.5-rc1-checklist.md`に三端末起点PASSあり。ただし後続のTaskCreated guard / collision変更を含むv0.6.56回帰は未記録。 |
 | TaskUpdated | 通常taskのtitle・値変更を物理MarkdownとAckまで確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3証跡はある。v0.6.48以降のfalse Ack対策を含む現行三端末回帰はrepository内に未記録。 |
 | TaskMoved v4 | section移動・日付移動・同一task_id複数entry・空source section | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | RC3のTaskMoved v3 PASSはあるが、v4の現行保証には使わない。 |
-| TaskMoved v4 | TMV4-BASIC-01: v4 entry orderの基本移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.58でTaskMoved v4本体に変更はない。実Vault回帰は未実施。 |
-| TaskMoved v4 | TMV4-EMPTY-SOURCE-01: source sectionが空になる移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.58でempty-source処理に変更はない。実Vault回帰は未実施。 |
+| TaskMoved v4 | TMV4-BASIC-01: v4 entry orderの基本移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.58 FAIL | `NOT_VERIFIED` | v0.6.59 synthetic PASS。v0.6.58実機ではD&D後のTaskMovedが0件でFAIL。修正版の実Vault再試験は未実施。 |
+| TaskMoved v4 | TMV4-EMPTY-SOURCE-01: source sectionが空になる移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.59でinbound empty-source処理に変更はない。実Vault回帰は未実施。 |
 | TaskDeleted | 通常・create直後・完了済み・一括削除 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3で通常一連操作と完了済みTaskDeletedのPASS記録あり。後続identity変更後のfull regressionは未記録。 |
 | TaskStarted | Board / Log / LogDaily / runtime保存後検証とAck | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3三端末起点PASS。v0.6.49 lifecycle classifier後の現行統合証跡なし。 |
 | TaskStopped / Paused / Resumed | stop・pause・resumeとruntime / log整合 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | TaskStoppedを含む実装記録はあるが、3イベントを覆う現行実Vault証跡はない。 |

@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.58`を基準とする。v0.6.58はinbound server Ackとlocal cursor persistenceを分離し、cursor-only reconciliationを追加した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.59`を基準とする。v0.6.59は同一sectionのtask-row D&Dからoutbound TaskMoved v4へのhandoffを修復した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -71,6 +71,8 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - v4 entry配列が不正な場合はv3へ黙って降格せず未Ack停止する。
 - v3以前はtask_id順を使用するが、同じsectionにduplicate task_idがある場合は安全停止する。
 - source sectionが移動後に空になる場合、v4の空`source_order_entry_ids`を許可する。
+- 同一sectionのtask-row D&Dは、移動前のentry/task順と保存後Markdownのentry/task順を明示的に取得する。順序が変わった場合だけ、保存後検証成功後に`task-drag-reorder-confirmed-markdown-v4`のTaskMovedを1件enqueueする。
+- 同一section D&D payloadは移動前の`source_order_entry_ids` / `source_order_task_ids`と移動後の`target_order_entry_ids` / `target_order_task_ids`を保持する。orderが同じno-opではTaskMovedを生成しない。
 
 ## 7. 実行lifecycle
 
@@ -205,5 +207,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.58を本番版とみなす条件。現状は実Vault / 実mobile未試験のPrereleaseである。
+- v0.6.59を本番版とみなす条件。現状は同一section D&Dを含む実Vault / 実mobile未試験のPrereleaseである。
 - Widget、Watch、MCP/API、外部calendarの仕様。

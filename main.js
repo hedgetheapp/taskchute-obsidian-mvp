@@ -31,6 +31,7 @@ const BRIDGE_DIAGNOSTICS_RETENTION_V1 = Object.freeze({
   ttlDays: Object.freeze({ audit: 7, info: 14, warning: 30, error: 60, critical: 180, resolvedSafeStop: 60 }),
   maxEntries: Object.freeze({
     bridgeInboundAutoApplyRuntimeDiagnostics: 1000,
+    bridgeTaskDragMoveDiagnostics: 120,
     taskMovedOrderDiagnostics: 120,
     taskCreatedOrderDiagnostics: 80,
     taskMovedSectionDiagnostics: 120,
@@ -129,6 +130,7 @@ const DEFAULT_SETTINGS = {
   bridgeTaskMovedCoalesceCount: 0,
   bridgeTaskMovedSupersededCount: 0,
   bridgeTaskMovedLastFinalPayloadSummary: "",
+  bridgeTaskDragMoveDiagnostics: [],
   bridgeTaskCreatedRenameMergeCount: 0,
   bridgeTaskCreatedLastRenameMergeTaskId: "",
   bridgeTaskCreatedLastRenameMergeEntryId: "",
@@ -6125,6 +6127,58 @@ function getTaskSectionOrderTaskIdsFromMarkdown(markdown, sectionName) {
   return ids;
 }
 
+function buildBridgeTaskMovedV4ReorderDraft(input = {}) {
+  const normalizeIds = values => (Array.isArray(values) ? values : []).map(value => String(value || "").trim());
+  const taskId = String(input.task_id || input.taskId || "").trim();
+  const entryId = String(input.entry_id || input.entryId || "").trim();
+  const date = String(input.date || "").trim();
+  const sectionId = String(input.section_id || input.sectionId || "").trim();
+  const sectionLabel = String(input.section_label || input.sectionLabel || sectionId).trim();
+  const sourceEntryIds = normalizeIds(input.source_order_entry_ids || input.sourceOrderEntryIds);
+  const targetEntryIds = normalizeIds(input.target_order_entry_ids || input.targetOrderEntryIds);
+  const sourceTaskIds = normalizeIds(input.source_order_task_ids || input.sourceOrderTaskIds);
+  const targetTaskIds = normalizeIds(input.target_order_task_ids || input.targetOrderTaskIds);
+  const invalidIdentity = !taskId || !entryId || !date || !sectionId;
+  const invalidEntries = !sourceEntryIds.length
+    || sourceEntryIds.some(value => !value)
+    || targetEntryIds.some(value => !value)
+    || new Set(sourceEntryIds).size !== sourceEntryIds.length
+    || new Set(targetEntryIds).size !== targetEntryIds.length
+    || sourceEntryIds.length !== targetEntryIds.length
+    || sourceEntryIds.some(value => !targetEntryIds.includes(value));
+  const invalidTasks = sourceTaskIds.length !== sourceEntryIds.length || targetTaskIds.length !== targetEntryIds.length;
+  const fromIndex = sourceEntryIds.indexOf(entryId);
+  const toIndex = targetEntryIds.indexOf(entryId);
+  if (invalidIdentity || invalidEntries || invalidTasks || fromIndex < 0 || toIndex < 0) {
+    return {
+      ok: false,
+      changed: false,
+      reason: invalidIdentity ? "identity_missing" : (invalidEntries ? "entry_order_invalid" : (invalidTasks ? "task_order_invalid" : "moved_entry_missing"))
+    };
+  }
+  const changed = JSON.stringify(sourceEntryIds) !== JSON.stringify(targetEntryIds);
+  return {
+    ok: true,
+    changed,
+    reason: changed ? "order_changed" : "order_unchanged",
+    payload: {
+      task_id: taskId,
+      entry_id: entryId,
+      from: { date, entry_id: entryId, section_id: sectionId, section_label: sectionLabel, index: fromIndex },
+      to: { date, entry_id: entryId, section_id: sectionId, section_label: sectionLabel, index: toIndex },
+      before: { date, entry_id: entryId, section_id: sectionId, section_label: sectionLabel, index: fromIndex },
+      after: { date, entry_id: entryId, section_id: sectionId, section_label: sectionLabel, index: toIndex },
+      source_order_entry_ids: sourceEntryIds.slice(),
+      target_order_entry_ids: targetEntryIds.slice(),
+      source_order_task_ids: sourceTaskIds.slice(),
+      target_order_task_ids: targetTaskIds.slice(),
+      move_payload_version: 4,
+      taskmoved_payload_source: String(input.taskmoved_payload_source || input.payloadSource || "task-drag-reorder-confirmed-markdown-v4").trim() || "task-drag-reorder-confirmed-markdown-v4",
+      move_type: "reorder"
+    }
+  };
+}
+
 function mergeTaskOrderWithPreferredSubset(baseOrder, preferredOrder) {
   const base = (Array.isArray(baseOrder) ? baseOrder : []).map(id => String(id || "").trim()).filter(Boolean);
   const baseSet = new Set(base);
@@ -10945,6 +10999,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.settings.bridgeTaskMovedCoalesceCount = Math.max(0, Math.floor(Number(this.settings.bridgeTaskMovedCoalesceCount || 0)));
     this.settings.bridgeTaskMovedSupersededCount = Math.max(0, Math.floor(Number(this.settings.bridgeTaskMovedSupersededCount || 0)));
     this.settings.bridgeTaskMovedLastFinalPayloadSummary = String(this.settings.bridgeTaskMovedLastFinalPayloadSummary || "").trim();
+    this.settings.bridgeTaskDragMoveDiagnostics = Array.isArray(this.settings.bridgeTaskDragMoveDiagnostics)
+      ? this.settings.bridgeTaskDragMoveDiagnostics.slice(-120)
+      : [];
     this.settings.bridgeTaskCreatedRenameMergeCount = Math.max(0, Math.floor(Number(this.settings.bridgeTaskCreatedRenameMergeCount || 0)));
     this.settings.bridgeTaskCreatedLastRenameMergeTaskId = String(this.settings.bridgeTaskCreatedLastRenameMergeTaskId || "").trim();
     this.settings.bridgeTaskCreatedLastRenameMergeEntryId = String(this.settings.bridgeTaskCreatedLastRenameMergeEntryId || "").trim();
@@ -11050,6 +11107,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       .filter(item => item.event_id && item.logical_clock > 0), "bridgeOutboxClockAudit", this.settings);
     this.settings.taskCreatedOrderDiagnostics = limitBridgeDiagnosticArrayProtectedAware(this.settings.taskCreatedOrderDiagnostics, "taskCreatedOrderDiagnostics", this.settings);
     this.settings.taskMovedOrderDiagnostics = limitBridgeDiagnosticArrayProtectedAware(this.settings.taskMovedOrderDiagnostics, "taskMovedOrderDiagnostics", this.settings);
+    this.settings.bridgeTaskDragMoveDiagnostics = limitBridgeDiagnosticArrayProtectedAware(this.settings.bridgeTaskDragMoveDiagnostics, "bridgeTaskDragMoveDiagnostics", this.settings);
     this.settings.bridgeAutoFlushEnabled = !!this.settings.bridgeAutoFlushEnabled;
     this.settings.bridgeAutoFlushOnStartup = !!this.settings.bridgeAutoFlushOnStartup;
     this.settings.bridgeAutoFlushDelayMs = normalizeBridgeAutoFlushMs(this.settings.bridgeAutoFlushDelayMs, 3000, 0, 300000);
@@ -12108,6 +12166,31 @@ class TaskchutePlugin extends obsidian.Plugin {
         }, detail || {})
       });
     } catch (e) {}
+  }
+
+  async recordBridgeTaskDragMoveDiagnostic(phase, detail = {}, options = {}) {
+    const entry = {
+      recorded_at: nowIso(),
+      phase: String(phase || "").trim(),
+      task_id: String(detail.task_id || "").trim(),
+      entry_id: String(detail.entry_id || "").trim(),
+      date: String(detail.date || "").trim(),
+      section_id: String(detail.section_id || "").trim(),
+      before_order_entry_ids: Array.isArray(detail.before_order_entry_ids) ? detail.before_order_entry_ids.slice() : [],
+      after_order_entry_ids: Array.isArray(detail.after_order_entry_ids) ? detail.after_order_entry_ids.slice() : [],
+      enqueue_attempted: !!detail.enqueue_attempted,
+      enqueue_result: detail.enqueue_result == null ? null : !!detail.enqueue_result,
+      enqueue_skipped_reason: String(detail.enqueue_skipped_reason || "").trim(),
+      message: String(detail.message || "").trim()
+    };
+    const current = Array.isArray(this.settings && this.settings.bridgeTaskDragMoveDiagnostics)
+      ? this.settings.bridgeTaskDragMoveDiagnostics
+      : [];
+    this.settings.bridgeTaskDragMoveDiagnostics = current.concat(entry).slice(-120);
+    if (options && options.persist) {
+      try { await this.savePluginData({ deviceWriterOperation: "bridge-task-drag-move-diagnostic" }); } catch (e) {}
+    }
+    return entry;
   }
 
   recordBridgeMobileResumeDrainDiagnostic(reasonCode, detail = {}) {
@@ -15590,8 +15673,16 @@ class TaskchutePlugin extends obsidian.Plugin {
       to.index = targetInfo.entryIds.indexOf(String(to.entry_id || payload.entry_id || "").trim());
       payload.to = to;
       if (sameDate && sameSection) {
-        delete payload.source_order_entry_ids;
-        delete payload.source_order_task_ids;
+        const firstSourceEntryIds = Array.isArray(oldestPayload.source_order_entry_ids)
+          ? oldestPayload.source_order_entry_ids
+          : payload.source_order_entry_ids;
+        const firstSourceTaskIds = Array.isArray(oldestPayload.source_order_task_ids)
+          ? oldestPayload.source_order_task_ids
+          : payload.source_order_task_ids;
+        if (Array.isArray(firstSourceEntryIds) && Array.isArray(firstSourceTaskIds)) {
+          payload.source_order_entry_ids = firstSourceEntryIds.slice();
+          payload.source_order_task_ids = firstSourceTaskIds.slice();
+        }
       } else {
         const sourceInfo = await this.getBridgeSectionOrderInfo(from.date, from.section_id || from.section);
         if (sourceInfo.missingEntryIdCount || sourceInfo.duplicateEntryIds.length) {
@@ -15602,8 +15693,6 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
     }
     if (sameDate && sameSection) {
-      delete payload.source_order_task_ids;
-      if (isV4) delete payload.source_order_entry_ids;
       payload.move_type = "reorder";
     } else {
       if (!isV4) payload.source_order_task_ids = await this.getBridgeSectionOrderTaskIds(from.date, from.section_id || from.section);
@@ -25420,15 +25509,30 @@ class TaskchutePlugin extends obsidian.Plugin {
     // TaskMoved payloadの順序は、移動・保存・ソート完了後のMarkdownだけを正とする。
     // 呼び出し元のDOM順、移動前配列、古いfocus indexはtarget_order_task_idsに使わない。
     const targetOrderInfo = await this.getBridgeSectionOrderInfo(to.date, to.section_id);
+    const explicitSourceEntryIds = Array.isArray(movement && movement.sourceOrderEntryIds)
+      ? movement.sourceOrderEntryIds.map(value => String(value || "").trim())
+      : [];
+    const explicitSourceTaskIds = Array.isArray(movement && movement.sourceOrderTaskIds)
+      ? movement.sourceOrderTaskIds.map(value => String(value || "").trim())
+      : [];
     const sourceOrderInfo = sameDateSection
-      ? { entryIds: [], taskIds: [], missingEntryIdCount: 0, duplicateEntryIds: [], duplicateTaskIds: [] }
+      ? {
+        entryIds: explicitSourceEntryIds.slice(),
+        taskIds: explicitSourceTaskIds.slice(),
+        missingEntryIdCount: explicitSourceEntryIds.some(value => !value) ? 1 : 0,
+        duplicateEntryIds: explicitSourceEntryIds.filter((value, index) => value && explicitSourceEntryIds.indexOf(value) !== index),
+        duplicateTaskIds: []
+      }
       : await this.getBridgeSectionOrderInfo(from.date, from.section_id);
     const targetOrderTaskIds = targetOrderInfo.taskIds.slice();
     const sourceOrderTaskIds = sourceOrderInfo.taskIds.slice();
     const targetOrderEntryIds = targetOrderInfo.entryIds.slice();
     const sourceOrderEntryIds = sourceOrderInfo.entryIds.slice();
     const targetOrderInvalid = targetOrderInfo.missingEntryIdCount > 0 || targetOrderInfo.duplicateEntryIds.length > 0;
-    const sourceOrderInvalid = !sameDateSection && (sourceOrderInfo.missingEntryIdCount > 0 || sourceOrderInfo.duplicateEntryIds.length > 0);
+    const sourceOrderRequired = !sameDateSection || explicitSourceEntryIds.length > 0 || explicitSourceTaskIds.length > 0;
+    const sourceOrderInvalid = sourceOrderRequired && (sourceOrderInfo.missingEntryIdCount > 0
+      || sourceOrderInfo.duplicateEntryIds.length > 0
+      || sourceOrderEntryIds.length !== sourceOrderTaskIds.length);
     if (targetOrderInvalid || sourceOrderInvalid) {
       return await recordFailure(`TaskMoved v4 entry orderを生成できません。${targetOrderInvalid ? "target" : "source"} entry identity invalid`);
     }
@@ -25482,8 +25586,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         to,
         before: Object.assign({}, from),
         after: Object.assign({}, to),
-        ...(sameDateSection ? {} : { source_order_task_ids: sourceOrderTaskIds }),
-        ...(sameDateSection ? {} : { source_order_entry_ids: sourceOrderEntryIds }),
+        ...(sourceOrderRequired ? { source_order_task_ids: sourceOrderTaskIds } : {}),
+        ...(sourceOrderRequired ? { source_order_entry_ids: sourceOrderEntryIds } : {}),
         target_order_task_ids: targetOrderTaskIds,
         target_order_entry_ids: targetOrderEntryIds,
         move_payload_version: 4,
@@ -35878,6 +35982,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         return false;
       }
       const sourceTask = this.getTaskFromViewByKey(sourceKey, view);
+      const moveDate = view && view.selectedDate ? view.selectedDate : this.getActiveViewDate();
+      const sourceSectionBeforeInfo = getTaskSectionOrderInfoFromMarkdown(md, sourceItem.section);
+      const sourceBridgeTaskId = String(sourceTask && (sourceTask.taskId || sourceTask.task_id) || taskIdFromTaskLine(sourceItem.line) || "").trim();
+      const sourceBridgeEntryId = String(sourceItem.id || sourceTask && (sourceTask.entryId || sourceTask.entry_id || sourceTask.taskKey) || "").trim();
       const isRuntimeProtectedTask = (task, item) => {
         if (!task && !item) return false;
         const key = item ? item.id : taskKey(task);
@@ -35932,10 +36040,69 @@ class TaskchutePlugin extends obsidian.Plugin {
         }
       }
       lines.splice(insertAt, 0, movedLine);
-      if (this.isTaskchuteWriteAborted(await this.writeFileText(notePath, lines.join("\n")))) {
+      const movedMarkdown = lines.join("\n");
+      const destinationAfterMoveInfo = getTaskSectionOrderInfoFromMarkdown(movedMarkdown, destinationName);
+      let reorderDraft = null;
+      if (!isCrossSectionDragMove) {
+        reorderDraft = buildBridgeTaskMovedV4ReorderDraft({
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          section_id: String(destinationSection && destinationSection.id || "").trim(),
+          section_label: destinationName,
+          source_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+          target_order_entry_ids: destinationAfterMoveInfo.entryIds,
+          source_order_task_ids: sourceSectionBeforeInfo.taskIds,
+          target_order_task_ids: destinationAfterMoveInfo.taskIds,
+          taskmoved_payload_source: "task-drag-reorder-confirmed-markdown-v4"
+        });
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_move_detected", {
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          section_id: String(destinationSection && destinationSection.id || "").trim(),
+          before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+          after_order_entry_ids: destinationAfterMoveInfo.entryIds,
+          enqueue_attempted: false,
+          enqueue_skipped_reason: reorderDraft && !reorderDraft.changed ? reorderDraft.reason : "",
+          message: reorderDraft && reorderDraft.changed ? "同一section D&Dのorder changeを検出しました。" : "同一section D&Dはorder変更なしです。"
+        });
+        if (!reorderDraft || !reorderDraft.ok || !reorderDraft.changed) {
+          await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_enqueue_skipped", {
+            task_id: sourceBridgeTaskId,
+            entry_id: sourceBridgeEntryId,
+            date: moveDate,
+            section_id: String(destinationSection && destinationSection.id || "").trim(),
+            before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+            after_order_entry_ids: destinationAfterMoveInfo.entryIds,
+            enqueue_attempted: false,
+            enqueue_skipped_reason: reorderDraft && reorderDraft.reason || "draft_invalid",
+            message: "同一section D&Dのorderが変わらないためTaskMovedを生成しません。"
+          }, { persist: true });
+          return false;
+        }
+      }
+      if (this.isTaskchuteWriteAborted(await this.writeFileText(notePath, movedMarkdown))) {
           await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
           return false;
         }
+      const confirmedMarkdownAfterDrag = await readFileText(this.app, notePath);
+      let destinationAfterSaveInfo = getTaskSectionOrderInfoFromMarkdown(confirmedMarkdownAfterDrag, destinationName);
+      if (!isCrossSectionDragMove && JSON.stringify(destinationAfterSaveInfo.entryIds) !== JSON.stringify(destinationAfterMoveInfo.entryIds)) {
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_save_verify_failed", {
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          section_id: String(destinationSection && destinationSection.id || "").trim(),
+          before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+          after_order_entry_ids: destinationAfterSaveInfo.entryIds,
+          enqueue_attempted: false,
+          enqueue_skipped_reason: "post_save_order_mismatch",
+          message: "同一section D&Dの保存後entry orderが期待値と一致しません。"
+        }, { persist: true });
+        await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
+        return false;
+      }
 
       if (destinationName && destinationName !== sourceItem.section) {
         if (routineEditScope !== "today") {
@@ -35973,13 +36140,90 @@ class TaskchutePlugin extends obsidian.Plugin {
         await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
       }
       this.updateSelectionInViews();
-      try {
-        await this.enqueueBridgeTaskMoved(sourceTask, {
-          from: { date: view && view.selectedDate ? view.selectedDate : this.getActiveViewDate(), section: sourceItem.section, index: sourceItem.index },
-          to: { date: view && view.selectedDate ? view.selectedDate : this.getActiveViewDate(), section: destinationSection ? destinationSection.id : destinationName, index: insertAt },
-          moveType: isCrossSectionDragMove ? "section-change" : "reorder"
+      const finalMarkdownAfterDragUi = await readFileText(this.app, notePath);
+      destinationAfterSaveInfo = getTaskSectionOrderInfoFromMarkdown(finalMarkdownAfterDragUi, destinationName);
+      let bridgeEnqueued = false;
+      if (!isCrossSectionDragMove) {
+        const finalDraft = buildBridgeTaskMovedV4ReorderDraft({
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          section_id: String(destinationSection && destinationSection.id || "").trim(),
+          section_label: destinationName,
+          source_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+          target_order_entry_ids: destinationAfterSaveInfo.entryIds,
+          source_order_task_ids: sourceSectionBeforeInfo.taskIds,
+          target_order_task_ids: destinationAfterSaveInfo.taskIds,
+          taskmoved_payload_source: "task-drag-reorder-confirmed-markdown-v4"
         });
-      } catch (e) {}
+        if (!finalDraft || !finalDraft.ok || !finalDraft.changed) {
+          await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_enqueue_skipped", {
+            task_id: sourceBridgeTaskId,
+            entry_id: sourceBridgeEntryId,
+            date: moveDate,
+            section_id: String(destinationSection && destinationSection.id || "").trim(),
+            before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+            after_order_entry_ids: destinationAfterSaveInfo.entryIds,
+            enqueue_attempted: false,
+            enqueue_skipped_reason: finalDraft && finalDraft.reason || "final_draft_invalid",
+            message: "最終Markdownのorderが移動前と同じためTaskMovedを生成しません。"
+          }, { persist: true });
+          return !!(finalDraft && finalDraft.ok);
+        }
+        const bridgeTask = Object.assign({}, sourceTask || {}, {
+          taskId: sourceBridgeTaskId,
+          entryId: sourceBridgeEntryId,
+          taskKey: sourceBridgeEntryId,
+          sourceDate: moveDate,
+          date: moveDate,
+          section: destinationName,
+          sectionId: String(destinationSection && destinationSection.id || "").trim()
+        });
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_enqueue_attempted", {
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          section_id: bridgeTask.sectionId,
+          before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+          after_order_entry_ids: destinationAfterSaveInfo.entryIds,
+          enqueue_attempted: true,
+          message: "保存後検証済みの同一section D&D TaskMoved v4をenqueueします。"
+        });
+        bridgeEnqueued = !!(await this.enqueueBridgeTaskMoved(bridgeTask, {
+          from: finalDraft.payload.from,
+          to: finalDraft.payload.to,
+          beforeOrder: finalDraft.payload.source_order_task_ids,
+          afterMoveOrder: finalDraft.payload.target_order_task_ids,
+          afterSaveOrder: finalDraft.payload.target_order_task_ids,
+          afterRebuildOrder: finalDraft.payload.target_order_task_ids,
+          sourceOrderEntryIds: finalDraft.payload.source_order_entry_ids,
+          sourceOrderTaskIds: finalDraft.payload.source_order_task_ids,
+          payloadSource: finalDraft.payload.taskmoved_payload_source,
+          moveType: "reorder"
+        }));
+      } else {
+        bridgeEnqueued = !!(await this.enqueueBridgeTaskMoved(sourceTask, {
+          from: { date: moveDate, section: sourceItem.section, index: sourceItem.index },
+          to: { date: moveDate, section: destinationSection ? destinationSection.id : destinationName, index: insertAt },
+          moveType: "section-change"
+        }));
+      }
+      await this.recordBridgeTaskDragMoveDiagnostic(bridgeEnqueued ? "drag_drop_enqueue_succeeded" : "drag_drop_enqueue_failed", {
+        task_id: sourceBridgeTaskId,
+        entry_id: sourceBridgeEntryId,
+        date: moveDate,
+        section_id: String(destinationSection && destinationSection.id || "").trim(),
+        before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+        after_order_entry_ids: destinationAfterSaveInfo.entryIds,
+        enqueue_attempted: true,
+        enqueue_result: bridgeEnqueued,
+        enqueue_skipped_reason: bridgeEnqueued ? "" : "enqueue_returned_false",
+        message: bridgeEnqueued ? "D&D TaskMovedをoutboxへ追加しました。" : "D&D TaskMovedをoutboxへ追加できませんでした。"
+      }, { persist: true });
+      if (!bridgeEnqueued) {
+        new obsidian.Notice("並び替えは保存されましたが、TaskMovedの同期準備に失敗しました。診断を確認してください。");
+        return false;
+      }
       return true;
     } catch (e) {
       console.error("Taskchute moveTaskByDrag error", e);
@@ -53060,6 +53304,16 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
       .setName("TaskMovedセクション順序診断")
       .setDesc(latestTaskMovedOrderDiagnostic
         ? `section_id ${latestTaskMovedOrderDiagnostic.section_id || "-"} / before ${JSON.stringify(latestTaskMovedOrderDiagnostic.before_order || [])} / after_move ${JSON.stringify(latestTaskMovedOrderDiagnostic.after_move_order || [])} / after_save ${JSON.stringify(latestTaskMovedOrderDiagnostic.after_save_order || [])} / after_rebuild ${JSON.stringify(latestTaskMovedOrderDiagnostic.after_rebuild_order || [])} / emitted ${JSON.stringify(latestTaskMovedOrderDiagnostic.emitted_target_order_task_ids || [])}`
+        : "診断履歴なし");
+
+    const taskDragMoveDiagnostics = Array.isArray(this.plugin.settings.bridgeTaskDragMoveDiagnostics)
+      ? this.plugin.settings.bridgeTaskDragMoveDiagnostics
+      : [];
+    const latestTaskDragMoveDiagnostic = taskDragMoveDiagnostics[taskDragMoveDiagnostics.length - 1] || null;
+    new obsidian.Setting(el)
+      .setName("Task D&D Bridge診断")
+      .setDesc(latestTaskDragMoveDiagnostic
+        ? `${latestTaskDragMoveDiagnostic.recorded_at || "-"} / ${latestTaskDragMoveDiagnostic.phase || "-"} / entry_id ${latestTaskDragMoveDiagnostic.entry_id || "-"} / before ${JSON.stringify(latestTaskDragMoveDiagnostic.before_order_entry_ids || [])} / after ${JSON.stringify(latestTaskDragMoveDiagnostic.after_order_entry_ids || [])} / enqueue ${latestTaskDragMoveDiagnostic.enqueue_attempted ? latestTaskDragMoveDiagnostic.enqueue_result ? "成功" : "失敗" : `skip: ${latestTaskDragMoveDiagnostic.enqueue_skipped_reason || "-"}`}`
         : "診断履歴なし");
 
     const taskMovedSectionDiagnostics = Array.isArray(this.plugin.settings.taskMovedSectionDiagnostics)

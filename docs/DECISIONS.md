@@ -178,6 +178,12 @@
 - 根拠: inbound Ack recovery helpersとmobile rescue path。
 - 理由: terminal lifecycleやTaskMoved等を二重適用せず、cursor gapだけを解消するため。server状態を確認できないcold legacy caseは推測で進めない。
 
+## D-030: D&D reorderは操作境界でTaskMovedへhandoffする
+
+- 判断: 同一sectionのtask-row D&Dは、移動前entry順と保存後entry順が異なる場合だけ、保存後検証後にD&D専用sourceのTaskMoved v4を1件enqueueする。
+- 根拠: `buildBridgeTaskMovedV4ReorderDraft()`と`moveTaskByDrag()`。
+- 理由: Markdown change watcher全体をTaskMoved化すると他のmove経路と二重送信するため。D&D操作境界で明示的に捕捉し、no-opと他経路を分離する。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

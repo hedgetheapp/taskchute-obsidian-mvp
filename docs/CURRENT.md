@@ -3,14 +3,14 @@
 ## 調査基準
 
 - 調査日: 2026-08-15
-- manifest version: `0.6.58`
+- manifest version: `0.6.59`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: `v0.6.58` tag target
-- release tag: `v0.6.58`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
-- release準備開始時のworktree: `main.js`にv0.6.58候補の未commit差分あり
+- canonical docs checkpoint: `v0.6.59` tag target
+- release tag: `v0.6.59`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
+- release準備開始時のworktree: clean
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.58はinbound Ack / cursor recoveryを追加したBRAT実機試験用Prereleaseであり、Verified済み安定版ではない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.59は同一section D&Dのoutbound TaskMoved v4欠落を修正するBRAT実機試験用Prereleaseであり、Verified済み安定版ではない。
 
 ## 文書運用
 
@@ -37,6 +37,8 @@ v0.6.55公開後に`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`�
 v0.6.57では、Auto Flush実行中にenqueueされたeventのwake-up要求を保持し、終了後に送信可能なpending eventが残る場合だけ再scheduleする。synthetic scheduler checkは成功しているが、AF-LWU-01からAF-LWU-03の実Vault端末間試験は未実施である。
 
 v0.6.58では、inbound server Ackとlocal cursor persistenceを分離し、Ack済みeventをMarkdownへ再適用しないcursor-only reconciliation、bounded Ack retry、recoverable mobile rescueを追加した。ACK-CURSOR-GUARD-01、ACK-AMBIG-01、ACK-AUTH-01、CURSOR-GAP-01、CURSOR-MERGE-01、MOBILE-RESCUE-01相当のsynthetic / structural試験は成功しているが、実Vault / 実mobile試験は未実施である。
+
+v0.6.58実機試験ではAF-LWU-01がPASSした一方、TMV4-BASIC-01はdevのMarkdown並び替え成功後にTaskMovedが1件も生成されずFAILした。v0.6.59ではD&D操作の移動前entry順と保存後entry順を明示的に比較し、保存後検証成功後にD&D専用sourceでTaskMoved v4を1件enqueueする。v0.6.59 syntheticはPASSしているが、実Vault再試験は未実施である。
 
 ## 実装済み
 
@@ -79,9 +81,10 @@ v0.6.58では、inbound server Ackとlocal cursor persistenceを分離し、Ack�
 次はコード上は実装済みだが、現行HEADを対象とする統合試験結果がリポジトリに記録されていない。
 
 - v0.6.56 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
-- v0.6.57 Auto Flush lost wake-upのAF-LWU-01 / AF-LWU-02 / AF-LWU-03実Vault回帰。
+- v0.6.57 Auto Flush lost wake-upのAF-LWU-02 / AF-LWU-03実Vault回帰。AF-LWU-01はv0.6.58でPASS証跡あり。
 - v0.6.58 inbound Ack / cursor recoveryの実mobile回帰。
-- AF-LWU-01、TMV4-BASIC-01、TMV4-EMPTY-SOURCE-01のv0.6.58実Vault回帰。
+- TMV4-BASIC-01のv0.6.59実Vault再試験。v0.6.58ではoutbound D&D TaskMoved欠落によりFAIL。
+- TMV4-EMPTY-SOURCE-01のv0.6.59実Vault回帰。
 - v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の日付移動、section移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
@@ -112,12 +115,12 @@ v0.6.58では、inbound server Ackとlocal cursor persistenceを分離し、Ack�
 
 ## 現在確認できる問題点
 
-- 現行統合文書はv0.6.58へ整合したが、旧詳細資料には過去versionの記述が残る。
+- 現行統合文書はv0.6.59へ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。v0.6.58は実機試験用Prereleaseであり、本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。v0.6.59は実機試験用Prereleaseであり、本番可否は要確認。
 
 ## 将来候補・明示的対象外
 
