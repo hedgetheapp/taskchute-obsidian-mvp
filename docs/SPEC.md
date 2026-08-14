@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.55` / commit `ef857645f149158a9fa2021e9e7c2fe0ac160daf`を基準とする。v0.6.55は文書統合とmanifest version更新のみで、実行挙動はv0.6.54 / commit `f8842d0`と同一である。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.56`を基準とし、canonical docs checkpointは`c08bfca0b4fb7793eca1f096d7ae18c447ec01af`である。v0.6.56はdocs/release metadataのみのreleaseで、実行挙動はv0.6.54 / commit `f8842d0`と同一である。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -197,5 +197,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.55を本番版とみなす条件。
+- v0.6.56を本番版とみなす条件。
 - Widget、Watch、MCP/API、外部calendarの仕様。

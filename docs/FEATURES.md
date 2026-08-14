@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.55 / commit `ef857645f149158a9fa2021e9e7c2fe0ac160daf`の現行feature inventoryである。v0.6.55はdocs consolidation releaseであり、実行挙動はv0.6.54と同一である。
+この一覧はv0.6.56の現行feature inventoryであり、canonical docs checkpointは`c08bfca0b4fb7793eca1f096d7ae18c447ec01af`である。v0.6.56はdocs/release metadataのみのreleaseで、Bridge/runtime logicはv0.6.54と同一である。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.55で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.56で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 

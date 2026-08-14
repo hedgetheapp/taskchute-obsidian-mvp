@@ -3,20 +3,20 @@
 ## 調査基準
 
 - 調査日: 2026-08-14
-- manifest version: `0.6.55`
+- manifest version: `0.6.56`
 - branch: `feature/v6.6-routine-sync`
-- HEAD: `ef857645f149158a9fa2021e9e7c2fe0ac160daf`
-- tag: `v0.6.55`
+- canonical docs checkpoint: `c08bfca0b4fb7793eca1f096d7ae18c447ec01af`
+- release tag: `v0.6.56`（release commitはtag targetを参照）
 - 調査開始時のworktree: clean
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は上記commitの実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在と実機試験済みであることは分けて扱う。v0.6.55は文書統合releaseであり、`main.js`と`styles.css`の実行内容はv0.6.54と同一である。
+この文書は上記checkpointの実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在と実機試験済みであることは分けて扱う。v0.6.56はdocs/release metadataのみのreleaseであり、`main.js`と`styles.css`はv0.6.55から変更せず、Bridge/runtime logicはv0.6.54と同一である。
 
 ## 現在の開発状況
 
 アプリ本体とBridge同期は広範囲に実装済みである。Bridgeの基礎部分はv6.5 RC3でdev / remote / mobile三端末スモークを通過した記録がある。その後、v0.6.16以降にRoutine同期、Routine occurrence、TaskMoved v4、lifecycle identity、割り込みcontinuation、safe rekeyが追加された。
 
-v0.6.55で`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`、`DECISIONS.md`の5統合文書を追加した。本変更ではREADMEとdocs索引を現行入口へ更新し、実機保証状態を`TEST_MATRIX.md`へ分離する。v0.6.42からv0.6.54の個別試験結果にはrepository内で統合証跡になっていないものがあり、未確認項目は引き続き試験不足として扱う。
+v0.6.55公開後に`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`、`DECISIONS.md`、`TEST_MATRIX.md`の6文書をcanonical documentation baselineとして固定した。READMEとdocs索引も現行入口へ更新した。v0.6.56はこのbaselineとversion metadataをBRAT配布versionとして固定する。v0.6.42からv0.6.54の個別試験結果にはrepository内で統合証跡になっていないものがあり、未確認項目は引き続き試験不足として扱う。
 
 ## 実装済み
 
@@ -58,12 +58,12 @@ v0.6.55で`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`、`DECISI
 
 次はコード上は実装済みだが、現行HEADを対象とする統合試験結果がリポジトリに記録されていない。
 
-- v0.6.55 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
-- v0.6.48からv0.6.55をまとめた三端末full regression。
+- v0.6.56 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
+- v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の日付移動、section移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
 - Routine定義同期とRoutine occurrenceの三端末同時起動・オフライン復帰試験。
-- TaskCommentAdded、Section、Category / Area / Clientのv0.6.55上での回帰。
+- TaskCommentAdded、Section、Category / Area / Clientのv0.6.56上での回帰。
 - mobile長時間hidden、OS強制停止、通信断・圏外復帰。
 
 `docs/regression/試験チェックリスト_v6.6_Routine同期_v1.md`は全項目未チェックのため、コードが存在することだけをもって試験済みとは扱わない。
@@ -89,12 +89,12 @@ v0.6.55で`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`、`DECISI
 
 ## 現在確認できる問題点
 
-- 現行統合文書はv0.6.55へ整合したが、旧詳細資料には過去versionの記述が残る。
+- 現行統合文書はv0.6.56へ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。現行v0.6.55の本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。現行v0.6.56の本番可否は要確認。
 
 ## 将来候補・明示的対象外
 

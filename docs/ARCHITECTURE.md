@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.55 / commit `ef857645f149158a9fa2021e9e7c2fe0ac160daf`。v0.6.55では実行コードを変更していないため、runtime architectureはv0.6.54と同一である。
+調査基準: v0.6.56。canonical docs checkpointは`c08bfca0b4fb7793eca1f096d7ae18c447ec01af`。v0.6.56は実行コードを変更しないため、runtime architectureはv0.6.54と同一である。
 
 ## 1. 概要
 
@@ -27,7 +27,7 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。約53,147行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.55`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.56`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |

@@ -1,6 +1,6 @@
 # Documentation Index
 
-このディレクトリはTaskChute Obsidian MVPの現行仕様、実装状況、試験状態、履歴資料への入口である。現行基準はv0.6.55。実行挙動はv0.6.54と同一である。
+このディレクトリはTaskChute Obsidian MVPの現行仕様、実装状況、試験状態、履歴資料への入口である。現行基準はv0.6.56。Bridge/runtime logicはv0.6.54と同一である。
 
 ## Current Documentation
 
@@ -36,6 +36,7 @@ Bridge詳細資料には作成時点のversion固有記述が残る。現行統�
 
 ## Release Docs
 
+- [v0.6.56 BRAT Prerelease](release/v0.6.56.md)
 - [BRAT release operation](brat-release-operation.md)
 - [BRAT実機試験用 Release作成チェックリスト](release/BRAT実機試験用_Release作成チェックリスト_v6.6_Routine同期.md)
 - [v6.6 Routine Sync Test 1 release note](release/taskchute-bridge-v6.6-routine-sync-test-1.md)

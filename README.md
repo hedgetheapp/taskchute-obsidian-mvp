@@ -4,12 +4,13 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current release: `v0.6.55`
+- Current release: `v0.6.56`
 - Current branch: `feature/v6.6-routine-sync`
-- Release commit: `ef857645f149158a9fa2021e9e7c2fe0ac160daf`
+- Canonical docs checkpoint: `c08bfca0b4fb7793eca1f096d7ae18c447ec01af`
+- Release commit: Git tag `v0.6.56`のtargetを参照
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.55はdocs consolidation releaseです。`manifest.json`のversion更新と現行文書の追加を行い、`main.js`と`styles.css`の実行内容はv0.6.54から変更していません。
+v0.6.56はcanonical documentation baselineとversion metadataを固定するdocs-only releaseです。`main.js`と`styles.css`はv0.6.55から変更せず、Bridge/runtime logicはv0.6.54と同一です。
 
 ## Canonical Documentation
 
@@ -48,4 +49,3 @@ v0.6.55はdocs consolidation releaseです。`manifest.json`のversion更新と�
 - [v6.6 Routine同期 回帰手順](docs/regression/試験チェックリスト_v6.6_Routine同期_v1.md)
 
 配布・リリース手順は[BRAT release operation](docs/brat-release-operation.md)と[Release checklist](docs/release-checklist.md)を参照してください。
-
