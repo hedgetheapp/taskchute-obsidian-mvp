@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.59の現行feature inventoryである。v0.6.59は同一sectionのtask-row D&Dからoutbound TaskMoved v4へ接続する保存後検証済みhandoffを追加した実機試験用Prereleaseである。
+この一覧はv0.6.60の現行feature inventoryである。v0.6.60はcreate直後renameをpending TaskCreatedへmergeする経路と、送信snapshot中または既送信時にTaskUpdatedへhandoffする経路を分離した実機試験用Prereleaseである。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.59で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.60で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -97,13 +97,14 @@
 | 整合性診断 | 実装済み | folder、ID、frontmatter、duplicate、runtime等を検査。 |
 | one-click repair | 実装済み | backupとreportを作り、安全と判断した項目だけ修復。 |
 | error log管理 | 実装済み | Taskchute由来logの保存・cleanup・診断表示。 |
-| 自動テスト | 一部実装 | `tests/tmv4-basic-v0659.js`で同一section D&Dのv4 payload、no-op、単一enqueue、coalesce保持をsynthetic確認する。汎用test runnerと広範な自動回帰は未実装。 |
+| 自動テスト | 一部実装 | `tests/tmv4-basic-v0659.js`と`tests/taskcreated-rename-handoff-v0660.js`でD&D v4とcreate/rename handoffをfocused synthetic確認する。汎用test runnerと広範な自動回帰は未実装。 |
 
 ## Bridge
 
 | 機能 | 状態 | 概要・根拠 |
 |---|---|---|
 | outbound outbox | 実装済み | `data.json`へpending / failed / sent / supersededを保持。 |
+| TaskCreated直後rename handoff | 実装済み・実機未試験 | flush対象外のpending TaskCreatedへtitleをmergeする。送信snapshot対象中またはTaskCreated不在なら同一`task_id + entry_id`のTaskUpdatedを追加し、旧titleだけの送信を防ぐ。 |
 | auto flush | 実装済み・実機未試験 | debounce、batch、retry上限、startup option。実行中のenqueue要求を保持し、終了後に送信可能eventが残る場合だけ再scheduleする。 |
 | pending pull | 実装済み | `server_sequence` cursorから昇順取得する。 |
 | inbound registry | 実装済み | eventごとにapply・verify・Ack guardを登録。 |

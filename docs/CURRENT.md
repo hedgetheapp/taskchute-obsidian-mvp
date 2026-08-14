@@ -3,14 +3,14 @@
 ## 調査基準
 
 - 調査日: 2026-08-15
-- manifest version: `0.6.59`
+- manifest version: `0.6.60`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: `v0.6.59` tag target
-- release tag: `v0.6.59`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
+- canonical docs checkpoint: `v0.6.60` tag target
+- release tag: `v0.6.60`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
 - release準備開始時のworktree: clean
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.59は同一section D&Dのoutbound TaskMoved v4欠落を修正するBRAT実機試験用Prereleaseであり、Verified済み安定版ではない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.60はcreate直後renameと送信中TaskCreated snapshotの競合を修正するBRAT実機試験用Prereleaseであり、Verified済み安定版ではない。
 
 ## 文書運用
 
@@ -39,6 +39,8 @@ v0.6.57では、Auto Flush実行中にenqueueされたeventのwake-up要求を�
 v0.6.58では、inbound server Ackとlocal cursor persistenceを分離し、Ack済みeventをMarkdownへ再適用しないcursor-only reconciliation、bounded Ack retry、recoverable mobile rescueを追加した。ACK-CURSOR-GUARD-01、ACK-AMBIG-01、ACK-AUTH-01、CURSOR-GAP-01、CURSOR-MERGE-01、MOBILE-RESCUE-01相当のsynthetic / structural試験は成功しているが、実Vault / 実mobile試験は未実施である。
 
 v0.6.58実機試験ではAF-LWU-01がPASSした一方、TMV4-BASIC-01はdevのMarkdown並び替え成功後にTaskMovedが1件も生成されずFAILした。v0.6.59ではD&D操作の移動前entry順と保存後entry順を明示的に比較し、保存後検証成功後にD&D専用sourceでTaskMoved v4を1件enqueueする。v0.6.59 syntheticはPASSしているが、実Vault再試験は未実施である。
+
+v0.6.59実機試験では、空sectionへ`task-insert-section-top`で作成した`T-0593 / E-20260815-0011`を即renameした際、D1にはseq 2184 TaskCreated（title=`新規タスク`）だけが到達し、TaskUpdatedは0件だった。`task-insert-below`のT-0594 / T-0595はTaskUpdatedまでremote / mobile appliedだった。調査により、Auto Flushが保持するTaskCreated送信snapshotと元outboxのpending表示が分離し、snapshot refresh後のrenameが元eventへのmerge成功扱いでTaskUpdatedを省略できる競合を確認した。v0.6.60はflush対象event IDをruntimeで追跡し、対象中TaskCreatedのrenameをTaskUpdatedへhandoffする。focused syntheticはPASSしているが、実Vault再試験は未実施である。
 
 ## 実装済み
 
@@ -83,8 +85,9 @@ v0.6.58実機試験ではAF-LWU-01がPASSした一方、TMV4-BASIC-01はdevのMa
 - v0.6.56 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
 - v0.6.57 Auto Flush lost wake-upのAF-LWU-02 / AF-LWU-03実Vault回帰。AF-LWU-01はv0.6.58でPASS証跡あり。
 - v0.6.58 inbound Ack / cursor recoveryの実mobile回帰。
-- TMV4-BASIC-01のv0.6.59実Vault再試験。v0.6.58ではoutbound D&D TaskMoved欠落によりFAIL。
-- TMV4-EMPTY-SOURCE-01のv0.6.59実Vault回帰。
+- 空sectionへの先頭task作成直後renameのv0.6.60実Vault再試験。v0.6.59ではTaskUpdated handoff欠落によりFAIL。
+- TMV4-BASIC-01のv0.6.60実Vault再試験。v0.6.58ではoutbound D&D TaskMoved欠落によりFAILし、v0.6.59試験はcreate/rename障害で前提を満たせなかった。
+- TMV4-EMPTY-SOURCE-01のv0.6.60実Vault回帰。
 - v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の日付移動、section移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
@@ -99,7 +102,7 @@ v0.6.58実機試験ではAF-LWU-01がPASSした一方、TMV4-BASIC-01はdevのMa
 - `main.js:17348`に旧Routine duplicate guardが`if (false && ...)`として残る。到達不能だが削除されていない。
 - `TaskLinksModal` (`main.js:7579`) は定義以外の参照が見つからない。現在のリンクUIはpopover / menu経路を使用しているため、未使用候補。削除可否は要確認。
 - v6.6の旧詳細仕様・引継ぎ・回帰チェックリストはv0.6.16からv0.6.17時点の記述を含む。現行統合文書と併読する場合はHistorical資料として扱う。
-- 自動テスト基盤が存在しない。確認可能なtestファイルはリリース文書と手動回帰チェックリストのみ。
+- 汎用自動テスト基盤は存在しない。`tests/`にはv0.6.59 TaskMoved D&Dとv0.6.60 create/rename handoffのfocused Node testだけがある。
 - `projectNoteMeta`は名前キー中心の互換層を残す。`project_id`中心への全面移行は未実装と既存docsに記載されている。
 
 ## TODO
@@ -115,12 +118,12 @@ v0.6.58実機試験ではAF-LWU-01がPASSした一方、TMV4-BASIC-01はdevのMa
 
 ## 現在確認できる問題点
 
-- 現行統合文書はv0.6.59へ整合したが、旧詳細資料には過去versionの記述が残る。
+- 現行統合文書はv0.6.60へ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。v0.6.59は実機試験用Prereleaseであり、本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。v0.6.60は実機試験用Prereleaseであり、本番可否は要確認。
 
 ## 将来候補・明示的対象外
 

@@ -32,6 +32,7 @@ const BRIDGE_DIAGNOSTICS_RETENTION_V1 = Object.freeze({
   maxEntries: Object.freeze({
     bridgeInboundAutoApplyRuntimeDiagnostics: 1000,
     bridgeTaskDragMoveDiagnostics: 120,
+    bridgeTaskCreatedRenameHandoffDiagnostics: 120,
     taskMovedOrderDiagnostics: 120,
     taskCreatedOrderDiagnostics: 80,
     taskMovedSectionDiagnostics: 120,
@@ -135,6 +136,7 @@ const DEFAULT_SETTINGS = {
   bridgeTaskCreatedLastRenameMergeTaskId: "",
   bridgeTaskCreatedLastRenameMergeEntryId: "",
   bridgeTaskCreatedLastFinalTitleSummary: "",
+  bridgeTaskCreatedRenameHandoffDiagnostics: [],
   bridgeTaskCreatedTimeMergeCount: 0,
   bridgeTaskCreatedLastTimeMergeTaskId: "",
   bridgeTaskCreatedLastTimeMergeEntryId: "",
@@ -1809,6 +1811,65 @@ function normalizeBridgeOutboxEvents(events) {
       superseded_by_event_id: String(src.superseded_by_event_id || "").trim()
     };
   }).filter(item => item.event_id);
+}
+function buildBridgeTaskCreatedRenameHandoffPlan(events, input = {}) {
+  const taskId = String(input.task_id || input.taskId || "").trim();
+  const entryId = String(input.entry_id || input.entryId || "").trim();
+  const title = String(input.title || "").trim();
+  const file = String(input.file || input.fileBase || input.file_base || "").trim();
+  const inFlightEventIds = new Set((Array.isArray(input.in_flight_event_ids) ? input.in_flight_event_ids : input.inFlightEventIds instanceof Set ? Array.from(input.inFlightEventIds) : [])
+    .map(value => String(value || "").trim()).filter(Boolean));
+  const normalized = normalizeBridgeOutboxEvents(events);
+  if (!taskId || !entryId || !title) {
+    return { ok: false, decision: "identity_or_title_missing", mergedCount: 0, matchingCount: 0, inFlightCount: 0, requiresTaskUpdated: false, events: normalized };
+  }
+  const matching = normalized.filter(event => {
+    if (!["pending", "failed"].includes(event.status) || event.event_type !== "TaskCreated") return false;
+    const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+    return String(payload.task_id || "").trim() === taskId && String(payload.entry_id || "").trim() === entryId;
+  });
+  const inFlightCount = matching.filter(event => inFlightEventIds.has(String(event.event_id || "").trim())).length;
+  if (inFlightCount > 0) {
+    return {
+      ok: true,
+      decision: "taskupdated_required_in_flight_taskcreated",
+      mergedCount: 0,
+      matchingCount: matching.length,
+      inFlightCount,
+      requiresTaskUpdated: true,
+      events: normalized
+    };
+  }
+  if (!matching.length) {
+    return { ok: true, decision: "taskupdated_required_no_pending_taskcreated", mergedCount: 0, matchingCount: 0, inFlightCount: 0, requiresTaskUpdated: true, events: normalized };
+  }
+  const matchingIds = new Set(matching.map(event => event.event_id));
+  const next = normalized.map(event => {
+    if (!matchingIds.has(event.event_id)) return event;
+    const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+    const after = payload.after && typeof payload.after === "object" && !Array.isArray(payload.after)
+      ? Object.assign({}, payload.after, { title })
+      : null;
+    return Object.assign({}, event, {
+      status: "pending",
+      retry_count: 0,
+      last_error: "",
+      payload: Object.assign({}, payload, {
+        title,
+        ...(file ? { file } : {}),
+        ...(after ? { after } : {})
+      })
+    });
+  });
+  return {
+    ok: true,
+    decision: "merged_into_pending_taskcreated",
+    mergedCount: matching.length,
+    matchingCount: matching.length,
+    inFlightCount: 0,
+    requiresTaskUpdated: false,
+    events: next
+  };
 }
 function normalizeBridgeUtcIso(value) {
   const raw = String(value || "").trim();
@@ -10571,6 +10632,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.bridgeAutoFlushRescheduleRequested = false;
       this.bridgeAutoFlushRescheduleReason = "";
       this.bridgeOutboxMutationQueue = Promise.resolve();
+      this.bridgeOutboxFlushTargetEventIds = new Set();
       this.bridgeTaskTitleCommitQueues = new Map();
       this.pluginDataSaveQueue = Promise.resolve();
       if (this.bridgeInboundAutoApplyDefaultMigrationPending) {
@@ -11108,6 +11170,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.settings.taskCreatedOrderDiagnostics = limitBridgeDiagnosticArrayProtectedAware(this.settings.taskCreatedOrderDiagnostics, "taskCreatedOrderDiagnostics", this.settings);
     this.settings.taskMovedOrderDiagnostics = limitBridgeDiagnosticArrayProtectedAware(this.settings.taskMovedOrderDiagnostics, "taskMovedOrderDiagnostics", this.settings);
     this.settings.bridgeTaskDragMoveDiagnostics = limitBridgeDiagnosticArrayProtectedAware(this.settings.bridgeTaskDragMoveDiagnostics, "bridgeTaskDragMoveDiagnostics", this.settings);
+    this.settings.bridgeTaskCreatedRenameHandoffDiagnostics = limitBridgeDiagnosticArrayProtectedAware(this.settings.bridgeTaskCreatedRenameHandoffDiagnostics, "bridgeTaskCreatedRenameHandoffDiagnostics", this.settings);
     this.settings.bridgeAutoFlushEnabled = !!this.settings.bridgeAutoFlushEnabled;
     this.settings.bridgeAutoFlushOnStartup = !!this.settings.bridgeAutoFlushOnStartup;
     this.settings.bridgeAutoFlushDelayMs = normalizeBridgeAutoFlushMs(this.settings.bridgeAutoFlushDelayMs, 3000, 0, 300000);
@@ -15869,34 +15932,41 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!taskId || !entryId || !nextTitle) return { mergedCount: 0 };
     return await this.runBridgeOutboxMutation(async () => {
       const current = normalizeBridgeOutboxEvents(this.settings && this.settings.bridgeOutboxEvents);
-      let mergedCount = 0;
-      const next = current.map(event => {
-        if (!["pending", "failed"].includes(event.status) || event.event_type !== "TaskCreated") return event;
-        const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
-        if (String(payload.task_id || "").trim() !== taskId || String(payload.entry_id || "").trim() !== entryId) return event;
-        mergedCount += 1;
-        const after = payload.after && typeof payload.after === "object" && !Array.isArray(payload.after)
-          ? Object.assign({}, payload.after, { title: nextTitle })
-          : null;
-        return Object.assign({}, event, {
-          status: "pending",
-          retry_count: 0,
-          last_error: "",
-          payload: Object.assign({}, payload, {
-            title: nextTitle,
-            ...(nextFile ? { file: nextFile } : {}),
-            ...(after ? { after } : {})
-          })
-        });
+      const plan = buildBridgeTaskCreatedRenameHandoffPlan(current, {
+        task_id: taskId,
+        entry_id: entryId,
+        title: nextTitle,
+        file: nextFile,
+        inFlightEventIds: this.bridgeOutboxFlushTargetEventIds
       });
-      if (!mergedCount) return { mergedCount: 0 };
+      const diagnostics = Array.isArray(this.settings.bridgeTaskCreatedRenameHandoffDiagnostics)
+        ? this.settings.bridgeTaskCreatedRenameHandoffDiagnostics : [];
+      this.settings.bridgeTaskCreatedRenameHandoffDiagnostics = limitBridgeDiagnosticArrayProtectedAware(diagnostics.concat({
+        recorded_at: nowIso(),
+        phase: "rename_handoff_planned",
+        task_id: taskId,
+        entry_id: entryId,
+        title: nextTitle,
+        matching_taskcreated_count: Math.max(0, Number(plan.matchingCount || 0)),
+        in_flight_taskcreated_count: Math.max(0, Number(plan.inFlightCount || 0)),
+        merged_taskcreated_count: Math.max(0, Number(plan.mergedCount || 0)),
+        taskupdated_required: !!plan.requiresTaskUpdated,
+        decision: String(plan.decision || "unknown")
+      }), "bridgeTaskCreatedRenameHandoffDiagnostics", this.settings);
+      if (!plan.mergedCount) return {
+        mergedCount: 0,
+        inFlightCount: Math.max(0, Number(plan.inFlightCount || 0)),
+        matchingCount: Math.max(0, Number(plan.matchingCount || 0)),
+        requiresTaskUpdated: !!plan.requiresTaskUpdated,
+        decision: String(plan.decision || "")
+      };
       const previousEvents = this.settings.bridgeOutboxEvents;
       const previousCount = Math.max(0, Number(this.settings.bridgeTaskCreatedRenameMergeCount || 0));
       const previousTaskId = String(this.settings.bridgeTaskCreatedLastRenameMergeTaskId || "");
       const previousEntryId = String(this.settings.bridgeTaskCreatedLastRenameMergeEntryId || "");
       const previousTitle = String(this.settings.bridgeTaskCreatedLastFinalTitleSummary || "");
-      this.settings.bridgeOutboxEvents = next;
-      this.settings.bridgeTaskCreatedRenameMergeCount = previousCount + mergedCount;
+      this.settings.bridgeOutboxEvents = plan.events;
+      this.settings.bridgeTaskCreatedRenameMergeCount = previousCount + plan.mergedCount;
       this.settings.bridgeTaskCreatedLastRenameMergeTaskId = taskId;
       this.settings.bridgeTaskCreatedLastRenameMergeEntryId = entryId;
       this.settings.bridgeTaskCreatedLastFinalTitleSummary = nextTitle;
@@ -15904,7 +15974,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         const saved = await this.savePluginData({ deviceWriterOperation: "bridge-task-created-rename-merge" });
         if (saved !== false) {
           this.setBridgeTaskCreatedPrerequisiteBlocked(taskId, entryId, false);
-          return { mergedCount };
+          this.scheduleBridgeAutoFlush({ reason: "task-created-rename-merged" });
+          return { mergedCount: plan.mergedCount, inFlightCount: 0, matchingCount: plan.matchingCount, requiresTaskUpdated: false, decision: plan.decision };
         }
       } catch (e) {}
       this.settings.bridgeOutboxEvents = previousEvents;
@@ -15924,7 +15995,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         flush_stopped: false
       });
       this.setBridgeTaskCreatedPrerequisiteBlocked(taskId, entryId, true);
-      return { mergedCount: 0, failed: true };
+      return { mergedCount: 0, failed: true, inFlightCount: 0, matchingCount: plan.matchingCount, requiresTaskUpdated: false, decision: "taskcreated_merge_save_failed" };
     });
   }
 
@@ -25028,11 +25099,13 @@ class TaskchutePlugin extends obsidian.Plugin {
     let fields = Array.from(new Set((Array.isArray(changedFields) ? changedFields : [])
       .map(field => String(field || "").trim())
       .filter(Boolean)));
+    let titleHandoff = null;
     if (!fields.length) return false;
     if (!(await this.ensureBridgeAttributeDefinitionsBeforeTaskEvent(task, fields, afterOverrides))) return false;
     if (fields.includes("title")) {
       const title = String(afterOverrides && afterOverrides.title || task && task.title || "").trim();
       const merged = await this.mergeBridgePendingTaskCreatedRename(task, title);
+      titleHandoff = merged && typeof merged === "object" ? merged : null;
       if (merged && merged.failed) {
         try { await this.savePluginData({ deviceWriterOperation: "bridge-task-created-rename-merge-failed-diagnostic" }); } catch (e) {}
         return false;
@@ -25110,6 +25183,20 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.settings.bridgeLastTaskUpdatedEnqueueMessage = String(message || "TaskUpdatedをoutboxへ追加できませんでした。");
       this.settings.bridgeLastTaskUpdatedEventId = eventId;
       this.settings.bridgeLastTaskUpdatedChangedFields = fields;
+      if (titleHandoff) {
+        const diagnostics = Array.isArray(this.settings.bridgeTaskCreatedRenameHandoffDiagnostics)
+          ? this.settings.bridgeTaskCreatedRenameHandoffDiagnostics : [];
+        this.settings.bridgeTaskCreatedRenameHandoffDiagnostics = limitBridgeDiagnosticArrayProtectedAware(diagnostics.concat({
+          recorded_at: nowIso(),
+          phase: "rename_taskupdated_enqueue_failed",
+          task_id: taskId,
+          entry_id: entryId,
+          title: String(afterOverrides && afterOverrides.title || task && task.title || "").trim(),
+          taskupdated_event_id: eventId,
+          decision: String(titleHandoff.decision || "taskupdated_required"),
+          reason: String(message || "TaskUpdated enqueue failed")
+        }), "bridgeTaskCreatedRenameHandoffDiagnostics", this.settings);
+      }
       if (routineOccurrenceFields.routine_id || routineOccurrenceFields.routine_occurrence_key) {
         this.recordRoutineOccurrenceSyncDiagnostic("routine_occurrence_update_enqueue_skipped", Object.assign({
           task,
@@ -25160,6 +25247,22 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.settings.bridgeLastTaskUpdatedChangedFields = fields;
       const saved = await this.appendBridgeOutboxEvent(event, { deviceWriterOperation: "bridge-task-updated-enqueue" });
       if (saved === false) return await recordFailure("TaskUpdatedをoutboxへ保存できませんでした。");
+      if (titleHandoff && fields.includes("title")) {
+        const diagnostics = Array.isArray(this.settings.bridgeTaskCreatedRenameHandoffDiagnostics)
+          ? this.settings.bridgeTaskCreatedRenameHandoffDiagnostics : [];
+        this.settings.bridgeTaskCreatedRenameHandoffDiagnostics = limitBridgeDiagnosticArrayProtectedAware(diagnostics.concat({
+          recorded_at: nowIso(),
+          phase: "rename_taskupdated_enqueued",
+          task_id: taskId,
+          entry_id: entryId,
+          title: String(event.payload && event.payload.after && event.payload.after.title || "").trim(),
+          taskupdated_event_id: eventId,
+          decision: String(titleHandoff.decision || "taskupdated_required"),
+          identity_preserved: String(event.payload && event.payload.task_id || "").trim() === taskId
+            && String(event.payload && event.payload.entry_id || "").trim() === entryId
+        }), "bridgeTaskCreatedRenameHandoffDiagnostics", this.settings);
+        await this.savePluginData({ deviceWriterOperation: "bridge-task-created-rename-handoff-diagnostic" });
+      }
       this.scheduleBridgeAutoFlush({ reason: "task-updated-enqueued" });
       return true;
     } catch (e) {
@@ -26264,6 +26367,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       event.status === "pending"
       || (event.status === "failed" && Math.max(0, Number(event.retry_count || 0)) < maxRetryCount)
     ).slice(0, maxBatchSize);
+    const flushTargetEventIds = new Set(targets.map(event => String(event && event.event_id || "").trim()).filter(Boolean));
+    this.bridgeOutboxFlushTargetEventIds = flushTargetEventIds;
     let sentCount = 0;
     let failedCount = 0;
     let supersededCount = Math.max(0, Number(preDrainCoalesce && preDrainCoalesce.supersededCount || 0));
@@ -26676,36 +26781,40 @@ class TaskchutePlugin extends obsidian.Plugin {
     } finally {
       const sentEventIds = new Set(targets.filter(event => event.status === "sent").map(event => event.event_id));
       const targetResults = new Map(targets.map(event => [event.event_id, event]));
-      await this.runBridgeOutboxMutation(async () => {
-        const current = normalizeBridgeOutboxEvents(this.settings.bridgeOutboxEvents);
-        this.settings.bridgeOutboxEvents = current
-          .filter(event => !sentEventIds.has(event.event_id))
-          .map(event => {
-            const result = targetResults.get(event.event_id);
-            if (!result || !["failed", "superseded"].includes(result.status)) return event;
-            return Object.assign({}, event, {
-              status: result.status,
-              retry_count: result.retry_count,
-              last_error: result.last_error,
-              payload: result.payload,
-              superseded_at: result.superseded_at,
-              superseded_by_event_id: result.superseded_by_event_id
+      try {
+        await this.runBridgeOutboxMutation(async () => {
+          const current = normalizeBridgeOutboxEvents(this.settings.bridgeOutboxEvents);
+          this.settings.bridgeOutboxEvents = current
+            .filter(event => !sentEventIds.has(event.event_id))
+            .map(event => {
+              const result = targetResults.get(event.event_id);
+              if (!result || !["failed", "superseded"].includes(result.status)) return event;
+              return Object.assign({}, event, {
+                status: result.status,
+                retry_count: result.retry_count,
+                last_error: result.last_error,
+                payload: result.payload,
+                superseded_at: result.superseded_at,
+                superseded_by_event_id: result.superseded_by_event_id
+              });
             });
-          });
-        this.settings.bridgeApiBaseUrl = baseUrl;
-        this.settings.bridgeOutboxSentCount = Math.max(0, Number(this.settings.bridgeOutboxSentCount || 0)) + sentEventIds.size;
-        this.settings.bridgeOutboxLastFlushAt = nowIso();
-        this.settings.bridgeOutboxLastFlushOk = ok;
-        this.settings.bridgeOutboxLastFlushMessage = message;
-        this.settings.bridgeOutboxLastFlushSentCount = sentCount;
-        this.settings.bridgeOutboxLastFlushFailedCount = failedCount;
-        this.settings.bridgeTaskMovedSupersededCount = Math.max(0, Number(this.settings.bridgeTaskMovedSupersededCount || 0))
-          + Math.max(0, supersededCount - Math.max(0, Number(preDrainCoalesce && preDrainCoalesce.supersededCount || 0)));
-        this.settings.bridgeOutboxLastFlushFinishedAt = nowIso();
-        if (skippedReason) this.settings.bridgeOutboxLastFlushSkippedReason = skippedReason;
-        this.settings.bridgeOutboxFlushInProgress = false;
-        await this.savePluginData({ deviceWriterOperation: "bridge-outbox-flush-test-result" });
-      });
+          this.settings.bridgeApiBaseUrl = baseUrl;
+          this.settings.bridgeOutboxSentCount = Math.max(0, Number(this.settings.bridgeOutboxSentCount || 0)) + sentEventIds.size;
+          this.settings.bridgeOutboxLastFlushAt = nowIso();
+          this.settings.bridgeOutboxLastFlushOk = ok;
+          this.settings.bridgeOutboxLastFlushMessage = message;
+          this.settings.bridgeOutboxLastFlushSentCount = sentCount;
+          this.settings.bridgeOutboxLastFlushFailedCount = failedCount;
+          this.settings.bridgeTaskMovedSupersededCount = Math.max(0, Number(this.settings.bridgeTaskMovedSupersededCount || 0))
+            + Math.max(0, supersededCount - Math.max(0, Number(preDrainCoalesce && preDrainCoalesce.supersededCount || 0)));
+          this.settings.bridgeOutboxLastFlushFinishedAt = nowIso();
+          if (skippedReason) this.settings.bridgeOutboxLastFlushSkippedReason = skippedReason;
+          this.settings.bridgeOutboxFlushInProgress = false;
+          await this.savePluginData({ deviceWriterOperation: "bridge-outbox-flush-test-result" });
+        });
+      } finally {
+        if (this.bridgeOutboxFlushTargetEventIds === flushTargetEventIds) this.bridgeOutboxFlushTargetEventIds = new Set();
+      }
       if (this.bridgeAutoFlushRescheduleRequested && !this.bridgeAutoFlushRunActive) {
         this.finishBridgeAutoFlushRun("outbox-flush-finished");
       }
@@ -53087,6 +53196,9 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
     const bridgeTaskCreatedLastRenameMergeTaskId = String(this.plugin.settings.bridgeTaskCreatedLastRenameMergeTaskId || "").trim();
     const bridgeTaskCreatedLastRenameMergeEntryId = String(this.plugin.settings.bridgeTaskCreatedLastRenameMergeEntryId || "").trim();
     const bridgeTaskCreatedLastFinalTitleSummary = String(this.plugin.settings.bridgeTaskCreatedLastFinalTitleSummary || "").trim();
+    const bridgeTaskCreatedRenameHandoffDiagnostics = Array.isArray(this.plugin.settings.bridgeTaskCreatedRenameHandoffDiagnostics)
+      ? this.plugin.settings.bridgeTaskCreatedRenameHandoffDiagnostics : [];
+    const latestBridgeTaskCreatedRenameHandoffDiagnostic = bridgeTaskCreatedRenameHandoffDiagnostics[bridgeTaskCreatedRenameHandoffDiagnostics.length - 1] || null;
     const bridgeTaskCreatedTimeMergeCount = Math.max(0, Number(this.plugin.settings.bridgeTaskCreatedTimeMergeCount || 0));
     const bridgeTaskCreatedLastTimeMergeTaskId = String(this.plugin.settings.bridgeTaskCreatedLastTimeMergeTaskId || "").trim();
     const bridgeTaskCreatedLastTimeMergeEntryId = String(this.plugin.settings.bridgeTaskCreatedLastTimeMergeEntryId || "").trim();
@@ -53186,6 +53298,7 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
               taskcreated_last_rename_merge_task_id: bridgeTaskCreatedLastRenameMergeTaskId || null,
               taskcreated_last_rename_merge_entry_id: bridgeTaskCreatedLastRenameMergeEntryId || null,
               taskcreated_last_final_title_summary: bridgeTaskCreatedLastFinalTitleSummary || null,
+              taskcreated_rename_handoff_latest: latestBridgeTaskCreatedRenameHandoffDiagnostic,
               taskcreated_time_merge_count: bridgeTaskCreatedTimeMergeCount,
               taskcreated_last_time_merge_task_id: bridgeTaskCreatedLastTimeMergeTaskId || null,
               taskcreated_last_time_merge_entry_id: bridgeTaskCreatedLastTimeMergeEntryId || null,
@@ -53259,6 +53372,12 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(el)
       .setName("TaskCreated rename merge診断")
       .setDesc(`pending TaskCreatedへのmerge ${bridgeTaskCreatedRenameMergeCount}件 / task_id ${bridgeTaskCreatedLastRenameMergeTaskId || "-"} / entry_id ${bridgeTaskCreatedLastRenameMergeEntryId || "-"} / 最終title ${bridgeTaskCreatedLastFinalTitleSummary || "-"}`);
+
+    new obsidian.Setting(el)
+      .setName("TaskCreated rename handoff診断")
+      .setDesc(latestBridgeTaskCreatedRenameHandoffDiagnostic
+        ? `${latestBridgeTaskCreatedRenameHandoffDiagnostic.recorded_at || "-"} / ${latestBridgeTaskCreatedRenameHandoffDiagnostic.phase || "-"} / task_id ${latestBridgeTaskCreatedRenameHandoffDiagnostic.task_id || "-"} / entry_id ${latestBridgeTaskCreatedRenameHandoffDiagnostic.entry_id || "-"} / decision ${latestBridgeTaskCreatedRenameHandoffDiagnostic.decision || "-"}`
+        : "診断履歴なし");
 
     new obsidian.Setting(el)
       .setName("Bridge時間フィールドmerge診断")

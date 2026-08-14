@@ -8,6 +8,35 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.60 - 2026-08-15
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- flush送信snapshot対象のTaskCreated event IDをruntimeで追跡するようにした。
+- create直後renameで、flush対象外のpending / retry可能failed TaskCreatedだけをtitle/file merge対象にした。
+- in-flight TaskCreatedまたはTaskCreated不在では、同一`task_id + entry_id`のTaskUpdatedを追加して旧titleだけの送信を防ぐようにした。
+- pending TaskCreatedへのrename merge後も既存Auto Flushをwakeするようにした。
+- rename handoffのplan、merge、TaskUpdated enqueue / failureをdiagnosticsへ追加した。
+- pending / in-flight / sent相当、3件連続identity、manual flush非依存のfocused synthetic testを追加した。
+- `manifest.json`を`0.6.60`へ更新した。
+
+### Verification
+
+- `node --check .\main.js`: OK
+- `git diff --check`: OK
+- TC-RENAME focused synthetic: PASS
+- TMV4-BASIC-01 synthetic: PASS
+- v0.6.60実Vault create→rename / TMV4-BASIC-01: `NOT_VERIFIED`
+
+Tag: `v0.6.60`
+GitHub Release: [v0.6.60 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.60)
+Assets: `main.js`, `manifest.json`, `styles.css`
+Release notes: [`docs/release/v0.6.60.md`](docs/release/v0.6.60.md)
+
+---
+
 ## v0.6.59 - 2026-08-15
 
 Type: Runtime BRAT Prerelease for device testing
@@ -27,7 +56,8 @@ Type: Runtime BRAT Prerelease for device testing
 - `git diff --check`: OK
 - TMV4-BASIC-01 synthetic: PASS
 - TMV4 no-op / duplicate prevention synthetic: PASS
-- 実Vault TMV4-BASIC-01再試験: `NOT_VERIFIED`
+- TC-RENAME-SECTION-TOP-01: `FAIL`。T-0593 / E-20260815-0011のTaskCreated（seq 2184、旧title）だけがD1へ到達し、TaskUpdatedは0件。比較のinsert-below B/CはTaskUpdatedまでremote / mobile applied。
+- 実Vault TMV4-BASIC-01再試験: create/rename前提FAILのため`BLOCKED`。v0.6.60で再試験する。
 - AF-LWU-01 / TaskUpdated / inbound TaskMoved v4 / empty-source / Routine identity実機回帰: `NOT_VERIFIED`
 
 Tag: `v0.6.59`

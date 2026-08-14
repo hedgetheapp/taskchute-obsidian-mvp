@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.59`を基準とする。v0.6.59は同一sectionのtask-row D&Dからoutbound TaskMoved v4へのhandoffを修復した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.60`を基準とする。v0.6.60はcreate直後renameとin-flight TaskCreated送信snapshotのhandoff競合を修復した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -52,6 +52,8 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - task noteの既定pathは`Taskchute/Tasks/{file_base}.md`。
 - Bridge有効時はTaskCreatedをoutboxへ追加する。
 - TaskCreated未送信の高速更新は、可能な項目をpending TaskCreatedへmergeする。
+- rename時に同一identityのTaskCreatedが現在のflush送信snapshot対象なら、元outboxがpending表示でもmergeしない。同じ`task_id + entry_id`のTaskUpdatedを追加する。
+- TaskCreatedがflush対象外のpending / retry可能failedならtitleとfileをTaskCreatedへmergeし、既存Auto Flushをwakeする。TaskCreated不在は既送信相当としてTaskUpdatedを追加する。
 - inbound TaskCreatedは同じentry_idの複数行、または別task_idによるentry_id占有をcollisionとして未Ack停止する。
 
 ## 5. Task更新
@@ -207,5 +209,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.59を本番版とみなす条件。現状は同一section D&Dを含む実Vault / 実mobile未試験のPrereleaseである。
+- v0.6.60を本番版とみなす条件。現状はcreate直後renameと同一section D&Dを含む実Vault / 実mobile未試験のPrereleaseである。
 - Widget、Watch、MCP/API、外部calendarの仕様。

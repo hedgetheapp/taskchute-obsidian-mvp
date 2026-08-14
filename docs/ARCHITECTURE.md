@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.59。同一sectionのtask-row D&Dからoutbound TaskMoved v4への保存後検証済みhandoffを追加した実機試験用Prereleaseである。
+調査基準: v0.6.60。outbox上のTaskCreatedとflush送信snapshotを区別し、create直後renameをmergeまたはTaskUpdatedへ安全にhandoffする実機試験用Prereleaseである。
 
 ## 1. 概要
 
@@ -27,13 +27,14 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。約53,147行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.59`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.60`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
 | `tests/tmv4-basic-v0659.js` | Node標準機能だけで実行するTaskMoved v4同一section D&Dのfocused synthetic test。 |
+| `tests/taskcreated-rename-handoff-v0660.js` | pending / in-flight / sent相当のTaskCreated rename handoffを検証するfocused synthetic test。 |
 
-`src/`、`package.json`、bundler設定、汎用test runnerは存在しない。`tests/`にはv0.6.59で追加したfocused standalone testだけがある。
+`src/`、`package.json`、bundler設定、汎用test runnerは存在しない。`tests/`にはv0.6.59以降のfocused standalone testだけがある。
 
 ## 3. 使用技術
 
@@ -164,6 +165,8 @@ UI / command
 操作により順番は異なる。Bridge event payloadは可能な限り保存後Markdownからrefreshする。
 
 同一sectionのtask-row D&Dは、操作前Markdownからsource entry orderを保存し、移動後Markdownを書き込み、再読込したtarget entry orderとの一致を確認してからD&D専用TaskMoved v4を1件enqueueする。UIのdrop handlerは`moveTaskByDrag()`へ集約され、no-op orderは保存・enqueue前に除外する。
+
+TaskCreated送信時はoutboxからHTTP用snapshotを作り、そのevent ID集合をflush終了までruntimeで保持する。create直後renameは同一identityのTaskCreatedがこの集合に含まれなければoutboxへmergeし、含まれる場合またはTaskCreated不在ならTaskUpdatedをappendする。flush完了mutationは新規TaskUpdatedを保持したまま送信済みTaskCreatedだけを除去する。
 
 ### Inbound Bridge
 

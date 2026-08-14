@@ -184,6 +184,12 @@
 - 根拠: `buildBridgeTaskMovedV4ReorderDraft()`と`moveTaskByDrag()`。
 - 理由: Markdown change watcher全体をTaskMoved化すると他のmove経路と二重送信するため。D&D操作境界で明示的に捕捉し、no-opと他経路を分離する。
 
+## D-031: in-flight TaskCreatedへrenameをmergeしない
+
+- 判断: flush送信snapshot対象のTaskCreatedは、元outboxがpending表示でもrename merge対象外とし、同一`task_id + entry_id`のTaskUpdatedを追加する。flush対象外のpending / retry可能failedだけをmergeする。
+- 根拠: `buildBridgeTaskCreatedRenameHandoffPlan()`、`mergeBridgePendingTaskCreatedRename()`、`testBridgeOutboxFlush()`のtarget ID追跡。
+- 理由: flushはoutboxから送信snapshotを作るため、snapshot refresh後に元eventだけを書き換えても送信payloadへ反映されない。merge成功扱いでTaskUpdatedを省略すると旧titleだけがD1へ到達するため。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。
