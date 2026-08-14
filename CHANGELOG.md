@@ -8,6 +8,32 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.57 - 2026-08-14
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- Auto Flush実行中に到着したflush要求をpending wake-upとして保持するようにした。
+- 現在のflush終了後、送信可能なpending eventが残る場合だけdebounce / min intervalを守って再scheduleするようにした。
+- reschedule requested / executed / not-neededをdiagnosticsへ追加した。
+- max retry到達済みfailed eventやsuperseded eventだけでは再scheduleしない。
+- `manifest.json`を`0.6.57`へ更新した。
+
+### Verification
+
+- `node --check .\main.js`: OK
+- `git diff --check`: OK
+- scheduler helperによるAF-LWU-01 / AF-LWU-02 / AF-LWU-03相当のsynthetic check: OK
+- 実Vault端末間試験とAF-LWU-01実機確認: `NOT_VERIFIED`
+
+Tag: `v0.6.57`
+GitHub Release: [v0.6.57 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.57)
+Assets: `main.js`, `manifest.json`, `styles.css`
+Release notes: [`docs/release/v0.6.57.md`](docs/release/v0.6.57.md)
+
+---
+
 ## v0.6.56 - 2026-08-14
 
 Type: Docs-only BRAT Prerelease

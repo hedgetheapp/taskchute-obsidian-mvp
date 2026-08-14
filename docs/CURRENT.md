@@ -3,14 +3,14 @@
 ## 調査基準
 
 - 調査日: 2026-08-14
-- manifest version: `0.6.56`
+- manifest version: `0.6.57`
 - branch: `feature/v6.6-routine-sync`
 - canonical docs checkpoint: `c08bfca0b4fb7793eca1f096d7ae18c447ec01af`
-- release tag: `v0.6.56`（release commitはtag targetを参照）
+- release tag: `v0.6.57`（実機試験用Prerelease。release commitはtag targetを参照）
 - 調査開始時のworktree: clean
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は上記checkpointの実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在と実機試験済みであることは分けて扱う。v0.6.56はdocs/release metadataのみのreleaseであり、`main.js`と`styles.css`はv0.6.55から変更せず、Bridge/runtime logicはv0.6.54と同一である。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在と実機試験済みであることは分けて扱う。v0.6.57はv0.6.56へAuto Flush lost wake-up修正を追加した実機試験用Prereleaseであり、Verified済み安定版ではない。
 
 ## 文書運用
 
@@ -32,6 +32,8 @@ main反映、実装完了、syntax checkだけではVerifiedまたはReleasedと
 アプリ本体とBridge同期は広範囲に実装済みである。Bridgeの基礎部分はv6.5 RC3でdev / remote / mobile三端末スモークを通過した記録がある。その後、v0.6.16以降にRoutine同期、Routine occurrence、TaskMoved v4、lifecycle identity、割り込みcontinuation、safe rekeyが追加された。
 
 v0.6.55公開後に`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`、`DECISIONS.md`、`TEST_MATRIX.md`の6文書をcanonical documentation baselineとして固定した。READMEとdocs索引も現行入口へ更新した。v0.6.56はこのbaselineとversion metadataをBRAT配布versionとして固定する。v0.6.42からv0.6.54の個別試験結果にはrepository内で統合証跡になっていないものがあり、未確認項目は引き続き試験不足として扱う。
+
+v0.6.57では、Auto Flush実行中にenqueueされたeventのwake-up要求を保持し、終了後に送信可能なpending eventが残る場合だけ再scheduleする。synthetic scheduler checkは成功しているが、AF-LWU-01からAF-LWU-03の実Vault端末間試験は未実施である。
 
 ## 実装済み
 
@@ -74,6 +76,7 @@ v0.6.55公開後に`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`�
 次はコード上は実装済みだが、現行HEADを対象とする統合試験結果がリポジトリに記録されていない。
 
 - v0.6.56 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
+- v0.6.57 Auto Flush lost wake-upのAF-LWU-01 / AF-LWU-02 / AF-LWU-03実Vault回帰。
 - v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の日付移動、section移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
@@ -104,12 +107,12 @@ v0.6.55公開後に`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`�
 
 ## 現在確認できる問題点
 
-- 現行統合文書はv0.6.56へ整合したが、旧詳細資料には過去versionの記述が残る。
+- 現行統合文書はv0.6.57へ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。現行v0.6.56の本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。v0.6.57は実機試験用Prereleaseであり、本番可否は要確認。
 
 ## 将来候補・明示的対象外
 

@@ -2,7 +2,8 @@
 
 ## Current Baseline
 
-- Current release: `v0.6.56`.
+- Current release: `v0.6.57` BRAT Prerelease for device testing.
+- v0.6.57 adds the outbound Auto Flush lost wake-up fix. AF-LWU-01 through AF-LWU-03 remain `NOT_VERIFIED` until real Vault testing is recorded.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 

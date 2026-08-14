@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.56の現行feature inventoryであり、canonical docs checkpointは`c08bfca0b4fb7793eca1f096d7ae18c447ec01af`である。v0.6.56はdocs/release metadataのみのreleaseで、Bridge/runtime logicはv0.6.54と同一である。
+この一覧はv0.6.57の現行feature inventoryである。v0.6.57はv0.6.56を基準にAuto Flush lost wake-up修正を追加した実機試験用Prereleaseである。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.56で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.57で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -104,7 +104,7 @@
 | 機能 | 状態 | 概要・根拠 |
 |---|---|---|
 | outbound outbox | 実装済み | `data.json`へpending / failed / sent / supersededを保持。 |
-| auto flush | 実装済み | debounce、batch、retry上限、startup option。 |
+| auto flush | 実装済み・実機未試験 | debounce、batch、retry上限、startup option。実行中のenqueue要求を保持し、終了後に送信可能eventが残る場合だけ再scheduleする。 |
 | pending pull | 実装済み | `server_sequence` cursorから昇順取得する。 |
 | inbound registry | 実装済み | eventごとにapply・verify・Ack guardを登録。 |
 | post-save verification | 実装済み | Markdownやruntimeを再読込してからAckする。 |

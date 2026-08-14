@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.56。canonical docs checkpointは`c08bfca0b4fb7793eca1f096d7ae18c447ec01af`。v0.6.56は実行コードを変更しないため、runtime architectureはv0.6.54と同一である。
+調査基準: v0.6.57。v0.6.56を基準にoutbound Auto Flushのpending wake-up / reschedule制御を追加した実機試験用Prereleaseである。
 
 ## 1. 概要
 
@@ -156,6 +156,8 @@ UI / command
   -> runtime / index / viewを更新
   -> Bridge eventをoutboxへenqueue
   -> optional auto flush
+  -> active flush中ならpending wake-upを保持
+  -> flush終了後に送信可能eventが残る場合だけ再schedule
 ```
 
 操作により順番は異なる。Bridge event payloadは可能な限り保存後Markdownからrefreshする。

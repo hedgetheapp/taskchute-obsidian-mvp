@@ -4,13 +4,13 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current release: `v0.6.56`
+- Current release: `v0.6.57` BRAT Prerelease
 - Current branch: `feature/v6.6-routine-sync`
 - Canonical docs checkpoint: `c08bfca0b4fb7793eca1f096d7ae18c447ec01af`
-- Release commit: Git tag `v0.6.56`のtargetを参照
+- Release commit: Git tag `v0.6.57`のtargetを参照
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.56はcanonical documentation baselineとversion metadataを固定するdocs-only releaseです。`main.js`と`styles.css`はv0.6.55から変更せず、Bridge/runtime logicはv0.6.54と同一です。
+v0.6.57はAuto Flush実行中のenqueue要求を終了後の再scheduleへ引き継ぐlost wake-up修正版です。実Vault端末間試験前のBRAT Prereleaseであり、Verified済み安定版ではありません。
 
 ## Canonical Documentation
 

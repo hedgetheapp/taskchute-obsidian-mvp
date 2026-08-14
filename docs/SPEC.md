@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.56`を基準とし、canonical docs checkpointは`c08bfca0b4fb7793eca1f096d7ae18c447ec01af`である。v0.6.56はdocs/release metadataのみのreleaseで、実行挙動はv0.6.54 / commit `f8842d0`と同一である。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.57`を基準とする。v0.6.57はv0.6.56へAuto Flush lost wake-up修正を追加した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -162,6 +162,9 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - auto flushまたは手動flushが`POST /events`へ送る。
 - retry上限、batch上限、debounce、coalesce、supersedeを持つ。
 - 送信前にVault / settingsを再読込してpayloadをrefreshするイベントがある。
+- auto flush実行中の新しいflush要求は破棄せずpending wake-upとして保持する。
+- active flush終了後、送信可能なpending eventが残る場合だけdebounceとmin intervalを守って再scheduleする。
+- max retry到達済みfailed eventまたはsuperseded eventだけが残る場合は再scheduleしない。
 
 ### 受信
 
@@ -197,5 +200,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.56を本番版とみなす条件。
+- v0.6.57を本番版とみなす条件。現状は実Vault未試験のPrereleaseである。
 - Widget、Watch、MCP/API、外部calendarの仕様。

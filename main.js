@@ -196,6 +196,14 @@ const DEFAULT_SETTINGS = {
   bridgeAutoFlushLastTriggeredAt: "",
   bridgeAutoFlushLastSkippedReason: "",
   bridgeAutoFlushLastResultMessage: "",
+  bridgeAutoFlushRescheduleRequestedCount: 0,
+  bridgeAutoFlushRescheduleExecutedCount: 0,
+  bridgeAutoFlushRescheduleNotNeededCount: 0,
+  bridgeAutoFlushLastRescheduleRequestedAt: "",
+  bridgeAutoFlushLastRescheduleExecutedAt: "",
+  bridgeAutoFlushLastRescheduleNotNeededAt: "",
+  bridgeAutoFlushLastRescheduleReason: "",
+  bridgeAutoFlushLastRescheduleDecision: "",
   bridgeInboundDryRunLastFetchAt: "",
   bridgeInboundDryRunLastFetchOk: false,
   bridgeInboundDryRunLastFetchMessage: "",
@@ -10446,6 +10454,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.pendingTaskchuteUndoTimer = null;
       this.bridgeAutoFlushTimer = null;
       this.bridgeAutoFlushRunActive = false;
+      this.bridgeAutoFlushRescheduleRequested = false;
+      this.bridgeAutoFlushRescheduleReason = "";
       this.bridgeOutboxMutationQueue = Promise.resolve();
       this.bridgeTaskTitleCommitQueues = new Map();
       this.pluginDataSaveQueue = Promise.resolve();
@@ -10994,6 +11004,14 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.settings.bridgeAutoFlushLastTriggeredAt = String(this.settings.bridgeAutoFlushLastTriggeredAt || "").trim();
     this.settings.bridgeAutoFlushLastSkippedReason = String(this.settings.bridgeAutoFlushLastSkippedReason || "").trim();
     this.settings.bridgeAutoFlushLastResultMessage = String(this.settings.bridgeAutoFlushLastResultMessage || "").trim();
+    this.settings.bridgeAutoFlushRescheduleRequestedCount = Math.max(0, Math.floor(Number(this.settings.bridgeAutoFlushRescheduleRequestedCount || 0)));
+    this.settings.bridgeAutoFlushRescheduleExecutedCount = Math.max(0, Math.floor(Number(this.settings.bridgeAutoFlushRescheduleExecutedCount || 0)));
+    this.settings.bridgeAutoFlushRescheduleNotNeededCount = Math.max(0, Math.floor(Number(this.settings.bridgeAutoFlushRescheduleNotNeededCount || 0)));
+    this.settings.bridgeAutoFlushLastRescheduleRequestedAt = String(this.settings.bridgeAutoFlushLastRescheduleRequestedAt || "").trim();
+    this.settings.bridgeAutoFlushLastRescheduleExecutedAt = String(this.settings.bridgeAutoFlushLastRescheduleExecutedAt || "").trim();
+    this.settings.bridgeAutoFlushLastRescheduleNotNeededAt = String(this.settings.bridgeAutoFlushLastRescheduleNotNeededAt || "").trim();
+    this.settings.bridgeAutoFlushLastRescheduleReason = String(this.settings.bridgeAutoFlushLastRescheduleReason || "").trim();
+    this.settings.bridgeAutoFlushLastRescheduleDecision = String(this.settings.bridgeAutoFlushLastRescheduleDecision || "").trim();
     this.settings.bridgeInboundDryRunLastFetchAt = String(this.settings.bridgeInboundDryRunLastFetchAt || "").trim();
     this.settings.bridgeInboundDryRunLastFetchOk = !!this.settings.bridgeInboundDryRunLastFetchOk;
     this.settings.bridgeInboundDryRunLastFetchMessage = String(this.settings.bridgeInboundDryRunLastFetchMessage || "").trim();
@@ -25518,6 +25536,75 @@ class TaskchutePlugin extends obsidian.Plugin {
     );
   }
 
+  requestBridgeAutoFlushReschedule(reason, source = "run-active") {
+    const normalizedReason = String(reason || "auto-flush-request-during-active-run").trim() || "auto-flush-request-during-active-run";
+    this.bridgeAutoFlushRescheduleRequested = true;
+    this.bridgeAutoFlushRescheduleReason = normalizedReason;
+    this.settings.bridgeAutoFlushRescheduleRequestedCount = Math.max(0, Number(this.settings.bridgeAutoFlushRescheduleRequestedCount || 0)) + 1;
+    this.settings.bridgeAutoFlushLastRescheduleRequestedAt = nowIso();
+    this.settings.bridgeAutoFlushLastRescheduleReason = `${String(source || "run-active")}:${normalizedReason}`;
+    this.settings.bridgeAutoFlushLastRescheduleDecision = "reschedule-requested";
+    const message = "Auto flush is already running; immediate execution was skipped and a reschedule was requested.";
+    this.settings.bridgeAutoFlushLastSkippedReason = message;
+    this.settings.bridgeAutoFlushLastResultMessage = message;
+    Promise.resolve(this.savePluginData({ deviceWriterOperation: "bridge-auto-flush-reschedule-requested" })).catch(() => {});
+    return { ok: false, skipped: true, rescheduleRequested: true, message };
+  }
+
+  getBridgeAutoFlushRescheduleDelayMs() {
+    const debounceMs = normalizeBridgeAutoFlushMs(this.settings && this.settings.bridgeAutoFlushDebounceMs, 5000, 0, 300000);
+    const minIntervalMs = normalizeBridgeAutoFlushMs(this.settings && this.settings.bridgeAutoFlushMinIntervalMs, 15000, 1000, 3600000);
+    const lastFinishedAt = Date.parse(String(this.settings && (this.settings.bridgeOutboxLastFlushFinishedAt || this.settings.bridgeOutboxLastFlushAt) || ""));
+    const elapsedMs = Number.isFinite(lastFinishedAt) ? Math.max(0, Date.now() - lastFinishedAt) : minIntervalMs;
+    return Math.max(1, debounceMs, Math.max(0, minIntervalMs - elapsedMs));
+  }
+
+  finishBridgeAutoFlushRun(reason = "auto") {
+    this.bridgeAutoFlushRunActive = false;
+    if (!this.bridgeAutoFlushRescheduleRequested) return false;
+
+    if (this.settings && this.settings.bridgeOutboxFlushInProgress) {
+      this.settings.bridgeAutoFlushLastRescheduleDecision = "reschedule-waiting-for-active-outbox-flush";
+      Promise.resolve(this.savePluginData({ deviceWriterOperation: "bridge-auto-flush-reschedule-waiting" })).catch(() => {});
+      return false;
+    }
+
+    const requestedReason = String(this.bridgeAutoFlushRescheduleReason || reason || "auto").trim() || "auto";
+    this.bridgeAutoFlushRescheduleRequested = false;
+    this.bridgeAutoFlushRescheduleReason = "";
+    const targets = this.getBridgeAutoFlushTargets();
+    const canSchedule = !!(this.settings
+      && this.settings.bridgeEnabled
+      && this.settings.bridgeAutoFlushEnabled
+      && normalizeBridgeApiBaseUrl(this.settings.bridgeApiBaseUrl)
+      && String(this.settings.bridgeApiToken || "")
+      && String(this.settings.bridgeUserId || "").trim()
+      && String(this.settings.bridgeDeviceId || "").trim()
+      && targets.length > 0);
+    if (!canSchedule) {
+      this.settings.bridgeAutoFlushRescheduleNotNeededCount = Math.max(0, Number(this.settings.bridgeAutoFlushRescheduleNotNeededCount || 0)) + 1;
+      this.settings.bridgeAutoFlushLastRescheduleNotNeededAt = nowIso();
+      this.settings.bridgeAutoFlushLastRescheduleReason = requestedReason;
+      this.settings.bridgeAutoFlushLastRescheduleDecision = targets.length > 0
+        ? "reschedule-not-needed-configuration-or-disabled"
+        : "reschedule-not-needed-no-sendable-targets";
+      Promise.resolve(this.savePluginData({ deviceWriterOperation: "bridge-auto-flush-reschedule-not-needed" })).catch(() => {});
+      return false;
+    }
+
+    const delayMs = this.getBridgeAutoFlushRescheduleDelayMs();
+    this.settings.bridgeAutoFlushRescheduleExecutedCount = Math.max(0, Number(this.settings.bridgeAutoFlushRescheduleExecutedCount || 0)) + 1;
+    this.settings.bridgeAutoFlushLastRescheduleExecutedAt = nowIso();
+    this.settings.bridgeAutoFlushLastRescheduleReason = requestedReason;
+    this.settings.bridgeAutoFlushLastRescheduleDecision = `reschedule-scheduled:${delayMs}ms`;
+    const scheduled = this.scheduleBridgeAutoFlush({
+      reason: `rescheduled-after-active:${requestedReason}`,
+      delayMs
+    });
+    Promise.resolve(this.savePluginData({ deviceWriterOperation: "bridge-auto-flush-reschedule-executed" })).catch(() => {});
+    return scheduled;
+  }
+
   async recordBridgeAutoFlushSkip(reason) {
     const message = String(reason || "自動flushをスキップしました。");
     this.settings.bridgeAutoFlushLastSkippedReason = message;
@@ -25529,14 +25616,21 @@ class TaskchutePlugin extends obsidian.Plugin {
   scheduleBridgeAutoFlush(options = {}) {
     if (!this.settings || !this.settings.bridgeAutoFlushEnabled) return false;
     if (options.startup && !this.settings.bridgeAutoFlushOnStartup) return false;
+    const reason = String(options.reason || (options.startup ? "startup" : "outbox-enqueue"));
+    if (this.bridgeAutoFlushRunActive) {
+      this.requestBridgeAutoFlushReschedule(reason, "schedule-during-active-run");
+      return true;
+    }
     if (this.bridgeAutoFlushTimer) {
       try { clearTimeout(this.bridgeAutoFlushTimer); } catch (e) {}
       this.bridgeAutoFlushTimer = null;
     }
-    const delay = options.startup
-      ? normalizeBridgeAutoFlushMs(this.settings.bridgeAutoFlushDelayMs, 3000, 0, 300000)
-      : normalizeBridgeAutoFlushMs(this.settings.bridgeAutoFlushDebounceMs, 5000, 0, 300000);
-    const reason = String(options.reason || (options.startup ? "startup" : "outbox-enqueue"));
+    const explicitDelayMs = Number(options.delayMs);
+    const delay = Number.isFinite(explicitDelayMs)
+      ? normalizeBridgeAutoFlushMs(explicitDelayMs, 1, 1, 3600000)
+      : options.startup
+        ? normalizeBridgeAutoFlushMs(this.settings.bridgeAutoFlushDelayMs, 3000, 0, 300000)
+        : normalizeBridgeAutoFlushMs(this.settings.bridgeAutoFlushDebounceMs, 5000, 0, 300000);
     this.bridgeAutoFlushTimer = window.setTimeout(() => {
       this.bridgeAutoFlushTimer = null;
       Promise.resolve(this.runBridgeAutoFlush(reason)).catch(() => {});
@@ -25545,7 +25639,7 @@ class TaskchutePlugin extends obsidian.Plugin {
   }
 
   async runBridgeAutoFlush(reason = "auto") {
-    if (this.bridgeAutoFlushRunActive) return await this.recordBridgeAutoFlushSkip("自動flush処理中のため、二重実行をスキップしました。");
+    if (this.bridgeAutoFlushRunActive) return this.requestBridgeAutoFlushReschedule(reason, "run-during-active-run");
     this.bridgeAutoFlushRunActive = true;
     try {
       this.settings.bridgeAutoFlushLastTriggeredAt = nowIso();
@@ -25557,7 +25651,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         || !String(this.settings.bridgeDeviceId || "").trim()) {
         return await this.recordBridgeAutoFlushSkip("Bridge API設定が不足しているため、自動flushをスキップしました。");
       }
-      if (this.settings.bridgeOutboxFlushInProgress) return await this.recordBridgeAutoFlushSkip("outbox送信中のため、自動flushをスキップしました。");
+      if (this.settings.bridgeOutboxFlushInProgress) return this.requestBridgeAutoFlushReschedule(reason, "outbox-flush-in-progress");
 
       const targets = this.getBridgeAutoFlushTargets();
       if (!targets.length) {
@@ -25598,7 +25692,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       await this.savePluginData({ deviceWriterOperation: `bridge-auto-flush-result:${String(reason || "auto")}` });
       return result;
     } finally {
-      this.bridgeAutoFlushRunActive = false;
+      this.finishBridgeAutoFlushRun(reason);
     }
   }
 
@@ -26116,6 +26210,9 @@ class TaskchutePlugin extends obsidian.Plugin {
         this.settings.bridgeOutboxFlushInProgress = false;
         await this.savePluginData({ deviceWriterOperation: "bridge-outbox-flush-test-result" });
       });
+      if (this.bridgeAutoFlushRescheduleRequested && !this.bridgeAutoFlushRunActive) {
+        this.finishBridgeAutoFlushRun("outbox-flush-finished");
+      }
     }
     const remainingCount = this.getBridgeAutoFlushTargets().length;
     if (sentCount > 0 || failedCount > 0) {
@@ -51375,6 +51472,13 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
       outbound_auto_flush_enabled: !!this.plugin.settings.bridgeAutoFlushEnabled,
       outbound_auto_flush_on_startup: !!this.plugin.settings.bridgeAutoFlushOnStartup,
       bridge_auto_flush_enabled: !!this.plugin.settings.bridgeAutoFlushEnabled,
+      bridge_auto_flush_run_active: !!this.plugin.bridgeAutoFlushRunActive,
+      bridge_auto_flush_reschedule_pending: !!this.plugin.bridgeAutoFlushRescheduleRequested,
+      bridge_auto_flush_reschedule_requested_count: Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleRequestedCount || 0)),
+      bridge_auto_flush_reschedule_executed_count: Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleExecutedCount || 0)),
+      bridge_auto_flush_reschedule_not_needed_count: Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleNotNeededCount || 0)),
+      bridge_auto_flush_last_reschedule_reason: String(this.plugin.settings.bridgeAutoFlushLastRescheduleReason || "").trim(),
+      bridge_auto_flush_last_reschedule_decision: String(this.plugin.settings.bridgeAutoFlushLastRescheduleDecision || "").trim(),
       inbound_auto_apply_enabled: !!this.plugin.settings.bridgeInboundAutoApplyEnabled,
       inbound_auto_apply_runtime_status: String(this.plugin.settings.bridgeInboundAutoApplyRuntimeStatus || "").trim(),
       inbound_auto_apply_runtime_reason: String(this.plugin.settings.bridgeInboundAutoApplyRuntimeReason || "").trim(),
@@ -52419,6 +52523,16 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
               copied_at: nowIso(),
               bridge_enabled: !!this.plugin.settings.bridgeEnabled,
               bridge_auto_flush_enabled: !!this.plugin.settings.bridgeAutoFlushEnabled,
+              bridge_auto_flush_run_active: !!this.plugin.bridgeAutoFlushRunActive,
+              bridge_auto_flush_reschedule_pending: !!this.plugin.bridgeAutoFlushRescheduleRequested,
+              bridge_auto_flush_reschedule_requested_count: Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleRequestedCount || 0)),
+              bridge_auto_flush_reschedule_executed_count: Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleExecutedCount || 0)),
+              bridge_auto_flush_reschedule_not_needed_count: Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleNotNeededCount || 0)),
+              bridge_auto_flush_last_reschedule_requested_at: String(this.plugin.settings.bridgeAutoFlushLastRescheduleRequestedAt || "").trim() || null,
+              bridge_auto_flush_last_reschedule_executed_at: String(this.plugin.settings.bridgeAutoFlushLastRescheduleExecutedAt || "").trim() || null,
+              bridge_auto_flush_last_reschedule_not_needed_at: String(this.plugin.settings.bridgeAutoFlushLastRescheduleNotNeededAt || "").trim() || null,
+              bridge_auto_flush_last_reschedule_reason: String(this.plugin.settings.bridgeAutoFlushLastRescheduleReason || "").trim() || null,
+              bridge_auto_flush_last_reschedule_decision: String(this.plugin.settings.bridgeAutoFlushLastRescheduleDecision || "").trim() || null,
               bridge_logical_clock: bridgeLogicalClock,
               bridge_outbox_max_batch_size: bridgeOutboxMaxBatchSize,
               bridge_outbox_drain_max_batches: bridgeOutboxDrainMaxBatches,
@@ -52743,6 +52857,10 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(el)
       .setName("最終自動flush結果")
       .setDesc(bridgeAutoFlushLastResultMessage || "未実施");
+
+    new obsidian.Setting(el)
+      .setName("Auto flush reschedule diagnostics")
+      .setDesc(`requested ${Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleRequestedCount || 0))} / executed ${Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleExecutedCount || 0))} / not-needed ${Math.max(0, Number(this.plugin.settings.bridgeAutoFlushRescheduleNotNeededCount || 0))} / pending ${this.plugin.bridgeAutoFlushRescheduleRequested ? "yes" : "no"} / ${String(this.plugin.settings.bridgeAutoFlushLastRescheduleDecision || "none")}`);
 
     const bridgeLastLifecycleEnqueueAt = String(this.plugin.settings.bridgeLastLifecycleEnqueueAt || "").trim();
     const bridgeLastLifecycleEnqueueMessage = String(this.plugin.settings.bridgeLastLifecycleEnqueueMessage || "").trim();

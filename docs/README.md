@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current baseline: v0.6.56. Bridge/runtime logic remains identical to v0.6.54.
+Current baseline: v0.6.57 BRAT Prerelease. It adds the outbound Auto Flush lost wake-up fix to the v0.6.56 baseline and remains unverified on real Vaults.
 
 ## Current Canonical
 
@@ -32,7 +32,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
-- [v0.6.56 BRAT Prerelease](release/v0.6.56.md)
+- [v0.6.57 BRAT Prerelease](release/v0.6.57.md)
 - [BRAT release operation](brat-release-operation.md)
 - [Release checklist](release-checklist.md)
 
