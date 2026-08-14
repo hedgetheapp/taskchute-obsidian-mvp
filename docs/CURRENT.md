@@ -19,6 +19,14 @@
 - 現行versionの検証状態は[`TEST_MATRIX.md`](TEST_MATRIX.md)を正とする。
 - 過去versionの詳細資料は[`archive/`](archive/README.md)へ保存し、現行仕様の根拠には使わない。
 
+## Delivery state
+
+- **Integrated**: main反映済み。実機確認未完了の場合がある。
+- **Verified**: ユーザー実機確認済みで、current evidenceを`TEST_MATRIX.md`へ反映済み。
+- **Released**: Verifiedなrelease commitへtagとGitHub Releaseを作成済み。
+
+main反映、実装完了、syntax checkだけではVerifiedまたはReleasedとしない。runtime、UI、Bridge変更のreleaseはユーザー実機確認後に行う。docs-only変更はruntime、UI、Bridge diffが0なら例外とする。詳細は[`DEVELOPMENT_WORKFLOW.md`](DEVELOPMENT_WORKFLOW.md)を参照する。
+
 ## 現在の開発状況
 
 アプリ本体とBridge同期は広範囲に実装済みである。Bridgeの基礎部分はv6.5 RC3でdev / remote / mobile三端末スモークを通過した記録がある。その後、v0.6.16以降にRoutine同期、Routine occurrence、TaskMoved v4、lifecycle identity、割り込みcontinuation、safe rekeyが追加された。

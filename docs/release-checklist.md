@@ -17,6 +17,10 @@
 - [ ] PRのchanged filesとdiffがrelease scopeどおり
 - [ ] PR checks成功または問題なしを確認
 - [ ] mainへfast-forward反映後のrelease commitを確認
+- [ ] runtime / UI / Bridge変更時はユーザー実機確認済み
+- [ ] runtime / UI / Bridge変更時はTEST_MATRIXにcurrent evidenceを記録済み
+- [ ] tag作成前にrelease commitがVerifiedであることを確認
+- [ ] docs-onlyで実機確認を省略する場合はruntime / UI / Bridge diff 0を確認
 - [ ] tagが `v{manifest.version}` 形式
 - [ ] tagがmain反映後のrelease commitを指す
 - [ ] release titleにBridge世代・RC名を記載

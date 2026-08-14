@@ -54,6 +54,9 @@ Otherwise leave the event unacked and record a diagnostic such as identity confl
 - Keep `PASS`, `FAIL`, `BLOCKED`, and `NOT_VERIFIED` distinct. Unknown or mixed test data is not PASS.
 - Update root `CHANGELOG.md` for every release/version change. Keep it to release-level summaries; it does not replace Git history, and historical docs must not be copied into it wholesale.
 - Treat `docs/TEST_MATRIX.md` as the authority for current test state, including when writing CHANGELOG verification notes.
+- Keep Integrated, Verified, and Released distinct. Main integration alone proves neither device verification nor release.
+- Do not mark TEST_MATRIX rows PASS from implementation completion, syntax checks, or local helper tests. PASS requires user device verification and recorded current evidence; use FAIL, BLOCKED, or NOT_VERIFIED otherwise.
+- Do not independently change user-visible behavior, identity/sync/Ack/lifecycle semantics, or destructive migration policy. Stop and report when such a product or data-semantics decision is not already authorized by the user and canonical docs.
 - Do not modify tags, releases, D1 data, Cloudflare resources, or real Vault data unless the user explicitly requests it.
 
 Minimum runtime syntax check:
@@ -69,5 +72,5 @@ node --check .\main.js
 - When the PR is clean and fast-forward integration is possible, continue through main integration in the same task instead of leaving the PR open for routine user approval.
 - Prefer `--ff-only`; do not rebase, force push, squash, or create an unnecessary merge commit.
 - Return to `feature/v6.6-routine-sync` after main integration and confirm both remote branches and a clean worktree.
-- For releases, create the tag and GitHub Release only after the release commit has been integrated into main.
-- Follow `docs/git-pr-operation.md` for the complete procedure.
+- Runtime, UI, or Bridge changes may be integrated into main after review, but do not create a tag or GitHub Release until the user completes device verification and TEST_MATRIX contains current evidence. Docs-only releases may omit device verification when runtime/UI/Bridge diff is zero.
+- Follow `docs/DEVELOPMENT_WORKFLOW.md` for the complete procedure.

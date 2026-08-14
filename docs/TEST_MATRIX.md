@@ -9,6 +9,8 @@
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.56についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
+- Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
+- ユーザー実機確認後、対象version・端末・操作・物理状態をcurrent evidenceとして記録できた場合だけ`PASS`にする。
 
 ## Status
 
