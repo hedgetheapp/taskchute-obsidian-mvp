@@ -1,15 +1,17 @@
 # TaskChute Bridge 文書索引
 
+> Historical index for v6.5 RC3. Current documentation starts at `../../README.md`.
+
 このディレクトリは、TaskChute Bridgeのリポジトリ内運用文書を置く。現在の固定状態は`Taskchute Bridge v6.5 RC3 FIXED`とする。
 
 ## Taskchute Bridge v6.5 RC3 FIXED
 
 RC3はdev / remote / mobileの三端末起点による最終スモーク通過済みの固定リリース候補。RC3固定後の同期ロジック変更は禁止し、変更が必要な場合はRC3.1またはRC4候補として扱う。
 
-- [RC3 Release Lock](Taskchute_Bridge_v6.5_RC3_RELEASE_LOCK.md)
-- [RC3 FIXED仕様メモ](Taskchute_Bridge_仕様メモ_v6.5_RC3_FIXED.md)
-- [RC3 FIXED引継ぎ](Taskchute_Bridge_引継ぎ_v6.5_RC3_FIXED.md)
-- [RC3 FIXED配布メモ](rc3-fixed-distribution-notes.md)
+- [RC3 Release Lock](release-lock-v6.5-rc3.md)
+- [RC3 FIXED仕様メモ](specification-memo-v6.5-rc3-fixed.md)
+- [RC3 FIXED引継ぎ](handoff-v6.5-rc3-fixed.md)
+- [RC3 FIXED配布メモ](distribution-notes-v6.5-rc3-fixed.md)
 
 RC3固定原則:
 
@@ -24,21 +26,19 @@ RC3固定原則:
 
 ## v6.5 RC1
 
-- [同期モデル](sync-model.md)
-- [Identityと削除](bridge/Task_Identity_and_Delete_Semantics_v6.5_RC1.md)
-- [TaskCreated前提guard](task-created-guard.md)
-- [TaskStartedと開始前戻し](task-started-and-reset.md)
-- [diagnostics保持上限](identity-and-delete.md)（legacy filename）
-- [回帰試験チェックリスト](bridge-v6.5-rc1-checklist.md)
-- [リリースノート](taskchute-bridge-v6.5-rc1.md)
+- [同期モデル](sync-model-v6.5-rc1.md)
+- [Identityと削除](../../bridge/Task_Identity_and_Delete_Semantics_v6.5_RC1.md)
+- [TaskCreated前提guard](task-created-guard-v6.5-rc1.md)
+- [TaskStartedと開始前戻し](task-started-and-reset-semantics-v6.5-rc1.md)
+- [diagnostics保持上限](diagnostics-retention-v6.5-rc1.md)
+- [回帰試験チェックリスト](regression-checklist-v6.5-rc1.md)
 
 ## v6.5 RC2
 
 v6.5 RC2固定候補では、RC1固定後のPC 2 Vault運用試験で検出したTaskStarted開始時セクション不整合を修正済み仕様として扱う。
 
-- [TaskStartedと開始前戻し](task-started-and-reset.md)
-- v6.5 RC2回帰試験チェックリスト: repository内に独立fileなし
-- [v6.5 RC2リリースノート](taskchute-bridge-v6.5-rc2.md)
+- [TaskStartedと開始前戻し](task-started-and-reset-semantics-v6.5-rc1.md)
+- [v6.5 RC2回帰試験チェックリスト](regression-checklist-v6.5-rc2.md)
 
 RC2差分:
 
@@ -74,10 +74,10 @@ Bridge v6.4 RC1の外部正本ファイル名は以下。
 
 ## リポジトリ内運用文書
 
-- [Codex運用手順](Taskchute_Bridge_Codex運用手順_v6.4_RC1.md)
-- [リリース候補化チェックリスト](Taskchute_Bridge_v6.4_RC1_リリース候補化チェックリスト.md)
-- [リリースノート草案](Taskchute_Bridge_v6.4_RC1_リリースノート草案.md)
-- [RC1 Release Lock](Taskchute_Bridge_v6.4_RC1_RELEASE_LOCK.md)
+- [Codex運用手順](../v6.4/codex-operation-v6.4-rc1.md)
+- [リリース候補化チェックリスト](../v6.4/release-candidate-checklist-v6.4-rc1.md)
+- [リリースノート草案](../v6.4/release-note-draft-v6.4-rc1.md)
+- [RC1 Release Lock](../v6.4/release-lock-v6.4-rc1.md)
 
 ## 注意
 

@@ -59,9 +59,9 @@ v6.5 RC3については次の明示証跡がある。
 
 根拠:
 
-- [`bridge-v6.5-rc1-checklist.md`](bridge-v6.5-rc1-checklist.md)
-- [`Taskchute_Bridge_仕様メモ_v6.5_RC3_FIXED.md`](Taskchute_Bridge_仕様メモ_v6.5_RC3_FIXED.md)
-- [`Taskchute_Bridge_引継ぎ_v6.5_RC3_FIXED.md`](Taskchute_Bridge_引継ぎ_v6.5_RC3_FIXED.md)
+- [`handoff-v6.5-rc3-fixed.md`](archive/v6.5/handoff-v6.5-rc3-fixed.md)
+- [`release-lock-v6.5-rc3.md`](archive/v6.5/release-lock-v6.5-rc3.md)
+- [`specification-memo-v6.5-rc3-fixed.md`](archive/v6.5/specification-memo-v6.5-rc3-fixed.md)
 
 これらは後続versionで変更されたTaskMoved v4、lifecycle classifier、interrupt continuation、Routine occurrence、safe rekeyの保証証跡ではない。
 

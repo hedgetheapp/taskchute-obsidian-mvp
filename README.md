@@ -38,14 +38,6 @@ v0.6.56はcanonical documentation baselineとversion metadataを固定するdocs
 
 ## Historical Documentation
 
-次の資料は過去versionの設計・試験記録として保持しています。現行案内ではありません。
-
-- [v6.6 Routine同期 仕様書 v1](docs/bridge/Taskchute_Bridge_v6.6_Routine同期_仕様書_v1.md)
-- [v6.6 Routine同期 実装仕様](docs/bridge/Taskchute_Bridge_v6.6_Routine同期_実装仕様.md)
-- [v6.6 Routine同期 引継ぎ](docs/bridge/Taskchute_Bridge_v6.6_Routine同期_引継ぎ.md)
-- [v6.5 RC3 Release Lock](docs/Taskchute_Bridge_v6.5_RC3_RELEASE_LOCK.md)
-- [v6.5 RC3 FIXED仕様メモ](docs/Taskchute_Bridge_仕様メモ_v6.5_RC3_FIXED.md)
-- [v6.5 RC3 FIXED引継ぎ](docs/Taskchute_Bridge_引継ぎ_v6.5_RC3_FIXED.md)
-- [v6.6 Routine同期 回帰手順](docs/regression/試験チェックリスト_v6.6_Routine同期_v1.md)
+過去versionの設計、試験、release資料は[Documentation Archive](docs/archive/README.md)へ保存しています。現行実装判断の正本には使用しません。
 
 配布・リリース手順は[BRAT release operation](docs/brat-release-operation.md)と[Release checklist](docs/release-checklist.md)を参照してください。

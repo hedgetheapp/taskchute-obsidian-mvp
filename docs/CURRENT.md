@@ -66,7 +66,7 @@ v0.6.55公開後に`CURRENT.md`、`FEATURES.md`、`SPEC.md`、`ARCHITECTURE.md`�
 - TaskCommentAdded、Section、Category / Area / Clientのv0.6.56上での回帰。
 - mobile長時間hidden、OS強制停止、通信断・圏外復帰。
 
-`docs/regression/試験チェックリスト_v6.6_Routine同期_v1.md`は全項目未チェックのため、コードが存在することだけをもって試験済みとは扱わない。
+`docs/archive/v6.6/routine-sync-regression-checklist-v1.md`は全項目未チェックのため、コードが存在することだけをもって試験済みとは扱わない。
 
 ## 未完了と思われる箇所
 
