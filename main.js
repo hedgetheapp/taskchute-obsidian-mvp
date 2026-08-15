@@ -2938,6 +2938,79 @@ function setTaskLineTcMeta(line, updates) {
   }
   return String(line || "").replace(/\s*$/, ` ${comment}`);
 }
+
+function resolveTaskLineSectionIdentityForPhysicalHeading(line, settings, physicalSectionValue, options = {}) {
+  const rowMeta = tcMetaFromTaskLine(line);
+  const rawSectionId = Object.prototype.hasOwnProperty.call(rowMeta, "section_id")
+    ? String(rowMeta.section_id || "").trim()
+    : "";
+  const rawSectionLabel = Object.prototype.hasOwnProperty.call(rowMeta, "section")
+    ? String(rowMeta.section || "").trim()
+    : "";
+  const physicalSection = findBoardSection(settings || {}, String(physicalSectionValue || "").trim());
+  const rowSectionById = rawSectionId ? findBoardSection(settings || {}, rawSectionId) : null;
+  const rowSectionByLabel = rawSectionLabel ? findBoardSection(settings || {}, rawSectionLabel) : null;
+  const result = {
+    ok: false,
+    raw_row_section_id: rawSectionId,
+    raw_row_section_label: rawSectionLabel,
+    parsed_row_section_id: String(rowSectionById && rowSectionById.id || "").trim(),
+    parsed_row_section_label_id: String(rowSectionByLabel && rowSectionByLabel.id || "").trim(),
+    physical_section_id: String(physicalSection && physicalSection.id || "").trim(),
+    resolved_section_id: "",
+    section_identity_source: "unresolved",
+    normalization_performed: false,
+    normalized_line: String(line || ""),
+    final_guard_result: "blocked",
+    reason_code: "",
+    reason: ""
+  };
+  if (!physicalSection) {
+    result.reason_code = "physical_section_unresolved";
+    result.reason = "物理見出しのsection identityを解決できませんでした。";
+    return result;
+  }
+  if (rawSectionId && (!rowSectionById || String(rowSectionById.id || "") !== result.physical_section_id)) {
+    result.section_identity_source = "explicit_row_section_id_conflict";
+    result.reason_code = "row_section_id_conflict";
+    result.reason = "行コメントの明示section_idが物理見出しと一致しません。";
+    return result;
+  }
+  if (!rawSectionId && rawSectionLabel && (!rowSectionByLabel || String(rowSectionByLabel.id || "") !== result.physical_section_id)) {
+    result.section_identity_source = "explicit_row_section_label_conflict";
+    result.reason_code = "row_section_label_conflict";
+    result.reason = "行コメントの明示sectionラベルが物理見出しと一致しません。";
+    return result;
+  }
+  const idConfirmed = !!rowSectionById && String(rowSectionById.id || "") === result.physical_section_id;
+  const labelConfirmed = !!rowSectionByLabel && String(rowSectionByLabel.id || "") === result.physical_section_id;
+  const needsNormalization = !idConfirmed || !labelConfirmed;
+  if (needsNormalization && options && options.normalizeMissing === true) {
+    result.normalized_line = setTaskLineTcMeta(line, {
+      section: physicalSection.name,
+      section_id: physicalSection.id
+    });
+    result.normalization_performed = result.normalized_line !== String(line || "");
+    result.section_identity_source = idConfirmed
+      ? "physical_heading_normalized_row_label"
+      : (labelConfirmed ? "physical_heading_normalized_missing_section_id" : "physical_heading_normalized_missing_row_metadata");
+  } else if (!idConfirmed) {
+    result.section_identity_source = rawSectionLabel ? "row_section_label_without_section_id" : "row_section_metadata_missing";
+    result.reason_code = "row_section_id_missing";
+    result.reason = "行コメントのsection_idがないため物理見出しだけでは確定しません。";
+    return result;
+  } else {
+    result.section_identity_source = labelConfirmed ? "physical_heading_and_row_metadata" : "row_section_id_with_stale_or_missing_label";
+  }
+  result.ok = true;
+  result.resolved_section_id = result.physical_section_id;
+  result.final_guard_result = "allow";
+  result.reason_code = result.normalization_performed ? "row_section_metadata_normalized" : "row_section_identity_confirmed";
+  result.reason = result.normalization_performed
+    ? "物理見出しを正として欠落または不完全な行section metadataを正規化しました。"
+    : "物理見出しと行section identityを確認しました。";
+  return result;
+}
 function entryIdFromTaskLine(line) {
   return tcMetaFromTaskLine(line).entry_id || "";
 }
@@ -12240,6 +12313,17 @@ class TaskchutePlugin extends obsidian.Plugin {
       entry_id: String(detail.entry_id || "").trim(),
       date: String(detail.date || "").trim(),
       section_id: String(detail.section_id || "").trim(),
+      physical_section_id: String(detail.physical_section_id || "").trim(),
+      raw_row_section_id: String(detail.raw_row_section_id || "").trim(),
+      raw_row_section_label: String(detail.raw_row_section_label || "").trim(),
+      raw_row_section_id_before_normalization: String(detail.raw_row_section_id_before_normalization || "").trim(),
+      raw_row_section_label_before_normalization: String(detail.raw_row_section_label_before_normalization || "").trim(),
+      parsed_row_section_id: String(detail.parsed_row_section_id || "").trim(),
+      parsed_row_section_label_id: String(detail.parsed_row_section_label_id || "").trim(),
+      resolved_section_id: String(detail.resolved_section_id || "").trim(),
+      section_identity_source: String(detail.section_identity_source || "").trim(),
+      normalization_performed: !!detail.normalization_performed,
+      final_guard_result: String(detail.final_guard_result || "").trim(),
       before_order_entry_ids: Array.isArray(detail.before_order_entry_ids) ? detail.before_order_entry_ids.slice() : [],
       after_order_entry_ids: Array.isArray(detail.after_order_entry_ids) ? detail.after_order_entry_ids.slice() : [],
       enqueue_attempted: !!detail.enqueue_attempted,
@@ -18364,6 +18448,14 @@ class TaskchutePlugin extends obsidian.Plugin {
       physical_section_id: "",
       row_section_id: "",
       row_section_label_id: "",
+      raw_row_section_id: "",
+      raw_row_section_label: "",
+      parsed_row_section_id: "",
+      parsed_row_section_label_id: "",
+      resolved_section_id: "",
+      section_identity_source: "unresolved",
+      normalization_performed: false,
+      final_guard_result: "blocked",
       index_section_id: "",
       index_position_ignored_for_board_entry: true,
       current_target_order_task_ids: [],
@@ -18384,13 +18476,22 @@ class TaskchutePlugin extends obsidian.Plugin {
         : "TaskMoved整合性検査で対象日付のTaskBoard行が見つかりませんでした。";
       return diagnostic;
     }
-    const physicalSection = getSectionByNameOrId(this.settings, occurrence.section);
-    const rowMeta = tcMetaFromTaskLine(occurrence.line);
-    const rowSectionById = getSectionByNameOrId(this.settings, String(rowMeta.section_id || "").trim());
-    const rowSectionByLabel = getSectionByNameOrId(this.settings, String(rowMeta.section || "").trim());
-    diagnostic.physical_section_id = String(physicalSection && physicalSection.id || "").trim();
-    diagnostic.row_section_id = String(rowSectionById && rowSectionById.id || "").trim();
-    diagnostic.row_section_label_id = String(rowSectionByLabel && rowSectionByLabel.id || "").trim();
+    const rowIdentity = resolveTaskLineSectionIdentityForPhysicalHeading(
+      occurrence.line,
+      this.settings,
+      occurrence.section,
+      { normalizeMissing: false }
+    );
+    diagnostic.physical_section_id = String(rowIdentity.physical_section_id || "").trim();
+    diagnostic.row_section_id = String(rowIdentity.parsed_row_section_id || "").trim();
+    diagnostic.row_section_label_id = String(rowIdentity.parsed_row_section_label_id || "").trim();
+    diagnostic.raw_row_section_id = String(rowIdentity.raw_row_section_id || "").trim();
+    diagnostic.raw_row_section_label = String(rowIdentity.raw_row_section_label || "").trim();
+    diagnostic.parsed_row_section_id = String(rowIdentity.parsed_row_section_id || "").trim();
+    diagnostic.parsed_row_section_label_id = String(rowIdentity.parsed_row_section_label_id || "").trim();
+    diagnostic.resolved_section_id = String(rowIdentity.resolved_section_id || "").trim();
+    diagnostic.section_identity_source = String(rowIdentity.section_identity_source || "unresolved");
+    diagnostic.normalization_performed = !!rowIdentity.normalization_performed;
     let index = options && options.index && typeof options.index === "object" ? options.index : null;
     if (!index) {
       try {
@@ -18404,9 +18505,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     const indexSection = getSectionByNameOrId(this.settings, String(indexTask && indexTask.section_id || "").trim());
     diagnostic.index_section_id = String(indexSection && indexSection.id || "").trim();
     const expected = String(expectedSection.id || "").trim();
-    if (diagnostic.physical_section_id !== expected || diagnostic.row_section_id !== expected) {
+    if (!rowIdentity.ok || diagnostic.physical_section_id !== expected || diagnostic.row_section_id !== expected) {
       diagnostic.reason_code = "markdown_section_mismatch";
-      diagnostic.reason = "TaskMovedの移動先section_idが、物理見出し・行コメントで一致しません。";
+      diagnostic.reason = rowIdentity.reason || "TaskMovedの移動先section_idが、物理見出し・行コメントで一致しません。";
       return diagnostic;
     }
     const indexStale = diagnostic.index_section_id !== expected;
@@ -18447,6 +18548,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
     }
     diagnostic.ok = true;
+    diagnostic.final_guard_result = "allow";
     if (diagnostic.decision !== "allow_with_warning") {
       diagnostic.decision = "allow";
       diagnostic.reason_code = "markdown_and_index_confirmed";
@@ -35083,7 +35185,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (this.isTaskchuteWriteAborted(taskWriteOk)) return false;
 
       const entryId = await this.nextUniqueEntryId(date, md);
-      const line = taskLine(fileBase, title, false, entryId, { estimate_min: estimateMin });
+      const line = taskLine(fileBase, title, false, entryId, {
+        estimate_min: estimateMin,
+        section: section.name,
+        section_id: section.id || ""
+      });
       const baseKey = taskKey(baseTask);
       const protectedKeys = collectRuntimeTopProtectedKeys(this.runtime);
       const nextMd = insertTaskAfterKey(md, this.settings, baseKey, line, section.name, {
@@ -36135,8 +36241,37 @@ class TaskchutePlugin extends obsidian.Plugin {
       // 移動先へ更新する。ここを更新しないと、フィルタONの時刻順再整列時に
       // 以前の section/section_id が優先され、別セクションへ戻せないことがある。
       const destinationStartPlan = sourceTask && sourceTask.startPlan != null ? String(sourceTask.startPlan || "") : (tcMetaValue(movedLine, "start_plan") || "");
+      let dragSectionIdentity = null;
       if (isCrossSectionDragMove && destinationSection) {
         movedLine = setTaskLineTcMeta(movedLine, { section: destinationSection.name, section_id: destinationSection.id });
+      } else if (destinationSection) {
+        dragSectionIdentity = resolveTaskLineSectionIdentityForPhysicalHeading(
+          movedLine,
+          this.settings,
+          destinationName,
+          { normalizeMissing: true }
+        );
+        if (!dragSectionIdentity.ok) {
+          await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_section_identity_blocked", {
+            task_id: sourceBridgeTaskId,
+            entry_id: sourceBridgeEntryId,
+            date: moveDate,
+            physical_section_id: dragSectionIdentity.physical_section_id,
+            raw_row_section_id: dragSectionIdentity.raw_row_section_id,
+            raw_row_section_label: dragSectionIdentity.raw_row_section_label,
+            parsed_row_section_id: dragSectionIdentity.parsed_row_section_id,
+            parsed_row_section_label_id: dragSectionIdentity.parsed_row_section_label_id,
+            resolved_section_id: dragSectionIdentity.resolved_section_id,
+            section_identity_source: dragSectionIdentity.section_identity_source,
+            normalization_performed: dragSectionIdentity.normalization_performed,
+            final_guard_result: dragSectionIdentity.final_guard_result,
+            enqueue_attempted: false,
+            enqueue_skipped_reason: dragSectionIdentity.reason_code,
+            message: dragSectionIdentity.reason
+          }, { persist: true });
+          return false;
+        }
+        movedLine = dragSectionIdentity.normalized_line;
       }
       let routineEditScope = "normal";
       if (destinationName && destinationName !== sourceItem.section && sourceTask && isRoutineHistoryTarget(sourceTask)) {
@@ -36260,6 +36395,54 @@ class TaskchutePlugin extends obsidian.Plugin {
       destinationAfterSaveInfo = getTaskSectionOrderInfoFromMarkdown(finalMarkdownAfterDragUi, destinationName);
       let bridgeEnqueued = false;
       if (!isCrossSectionDragMove) {
+        const savedOccurrences = parseTasks(finalMarkdownAfterDragUi).filter(task =>
+          String(task && task.entryId || "").trim() === sourceBridgeEntryId
+        );
+        const savedOccurrence = savedOccurrences.length === 1 ? savedOccurrences[0] : null;
+        const savedSectionIdentity = savedOccurrence
+          ? resolveTaskLineSectionIdentityForPhysicalHeading(
+            savedOccurrence.line,
+            this.settings,
+            savedOccurrence.section,
+            { normalizeMissing: false }
+          )
+          : null;
+        const expectedDestinationSectionId = String(destinationSection && destinationSection.id || "").trim();
+        const savedIdentityOk = !!savedOccurrence
+          && String(savedOccurrence.taskId || "").trim() === sourceBridgeTaskId
+          && !!savedSectionIdentity
+          && savedSectionIdentity.ok
+          && String(savedSectionIdentity.physical_section_id || "").trim() === expectedDestinationSectionId
+          && String(savedSectionIdentity.resolved_section_id || "").trim() === expectedDestinationSectionId;
+        if (!savedIdentityOk) {
+          await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_section_identity_verify_failed", {
+            task_id: sourceBridgeTaskId,
+            entry_id: sourceBridgeEntryId,
+            date: moveDate,
+            physical_section_id: String(savedSectionIdentity && savedSectionIdentity.physical_section_id || "").trim(),
+            raw_row_section_id: String(savedSectionIdentity && savedSectionIdentity.raw_row_section_id || "").trim(),
+            raw_row_section_label: String(savedSectionIdentity && savedSectionIdentity.raw_row_section_label || "").trim(),
+            parsed_row_section_id: String(savedSectionIdentity && savedSectionIdentity.parsed_row_section_id || "").trim(),
+            parsed_row_section_label_id: String(savedSectionIdentity && savedSectionIdentity.parsed_row_section_label_id || "").trim(),
+            resolved_section_id: String(savedSectionIdentity && savedSectionIdentity.resolved_section_id || "").trim(),
+            section_identity_source: String(savedSectionIdentity && savedSectionIdentity.section_identity_source || "entry_id_not_unique"),
+            normalization_performed: !!(dragSectionIdentity && dragSectionIdentity.normalization_performed),
+            final_guard_result: "blocked",
+            enqueue_attempted: false,
+            enqueue_skipped_reason: savedSectionIdentity && savedSectionIdentity.reason_code || "saved_entry_identity_unresolved",
+            message: savedSectionIdentity && savedSectionIdentity.reason || "保存後Markdownから対象entry_idのsection identityを一意に検証できませんでした。"
+          }, { persist: true });
+          return false;
+        }
+        dragSectionIdentity = Object.assign({}, savedSectionIdentity, {
+          raw_row_section_id_before_normalization: String(dragSectionIdentity && dragSectionIdentity.raw_row_section_id || "").trim(),
+          raw_row_section_label_before_normalization: String(dragSectionIdentity && dragSectionIdentity.raw_row_section_label || "").trim(),
+          normalization_performed: !!(dragSectionIdentity && dragSectionIdentity.normalization_performed),
+          section_identity_source: dragSectionIdentity && dragSectionIdentity.normalization_performed
+            ? dragSectionIdentity.section_identity_source
+            : savedSectionIdentity.section_identity_source,
+          final_guard_result: "allow"
+        });
         const finalDraft = buildBridgeTaskMovedV4ReorderDraft({
           task_id: sourceBridgeTaskId,
           entry_id: sourceBridgeEntryId,
@@ -36300,6 +36483,17 @@ class TaskchutePlugin extends obsidian.Plugin {
           entry_id: sourceBridgeEntryId,
           date: moveDate,
           section_id: bridgeTask.sectionId,
+          physical_section_id: dragSectionIdentity.physical_section_id,
+          raw_row_section_id: dragSectionIdentity.raw_row_section_id,
+          raw_row_section_label: dragSectionIdentity.raw_row_section_label,
+          raw_row_section_id_before_normalization: dragSectionIdentity.raw_row_section_id_before_normalization,
+          raw_row_section_label_before_normalization: dragSectionIdentity.raw_row_section_label_before_normalization,
+          parsed_row_section_id: dragSectionIdentity.parsed_row_section_id,
+          parsed_row_section_label_id: dragSectionIdentity.parsed_row_section_label_id,
+          resolved_section_id: dragSectionIdentity.resolved_section_id,
+          section_identity_source: dragSectionIdentity.section_identity_source,
+          normalization_performed: dragSectionIdentity.normalization_performed,
+          final_guard_result: dragSectionIdentity.final_guard_result,
           before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
           after_order_entry_ids: destinationAfterSaveInfo.entryIds,
           enqueue_attempted: true,
@@ -36329,6 +36523,17 @@ class TaskchutePlugin extends obsidian.Plugin {
         entry_id: sourceBridgeEntryId,
         date: moveDate,
         section_id: String(destinationSection && destinationSection.id || "").trim(),
+        physical_section_id: String(dragSectionIdentity && dragSectionIdentity.physical_section_id || "").trim(),
+        raw_row_section_id: String(dragSectionIdentity && dragSectionIdentity.raw_row_section_id || "").trim(),
+        raw_row_section_label: String(dragSectionIdentity && dragSectionIdentity.raw_row_section_label || "").trim(),
+        raw_row_section_id_before_normalization: String(dragSectionIdentity && dragSectionIdentity.raw_row_section_id_before_normalization || "").trim(),
+        raw_row_section_label_before_normalization: String(dragSectionIdentity && dragSectionIdentity.raw_row_section_label_before_normalization || "").trim(),
+        parsed_row_section_id: String(dragSectionIdentity && dragSectionIdentity.parsed_row_section_id || "").trim(),
+        parsed_row_section_label_id: String(dragSectionIdentity && dragSectionIdentity.parsed_row_section_label_id || "").trim(),
+        resolved_section_id: String(dragSectionIdentity && dragSectionIdentity.resolved_section_id || "").trim(),
+        section_identity_source: String(dragSectionIdentity && dragSectionIdentity.section_identity_source || (isCrossSectionDragMove ? "cross_section_existing_path" : "unresolved")),
+        normalization_performed: !!(dragSectionIdentity && dragSectionIdentity.normalization_performed),
+        final_guard_result: bridgeEnqueued ? "allow" : "blocked",
         before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
         after_order_entry_ids: destinationAfterSaveInfo.entryIds,
         enqueue_attempted: true,

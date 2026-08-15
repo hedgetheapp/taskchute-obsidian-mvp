@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.61。explicit insert-below placementをprotected top insertionから分離し、作成時の物理Markdown順とvisual順を一致させる実機試験用Prereleaseである。
+調査基準: v0.6.62。same-section D&Dの保存後entry section identityを物理Markdownから再解決し、欠落row metadataだけを補完する実機試験用Prereleaseである。
 
 ## 1. 概要
 
@@ -27,13 +27,14 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。約53,147行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.61`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.62`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
 | `tests/tmv4-basic-v0659.js` | Node標準機能だけで実行するTaskMoved v4同一section D&Dのfocused synthetic test。 |
 | `tests/taskcreated-rename-handoff-v0660.js` | pending / in-flight / sent相当のTaskCreated rename handoffを検証するfocused synthetic test。 |
 | `tests/insert-below-order-v0661.js` | explicit insert-belowの物理/visual順、refresh、rename、protected target、task-copy scopeを検証するfocused synthetic test。 |
+| `tests/tmv4-section-handoff-v0662.js` | same-section D&Dの欠落row section meta補完、保存後identity、strict conflict block、TaskMoved 1件を検証するfocused synthetic test。 |
 
 `src/`、`package.json`、bundler設定、汎用test runnerは存在しない。`tests/`にはv0.6.59以降のfocused standalone testだけがある。
 
@@ -168,6 +169,8 @@ UI / command
 explicit insert-belowと「下にコピー」は`insertTaskAfterKey()`へ`insertPlacement=explicit-below`を渡す。これにより通常targetをprotected集合へ自動追加せず、物理Markdownをtarget直下へ保存してから同じanchorでvisual rowを追加する。実際のcompleted / running / paused keyは既存protected集合とstatus判定に残る。default top insertion、inbound / interrupt continuationはこのoptionを使わない。
 
 同一sectionのtask-row D&Dは、操作前Markdownからsource entry orderを保存し、移動後Markdownを書き込み、再読込したtarget entry orderとの一致を確認してからD&D専用TaskMoved v4を1件enqueueする。UIのdrop handlerは`moveTaskByDrag()`へ集約され、no-op orderは保存・enqueue前に除外する。
+
+same-section D&Dでは、moved rowのraw `section` / `section_id`を物理見出しと比較する。`section_id`欠落は物理見出しから補完し、IDが物理sectionを確定している場合に限って欠落・古いlabelも正規化して同じMarkdown保存へ含める。UI refresh後のMarkdownから対象`entry_id`を一意再解決し、`task_id`、physical section、row section IDが揃った後だけ既存`enqueueBridgeTaskMoved()`へ渡す。明示section IDの不一致は補正せず一般guardへ到達する前にも停止する。
 
 TaskCreated送信時はoutboxからHTTP用snapshotを作り、そのevent ID集合をflush終了までruntimeで保持する。create直後renameは同一identityのTaskCreatedがこの集合に含まれなければoutboxへmergeし、含まれる場合またはTaskCreated不在ならTaskUpdatedをappendする。flush完了mutationは新規TaskUpdatedを保持したまま送信済みTaskCreatedだけを除去する。
 

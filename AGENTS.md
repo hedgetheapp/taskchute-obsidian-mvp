@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current release candidate: `v0.6.61` BRAT Prerelease for device testing.
-- v0.6.61 separates explicit insert-below placement from protected top insertion so physical Markdown and visual order remain aligned. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until current evidence is recorded.
+- Current release candidate: `v0.6.62` BRAT Prerelease for device testing.
+- v0.6.62 normalizes only missing same-section D&D row section metadata from the saved physical heading, then re-reads the exact entry before TaskMoved enqueue. Explicit conflicts remain blocked. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until current evidence is recorded.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 

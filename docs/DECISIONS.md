@@ -196,6 +196,12 @@
 - 根拠: `insertTaskAfterKey()`の`insertPlacement="explicit-below"`、`insertTaskBelowCurrent()`、`copyCurrentTaskBelow()`。
 - 理由: target指定そのものをprotected扱いすると、section先頭scannerが通常Aの手前を返し、A / Bの下へCを追加した物理順がC / A / Bになる一方、visualだけA / B / Cとなるため。作成orderはTaskMovedで後補正せず、最初のMarkdown保存から一致させる。
 
+## D-033: same-section D&Dでは欠落row section metadataだけをphysical headingから補完する
+
+- 判断: same-section D&Dのmoved rowで`section_id`が欠落している場合、物理Markdown見出しを正として`section` / `section_id`を補完する。明示`section_id`が物理sectionと一致する場合に限り、欠落・古いsection labelも正規化する。保存後に同じ`entry_id`を再読込してからTaskMovedへhandoffし、明示`__no_section__`や別section IDとの矛盾は補正せずblockする。
+- 根拠: `resolveTaskLineSectionIdentityForPhysicalHeading()`、`moveTaskByDrag()`、`inspectBridgeTaskMovedVaultState()`。
+- 理由: 空row metadataを`getSectionByNameOrId()`へ渡すとfallback `__no_section__`となり、物理見出しが正しくてもTaskMoved guardでblockされる。一方、`__no_section__`をwildcard化するとgenuine mismatchを見逃すため、欠落と明示値をraw metadataで区別する必要がある。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

@@ -8,6 +8,42 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.62 - 2026-08-15
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- same-section D&D時、moved rowのsection metadata欠落だけを物理見出しから補完するようにした。
+- 明示`__no_section__`または別section IDと物理見出しの不一致は上書きせず従来どおりblockする。row `section_id`が物理sectionと一致する場合に限り、欠落・古いsection labelを正規化する。
+- D&D保存後に対象`entry_id`をMarkdownから一意再解決し、`task_id`、physical heading、row `section_id`を再検証してからTaskMoved v4をenqueueするようにした。
+- `task-insert-below`で新規作成する行へ`section` / `section_id`を保存するようにした。
+- TaskMoved section diagnosticでraw row metadata、parsed identity、resolved section、identity source、normalization、final guard resultを区別した。
+- 欠落meta、stale view identity、明示collision、no-op、TaskMoved 1件を検証するfocused synthetic testを追加した。
+- `manifest.json`を`0.6.62`へ更新した。
+
+### Verification
+
+- `node --check .\main.js`: OK
+- `git diff --check`: OK
+- TMV4 section handoff focused synthetic: PASS
+- TMV4 existing synthetic / no-op / duplicate prevention: PASS
+- v0.6.60 rename handoff regression: PASS
+- v0.6.61 insert-below order regression: PASS
+- v0.6.62実Vault TMV4-BASIC-01: `NOT_VERIFIED`
+
+### v0.6.61 device evidence
+
+- TMV4-BASIC-01: `FAIL`。T-0614 / E-20260815-0032のD&D detection、保存、保存後order検証、enqueue attemptまでは成功したが、`enqueueBridgeTaskMoved()`が`markdown_section_mismatch`でfalse。
+- expected / physical / index sectionは`morning`、row section resolutionは`__no_section__`。remote / mobileへTaskMovedは伝播しなかった。
+
+Tag: `v0.6.62`
+GitHub Release: [v0.6.62 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.62)
+Assets: `main.js`, `manifest.json`, `styles.css`
+Release notes: [`docs/release/v0.6.62.md`](docs/release/v0.6.62.md)
+
+---
+
 ## v0.6.61 - 2026-08-15
 
 Type: Runtime BRAT Prerelease for device testing

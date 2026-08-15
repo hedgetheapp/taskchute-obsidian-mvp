@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.61`を基準とする。v0.6.61はexplicit insert-belowの物理Markdown順とvisual順を一致させ、protected top insertionと分離した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.62`を基準とする。v0.6.62はsame-section D&Dの保存後section identityを物理Markdownから再解決し、欠落row metadataだけを補完してTaskMovedへhandoffする実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -78,6 +78,8 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - source sectionが移動後に空になる場合、v4の空`source_order_entry_ids`を許可する。
 - 同一sectionのtask-row D&Dは、移動前のentry/task順と保存後Markdownのentry/task順を明示的に取得する。順序が変わった場合だけ、保存後検証成功後に`task-drag-reorder-confirmed-markdown-v4`のTaskMovedを1件enqueueする。
 - 同一section D&D payloadは移動前の`source_order_entry_ids` / `source_order_task_ids`と移動後の`target_order_entry_ids` / `target_order_task_ids`を保持する。orderが同じno-opではTaskMovedを生成しない。
+- same-section D&Dのmoved rowに`section_id`がない場合、物理見出しを正として`section` / `section_id`を補完し、保存後に同じ`entry_id`を再読込して`task_id`、物理section、row section identityを検証する。
+- row metadataの明示`section_id`が`__no_section__`または別sectionで物理見出しと矛盾する場合は正規化せず、一般`markdown_section_mismatch` guardでTaskMoved enqueueをblockする。row `section_id`が物理sectionと一致する場合に限り、欠落・古いsection labelを正規化する。`__no_section__`をwildcardとして扱わない。
 
 ## 7. 実行lifecycle
 
@@ -212,5 +214,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.61を本番版とみなす条件。現状はinsert-below物理順と同一section D&Dを含む実Vault / 実mobile未試験のPrereleaseである。
+- v0.6.62を本番版とみなす条件。現状はsame-section D&D section handoffを含む実Vault / 実mobile未試験のPrereleaseである。
 - Widget、Watch、MCP/API、外部calendarの仕様。
