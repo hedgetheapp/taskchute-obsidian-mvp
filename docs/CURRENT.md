@@ -48,6 +48,8 @@ v0.6.61実機試験ではT-0614 / E-20260815-0032のsame-section D&D detection�
 
 v0.6.62実機試験では通常C `T-0624 / E-20260815-0042`のA/B/C→C/A/B D&Dがdevで`drag_drop_enqueue_succeeded`まで到達し、section / physical / resolved IDは`morning`だった。ただしremote / mobile / D1最終確認は未完了でPASS確定しない。missing metadata B `T-0623 / E-20260815-0041`はreload後にgrab/drop gestureが成立してもcommitされず、`drag_drop_section_identity_blocked`、`physical_section_unresolved`、`enqueue_attempted=false`となった。filter stateは空で、試験前backupでもB rowのsection metadataは欠落していた。コード確認では画面add formが通る`addTask()`だけがv0.6.62でも`estimate_min`しかrowへ保存しておらず、欠落行を作り得た。v0.6.63はcurrent Markdownからexact source/target entryの物理見出しを解決し、generic add rowにもsection metadataを保存する。
 
+v0.6.63実機試験では、午後sectionのA `T-0625 / E-20260815-0043`、B `T-0626 / E-20260815-0044`、C `T-0627 / E-20260815-0045`を使用したTMV4-BASIC-01がPASSした。Cのsame-section D&Dはdev物理Markdownと三端末UIをC/A/Bへ揃え、D1 seq 2284のTaskMoved v4がremote / mobile appliedになった。続くTMV4-SECTION-HANDOFF-01もPASSし、controlled missing metadata化したB rowはreload後D&Dで`section=午後 section_id=afternoon`へ補完され、D1 seq 2285がremote / mobile applied、三端末UIはB/C/Aになった。current PASSはこの2ケースだけであり、v0.6.63全体をVerified扱いしない。
+
 ## 実装済み
 
 ### ローカルTaskChute機能
@@ -91,10 +93,9 @@ v0.6.62実機試験では通常C `T-0624 / E-20260815-0042`のA/B/C→C/A/B D&D�
 - v0.6.56 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
 - v0.6.57 Auto Flush lost wake-upのAF-LWU-02 / AF-LWU-03実Vault回帰。AF-LWU-01はv0.6.58でPASS証跡あり。
 - v0.6.58 inbound Ack / cursor recoveryの実mobile回帰。
-- v0.6.63でreload後runtime section空のmissing-metadata rowをsame-section D&Dし、TaskMoved 1件、remote / mobile order反映を確認する。v0.6.62では物理context未解決でFAIL。
 - generic add formで作成したrowに`section` / `section_id`が保存されることをv0.6.63実Vaultで確認する。
 - v0.6.61 explicit insert-below物理順とTC-RENAME-SECTION-TOP / SEQUENCEをv0.6.63で回帰する。
-- TMV4-BASIC-01とTMV4-EMPTY-SOURCE-01のv0.6.63実Vault回帰。
+- TMV4-EMPTY-SOURCE-01のv0.6.63実Vault回帰。TMV4-BASIC-01とTMV4-SECTION-HANDOFF-01はcurrent PASS済み。
 - v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の日付移動、section移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。

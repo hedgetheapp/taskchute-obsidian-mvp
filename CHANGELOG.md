@@ -31,12 +31,18 @@ Type: Runtime BRAT Prerelease for device testing
 - existing TMV4 synthetic / no-op / duplicate prevention: PASS
 - v0.6.60 rename handoff regression: PASS
 - v0.6.61 insert-below order regression: PASS
-- v0.6.63実Vault / 実mobile: `NOT_VERIFIED`
+- v0.6.63 release全体の実Vault / 実mobile Verified判定: `NOT_VERIFIED`。TMV4-BASIC-01とTMV4-SECTION-HANDOFF-01だけcurrent device evidenceで`PASS`。
 
 ### v0.6.62 device evidence
 
 - TMV4-BASIC-01はC `T-0624 / E-20260815-0042`でdev enqueue succeededまで確認。remote / mobile / D1最終確認未完了のためPASS確定なし。
 - TMV4-SECTION-HANDOFF-01はB `T-0623 / E-20260815-0041`で`physical_section_unresolved`、`enqueue_attempted=false`となりFAIL。試験前backupでもrow metadataは欠落していた。
+
+### Post-prerelease device evidence
+
+- TMV4-BASIC-01: `PASS`。A `T-0625 / E-20260815-0043`、B `T-0626 / E-20260815-0044`、C `T-0627 / E-20260815-0045`。午後sectionでCをAの上へD&Dし、dev物理Markdownと三端末UIはC/A/B。D1 seq 2284 / event `465fc34f-a559-4cc5-afdd-9b355abe63f3`はremote / mobile applied。
+- TMV4-SECTION-HANDOFF-01: `PASS`。B rowのsection metadataだけを欠落させてreload後にD&Dし、`section=午後 section_id=afternoon`へ自動補完。dev物理Markdownと三端末UIはB/C/A。D1 seq 2285 / event `7aa1ac1a-d13d-4b74-a691-252502c7e4a3`はremote / mobile applied。
+- このdocs-only追記は公開済みv0.6.63 tag / Release / assetsを変更せず、他の`NOT_VERIFIED`を昇格しない。
 
 Tag: `v0.6.63`
 GitHub Release: [v0.6.63 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.63)
