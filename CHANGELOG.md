@@ -8,6 +8,42 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.61 - 2026-08-15
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- `insertTaskAfterKey()`へexplicit insert-below placementを追加し、通常targetを人工的なprotected keyへ加えないようにした。
+- `task-insert-below`と「下にコピー」で、通常taskの選択target直下へ物理Markdownを保存するようにした。
+- completed / running / paused targetの既存protected top-insert判定は維持した。
+- 作成時点から物理順を正し、order補正用TaskMovedは生成しない。
+- A/B/C連続insert、refresh、rename、物理/UI一致、protected target、task-copy scopeを確認するfocused synthetic testを追加した。
+- `manifest.json`を`0.6.61`へ更新した。
+
+### Verification
+
+- `node --check .\main.js`: OK
+- `git diff --check`: OK
+- INSERT-BELOW-ORDER focused synthetic: PASS
+- v0.6.60 rename handoff focused synthetic: PASS
+- TMV4-BASIC-01 synthetic: PASS
+- v0.6.61実Vault insert-below order / TMV4-BASIC-01: `NOT_VERIFIED`
+
+### v0.6.60 device evidence
+
+- TC-RENAME-SECTION-TOP-01: `PASS`。
+- TC-RENAME-SEQUENCE-01: rename伝播、`task_id + entry_id` identity、remote / mobile appliedは`PASS`。A `T-0602 / E-20260815-0020`、B `T-0603 / E-20260815-0021`、C `T-0604 / E-20260815-0022`。
+- insert-below physical order: `FAIL`。D&D前のdev物理MarkdownがC / A / B、remote / mobileはA / B / C。
+- TMV4-BASIC-01: `BLOCKED`。D&Dは未開始。
+
+Tag: `v0.6.61`
+GitHub Release: [v0.6.61 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.61)
+Assets: `main.js`, `manifest.json`, `styles.css`
+Release notes: [`docs/release/v0.6.61.md`](docs/release/v0.6.61.md)
+
+---
+
 ## v0.6.60 - 2026-08-15
 
 Type: Runtime BRAT Prerelease for device testing

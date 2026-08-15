@@ -6385,8 +6385,9 @@ function insertTaskAfterKey(markdown, settings, targetKey, line, fallbackSection
   markdown = ensureTasksSkeleton(markdown, settings);
   const lines = markdown.split(/\r?\n/);
   const insertOptions = Object.assign({}, options || {});
+  const explicitInsertBelow = String(insertOptions.insertPlacement || "").trim() === "explicit-below";
   const protectedKeys = normalizeProtectedInsertKeys(insertOptions);
-  if (targetKey) protectedKeys.add(String(targetKey));
+  if (targetKey && !explicitInsertBelow) protectedKeys.add(String(targetKey));
   insertOptions.protectedKeys = Array.from(protectedKeys);
   let inTasks = false;
   for (let i = 0; i < lines.length; i++) {
@@ -34916,7 +34917,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       const line = taskLine(fileBase, copiedTitle, false, entryId, meta);
       const baseKey = taskKey(baseTask);
       const protectedKeys = collectRuntimeTopProtectedKeys(this.runtime);
-      const nextMd = insertTaskAfterKey(md, this.settings, baseKey, line, section.name, protectedKeys.length ? { protectedKeys } : {});
+      const nextMd = insertTaskAfterKey(md, this.settings, baseKey, line, section.name, {
+        protectedKeys,
+        insertPlacement: "explicit-below"
+      });
       const orderOk = await this.validateAndRecordTaskCreatedOrder(md, nextMd, section.name, taskId, "task-copy", date);
       if (!orderOk) return false;
       md = nextMd;
@@ -35082,7 +35086,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       const line = taskLine(fileBase, title, false, entryId, { estimate_min: estimateMin });
       const baseKey = taskKey(baseTask);
       const protectedKeys = collectRuntimeTopProtectedKeys(this.runtime);
-      const nextMd = insertTaskAfterKey(md, this.settings, baseKey, line, section.name, protectedKeys.length ? { protectedKeys } : {});
+      const nextMd = insertTaskAfterKey(md, this.settings, baseKey, line, section.name, {
+        protectedKeys,
+        insertPlacement: "explicit-below"
+      });
       const orderOk = await this.validateAndRecordTaskCreatedOrder(md, nextMd, section.name, taskId, "task-insert-below", date);
       if (!orderOk) return false;
       md = nextMd;

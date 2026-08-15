@@ -190,6 +190,12 @@
 - 根拠: `buildBridgeTaskCreatedRenameHandoffPlan()`、`mergeBridgePendingTaskCreatedRename()`、`testBridgeOutboxFlush()`のtarget ID追跡。
 - 理由: flushはoutboxから送信snapshotを作るため、snapshot refresh後に元eventだけを書き換えても送信payloadへ反映されない。merge成功扱いでTaskUpdatedを省略すると旧titleだけがD1へ到達するため。
 
+## D-032: explicit insert-belowをprotected top insertionから分離する
+
+- 判断: ユーザーが明示的に「下にタスクを追加」または「下にコピー」を選んだ場合、通常targetをtarget指定だけでprotected keyへ昇格させず、物理Markdownをtarget直下へ保存する。targetが実際にcompleted / running / pausedなら既存protected insertionを維持する。
+- 根拠: `insertTaskAfterKey()`の`insertPlacement="explicit-below"`、`insertTaskBelowCurrent()`、`copyCurrentTaskBelow()`。
+- 理由: target指定そのものをprotected扱いすると、section先頭scannerが通常Aの手前を返し、A / Bの下へCを追加した物理順がC / A / Bになる一方、visualだけA / B / Cとなるため。作成orderはTaskMovedで後補正せず、最初のMarkdown保存から一致させる。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

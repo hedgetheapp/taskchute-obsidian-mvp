@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.60`を基準とする。v0.6.60はcreate直後renameとin-flight TaskCreated送信snapshotのhandoff競合を修復した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.61`を基準とする。v0.6.61はexplicit insert-belowの物理Markdown順とvisual順を一致させ、protected top insertionと分離した実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -49,6 +49,9 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 
 - 通常追加、section先頭追加、現在行の下への追加、割り込み追加を提供する。
 - 新規taskにはtask noteと日付noteのentry行を作成する。
+- explicitな「下にタスクを追加」と「下にコピー」は、通常targetを人工的なprotected keyにせず、選択target直下へ物理Markdownを保存する。
+- target自体がcompleted、running、pausedとして保護対象なら、既存どおりprotected block直後へ挿入する。section先頭追加、interrupt continuation、inbound continuationの既存placementは変更しない。
+- 作成時のphysical orderとvisual orderを同じ挿入結果から構築し、order修復目的のTaskMovedは生成しない。
 - task noteの既定pathは`Taskchute/Tasks/{file_base}.md`。
 - Bridge有効時はTaskCreatedをoutboxへ追加する。
 - TaskCreated未送信の高速更新は、可能な項目をpending TaskCreatedへmergeする。
@@ -209,5 +212,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.60を本番版とみなす条件。現状はcreate直後renameと同一section D&Dを含む実Vault / 実mobile未試験のPrereleaseである。
+- v0.6.61を本番版とみなす条件。現状はinsert-below物理順と同一section D&Dを含む実Vault / 実mobile未試験のPrereleaseである。
 - Widget、Watch、MCP/API、外部calendarの仕様。

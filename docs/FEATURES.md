@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.60の現行feature inventoryである。v0.6.60はcreate直後renameをpending TaskCreatedへmergeする経路と、送信snapshot中または既送信時にTaskUpdatedへhandoffする経路を分離した実機試験用Prereleaseである。
+この一覧はv0.6.61の現行feature inventoryである。v0.6.61はexplicit insert-belowとprotected top insertionを分離し、通常task追加時の物理Markdown順とvisual順を一致させる実機試験用Prereleaseである。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.60で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.61で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -28,10 +28,10 @@
 
 | 機能 | 状態 | 概要・根拠 |
 |---|---|---|
-| Task作成 | 実装済み | 通常追加、section先頭、現在行の下、割り込み追加。`addTask()`。 |
+| Task作成 | 実装済み | 通常追加、section先頭、現在行の下、割り込み追加。explicit insert-belowは通常target直下へ物理保存し、completed / running / paused保護時だけ既存top-insert規則を使う。`insertTaskAfterKey()`、`insertTaskBelowCurrent()`。 |
 | Task編集 | 実装済み | title、estimate、start/end plan、actual、各属性を更新。 |
 | Task削除 | 実装済み | 単体・複数・全件系。削除前snapshotとBridge guardを持つ。 |
-| Taskコピー | 実装済み | task noteとboard entryを別IDで複製する。 |
+| Taskコピー | 実装済み | task noteとboard entryを別IDで複製し、通常targetでは物理行も選択行直下へ保存する。 |
 | Task移動 | 実装済み | 上下、D&D、section、日付変更、複数選択移動。 |
 | title / task note filename同期 | 実装済み | title、YAML、heading、リンクalias、必要時renameを扱う。 |
 | entry identity | 実装済み | 原則`task_id + entry_id`。同一task_id複数entryを許容する。 |

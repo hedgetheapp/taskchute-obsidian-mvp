@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current baseline: v0.6.60 BRAT Prerelease. It makes create-then-rename handoff aware of in-flight TaskCreated snapshots. Synthetic and structural checks passed; real Vault verification remains pending.
+Current baseline: v0.6.61 BRAT Prerelease. It keeps explicit insert-below physical Markdown order aligned with the visual order while preserving protected top insertion. Synthetic and structural checks passed; real Vault verification remains pending.
 
 ## Current Canonical
 
@@ -32,6 +32,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
+- [v0.6.61 BRAT Prerelease](release/v0.6.61.md)
 - [v0.6.60 BRAT Prerelease](release/v0.6.60.md)
 - [BRAT release operation](brat-release-operation.md)
 - [Release checklist](release-checklist.md)

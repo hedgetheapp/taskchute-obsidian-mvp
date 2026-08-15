@@ -4,13 +4,13 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current release: `v0.6.60` BRAT Prerelease
+- Current release: `v0.6.61` BRAT Prerelease
 - Current branch: `feature/v6.6-routine-sync`
-- Canonical docs checkpoint: `v0.6.60` tag target
-- Release commit: Git tag `v0.6.60`のtargetを参照
+- Canonical docs checkpoint: `v0.6.61` tag target
+- Release commit: Git tag `v0.6.61`のtargetを参照
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.60は、送信snapshotに入ったTaskCreatedへcreate直後renameをmergeしてTaskUpdatedを省略する競合を修正する実機試験用BRAT Prereleaseです。pending TaskCreatedはmergeし、in-flightまたは既送信ならTaskUpdatedへhandoffします。synthetic / structural試験は完了していますが、実Vault / 実mobileでは`NOT_VERIFIED`であり、Verified済み安定版ではありません。
+v0.6.61は、explicit insert-belowのtargetを人工的なprotected keyとして扱わず、通常taskの直下へ物理Markdownを保存する実機試験用BRAT Prereleaseです。completed / running / pausedの保護とv0.6.60 rename handoffは維持します。synthetic / structural試験は完了していますが、実Vault / 実mobileでは`NOT_VERIFIED`であり、Verified済み安定版ではありません。
 
 ## Canonical Documentation
 
