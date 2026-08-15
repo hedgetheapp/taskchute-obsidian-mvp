@@ -3011,6 +3011,83 @@ function resolveTaskLineSectionIdentityForPhysicalHeading(line, settings, physic
     : "物理見出しと行section identityを確認しました。";
   return result;
 }
+
+function collectTaskBoardPhysicalOccurrences(markdown) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const occurrences = [];
+  let inTasks = false;
+  let physicalSectionLabel = "";
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (/^##\s+Tasks\s*$/.test(line)) {
+      inTasks = true;
+      continue;
+    }
+    if (inTasks && /^##\s+/.test(line)) break;
+    if (!inTasks) continue;
+    const sectionMatch = line.match(/^###\s+(.+?)\s*$/);
+    if (sectionMatch) {
+      physicalSectionLabel = String(sectionMatch[1] || "").trim();
+      continue;
+    }
+    if (!isTaskLine(line)) continue;
+    occurrences.push({
+      index,
+      line,
+      entry_id: String(entryIdFromTaskLine(line) || "").trim(),
+      task_id: String(taskIdFromTaskLine(line) || "").trim(),
+      physical_section_label: physicalSectionLabel
+    });
+  }
+  return { lines, occurrences };
+}
+
+function resolveTaskDragPhysicalContext(markdown, settings, sourceEntryId, targetEntryId) {
+  const sourceId = String(sourceEntryId || "").trim();
+  const targetId = String(targetEntryId || "").trim();
+  const collected = collectTaskBoardPhysicalOccurrences(markdown);
+  const sourceMatches = collected.occurrences.filter(item => item.entry_id === sourceId);
+  const targetMatches = collected.occurrences.filter(item => item.entry_id === targetId);
+  const result = {
+    ok: false,
+    reason_code: "",
+    reason: "",
+    source_occurrence: sourceMatches.length === 1 ? sourceMatches[0] : null,
+    target_occurrence: targetMatches.length === 1 ? targetMatches[0] : null,
+    source_physical_section_label: "",
+    destination_physical_section_label: "",
+    source_section_id: "",
+    destination_section_id: "",
+    source_section: null,
+    destination_section: null,
+    same_physical_section: false,
+    section_identity_source: "exact_entry_id_physical_heading"
+  };
+  if (!sourceId || !targetId || sourceMatches.length !== 1 || targetMatches.length !== 1) {
+    result.reason_code = "drag_entry_identity_not_unique";
+    result.reason = "D&Dのsource/target entry_idを物理Markdownから一意に解決できませんでした。";
+    return result;
+  }
+  result.source_physical_section_label = String(result.source_occurrence.physical_section_label || "").trim();
+  result.destination_physical_section_label = String(result.target_occurrence.physical_section_label || "").trim();
+  if (!result.source_physical_section_label || !result.destination_physical_section_label) {
+    result.reason_code = "physical_section_heading_missing";
+    result.reason = "D&Dのsource/target物理見出しをMarkdownから解決できませんでした。";
+    return result;
+  }
+  result.source_section = findBoardSection(settings || {}, result.source_physical_section_label);
+  result.destination_section = findBoardSection(settings || {}, result.destination_physical_section_label);
+  result.source_section_id = String(result.source_section && result.source_section.id || "").trim();
+  result.destination_section_id = String(result.destination_section && result.destination_section.id || "").trim();
+  if (!result.source_section || !result.destination_section) {
+    result.reason_code = "physical_section_unresolved";
+    result.reason = "D&Dのsource/target物理見出しをsection設定へ解決できませんでした。";
+    return result;
+  }
+  result.same_physical_section = result.source_section_id === result.destination_section_id;
+  result.ok = true;
+  return result;
+}
 function entryIdFromTaskLine(line) {
   return tcMetaFromTaskLine(line).entry_id || "";
 }
@@ -12314,6 +12391,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       date: String(detail.date || "").trim(),
       section_id: String(detail.section_id || "").trim(),
       physical_section_id: String(detail.physical_section_id || "").trim(),
+      source_physical_section_label: String(detail.source_physical_section_label || "").trim(),
+      destination_physical_section_label: String(detail.destination_physical_section_label || "").trim(),
+      physical_context_source: String(detail.physical_context_source || "").trim(),
       raw_row_section_id: String(detail.raw_row_section_id || "").trim(),
       raw_row_section_label: String(detail.raw_row_section_label || "").trim(),
       raw_row_section_id_before_normalization: String(detail.raw_row_section_id_before_normalization || "").trim(),
@@ -32452,7 +32532,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       const notePath = this.getTaskchutePath(date);
       let md = await readFileText(this.app, notePath);
       const entryId = await this.nextUniqueEntryId(date, md);
-      const nextMd = insertTaskIntoSection(md, this.settings, sec.name, taskLine(base, title, false, entryId, { estimate_min: normalizedEstimateMin }));
+      const nextMd = insertTaskIntoSection(md, this.settings, sec.name, taskLine(base, title, false, entryId, {
+        estimate_min: normalizedEstimateMin,
+        section: sec.name,
+        section_id: sec.id || ""
+      }));
       const orderOk = await this.validateAndRecordTaskCreatedOrder(md, nextMd, sec.name, taskId, interrupt ? "interrupt-task-add" : "task-add", date);
       if (!orderOk) return false;
       md = nextMd;
@@ -36185,6 +36269,8 @@ class TaskchutePlugin extends obsidian.Plugin {
             items.push({
               index: i,
               id: taskKeyFromTaskLine(srcLines[i]),
+              entryId: String(entryIdFromTaskLine(srcLines[i]) || "").trim(),
+              taskId: String(taskIdFromTaskLine(srcLines[i]) || "").trim(),
               file: link ? link.file : "",
               title: link ? link.alias : "",
               section: currentSection,
@@ -36197,17 +36283,40 @@ class TaskchutePlugin extends obsidian.Plugin {
       };
 
       const beforeItems = collectTaskItems(lines);
-      const sourceItem = beforeItems.find(item => item.id === sourceKey);
-      const targetItem = beforeItems.find(item => item.id === targetKey);
+      const sourceCandidates = beforeItems.filter(item => item.entryId === sourceKey);
+      const targetCandidates = beforeItems.filter(item => item.entryId === targetKey);
+      const sourceItem = sourceCandidates.length === 1 ? sourceCandidates[0] : null;
+      const targetItem = targetCandidates.length === 1 ? targetCandidates[0] : null;
       if (!sourceItem || !targetItem) {
         new obsidian.Notice("移動するタスクが見つかりません");
         return false;
       }
       const sourceTask = this.getTaskFromViewByKey(sourceKey, view);
       const moveDate = view && view.selectedDate ? view.selectedDate : this.getActiveViewDate();
-      const sourceSectionBeforeInfo = getTaskSectionOrderInfoFromMarkdown(md, sourceItem.section);
       const sourceBridgeTaskId = String(sourceTask && (sourceTask.taskId || sourceTask.task_id) || taskIdFromTaskLine(sourceItem.line) || "").trim();
-      const sourceBridgeEntryId = String(sourceItem.id || sourceTask && (sourceTask.entryId || sourceTask.entry_id || sourceTask.taskKey) || "").trim();
+      const sourceBridgeEntryId = String(sourceItem.entryId || "").trim();
+      const physicalContext = resolveTaskDragPhysicalContext(md, this.settings, sourceBridgeEntryId, targetKey);
+      if (!physicalContext.ok) {
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_physical_context_blocked", {
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          source_physical_section_label: physicalContext.source_physical_section_label,
+          destination_physical_section_label: physicalContext.destination_physical_section_label,
+          physical_context_source: physicalContext.section_identity_source,
+          section_identity_source: physicalContext.section_identity_source,
+          final_guard_result: "blocked",
+          enqueue_attempted: false,
+          enqueue_skipped_reason: physicalContext.reason_code,
+          message: physicalContext.reason
+        }, { persist: true });
+        return false;
+      }
+      const sourcePhysicalName = physicalContext.source_physical_section_label;
+      const destinationName = physicalContext.destination_physical_section_label;
+      const sourcePhysicalSection = physicalContext.source_section;
+      const destinationSection = physicalContext.destination_section;
+      const sourceSectionBeforeInfo = getTaskSectionOrderInfoFromMarkdown(md, sourcePhysicalName);
       const isRuntimeProtectedTask = (task, item) => {
         if (!task && !item) return false;
         const key = item ? item.id : taskKey(task);
@@ -36227,12 +36336,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       lines.splice(sourceItem.index, 1);
 
       const afterItems = collectTaskItems(lines);
-      const targetAfterRemoval = afterItems.find(item => item.id === targetKey);
+      const targetAfterRemovalCandidates = afterItems.filter(item => item.entryId === targetKey);
+      const targetAfterRemoval = targetAfterRemovalCandidates.length === 1 ? targetAfterRemovalCandidates[0] : null;
       if (!targetAfterRemoval) return false;
 
-      const destinationName = targetAfterRemoval.section || targetItem.section || sourceItem.section || "";
-      const destinationSection = getSectionByNameOrId(this.settings, destinationName);
-      const isCrossSectionDragMove = !!destinationName && destinationName !== sourceItem.section;
+      const isCrossSectionDragMove = !physicalContext.same_physical_section;
       if (isCrossSectionDragMove) {
         this.ensureSectionExpandedForIncomingTask(destinationSection ? destinationSection.id : destinationName);
       }
@@ -36256,6 +36364,9 @@ class TaskchutePlugin extends obsidian.Plugin {
             task_id: sourceBridgeTaskId,
             entry_id: sourceBridgeEntryId,
             date: moveDate,
+            source_physical_section_label: sourcePhysicalName,
+            destination_physical_section_label: destinationName,
+            physical_context_source: physicalContext.section_identity_source,
             physical_section_id: dragSectionIdentity.physical_section_id,
             raw_row_section_id: dragSectionIdentity.raw_row_section_id,
             raw_row_section_label: dragSectionIdentity.raw_row_section_label,
@@ -36274,7 +36385,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         movedLine = dragSectionIdentity.normalized_line;
       }
       let routineEditScope = "normal";
-      if (destinationName && destinationName !== sourceItem.section && sourceTask && isRoutineHistoryTarget(sourceTask)) {
+      if (isCrossSectionDragMove && sourceTask && isRoutineHistoryTarget(sourceTask)) {
         const scope = await this.askRoutineEditScope(sourceTask, "section", destinationName);
         if (scope === "cancel") return false;
         routineEditScope = scope;
@@ -36355,7 +36466,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         return false;
       }
 
-      if (destinationName && destinationName !== sourceItem.section) {
+      if (isCrossSectionDragMove) {
         if (routineEditScope !== "today") {
           const sectionMetaOk = await this.updateTaskSectionMetadata(sourceItem.file, destinationName);
           if (sectionMetaOk === false) {
@@ -36482,6 +36593,9 @@ class TaskchutePlugin extends obsidian.Plugin {
           task_id: sourceBridgeTaskId,
           entry_id: sourceBridgeEntryId,
           date: moveDate,
+          source_physical_section_label: sourcePhysicalName,
+          destination_physical_section_label: destinationName,
+          physical_context_source: physicalContext.section_identity_source,
           section_id: bridgeTask.sectionId,
           physical_section_id: dragSectionIdentity.physical_section_id,
           raw_row_section_id: dragSectionIdentity.raw_row_section_id,
@@ -36513,7 +36627,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         }));
       } else {
         bridgeEnqueued = !!(await this.enqueueBridgeTaskMoved(sourceTask, {
-          from: { date: moveDate, section: sourceItem.section, index: sourceItem.index },
+          from: { date: moveDate, section: sourcePhysicalSection ? sourcePhysicalSection.id : sourcePhysicalName, index: sourceItem.index },
           to: { date: moveDate, section: destinationSection ? destinationSection.id : destinationName, index: insertAt },
           moveType: "section-change"
         }));
@@ -36522,6 +36636,9 @@ class TaskchutePlugin extends obsidian.Plugin {
         task_id: sourceBridgeTaskId,
         entry_id: sourceBridgeEntryId,
         date: moveDate,
+        source_physical_section_label: sourcePhysicalName,
+        destination_physical_section_label: destinationName,
+        physical_context_source: physicalContext.section_identity_source,
         section_id: String(destinationSection && destinationSection.id || "").trim(),
         physical_section_id: String(dragSectionIdentity && dragSectionIdentity.physical_section_id || "").trim(),
         raw_row_section_id: String(dragSectionIdentity && dragSectionIdentity.raw_row_section_id || "").trim(),

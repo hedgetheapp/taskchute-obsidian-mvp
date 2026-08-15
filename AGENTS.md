@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current release candidate: `v0.6.62` BRAT Prerelease for device testing.
-- v0.6.62 normalizes only missing same-section D&D row section metadata from the saved physical heading, then re-reads the exact entry before TaskMoved enqueue. Explicit conflicts remain blocked. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until current evidence is recorded.
+- Current release candidate: `v0.6.63` BRAT Prerelease for device testing.
+- v0.6.63 resolves same-section D&D source and target from exact `entry_id` occurrences and physical Markdown headings even when reloaded runtime section fields are empty. Generic task creation now persists row section metadata. Explicit conflicts remain blocked. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until current evidence is recorded.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 

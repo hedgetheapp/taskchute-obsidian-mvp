@@ -3,14 +3,14 @@
 ## 調査基準
 
 - 調査日: 2026-08-15
-- manifest version: `0.6.62`
+- manifest version: `0.6.63`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: `v0.6.62` tag target
-- release tag: `v0.6.62`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
+- canonical docs checkpoint: `v0.6.63` tag target
+- release tag: `v0.6.63`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
 - release準備開始時のworktree: clean
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.62はsame-section D&Dの保存後section identityを物理Markdownから再解決し、欠落row metadataだけを補完するBRAT実機試験用Prereleaseであり、Verified済み安定版ではない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.63はsame-section D&Dのsource/targetをexact entryと物理Markdown見出しから再解決し、reload後のruntime section fieldsに依存しないBRAT実機試験用Prereleaseであり、Verified済み安定版ではない。
 
 ## 文書運用
 
@@ -45,6 +45,8 @@ v0.6.59実機試験では、空sectionへ`task-insert-section-top`で作成し�
 v0.6.60実機試験ではTC-RENAME-SECTION-TOP-01がPASSし、A `T-0602 / E-20260815-0020`、B `T-0603 / E-20260815-0021`、C `T-0604 / E-20260815-0022`の連続create→renameもtitle伝播、identity、remote / mobile appliedまでPASSした。一方、D&D開始前のdev物理MarkdownはC / A / B、remote / mobileはA / B / Cだった。`insertTaskAfterKey()`がselected targetを常にprotected集合へ加え、通常Bの下へのCもsection top scannerへrerouteしたlatent bugが原因である。v0.6.61はexplicit insert-belowと「下にコピー」だけtargetの人工的protected化を止め、実際のcompleted / running / paused保護は維持する。TMV4-BASIC-01はD&D未開始のためv0.6.60ではBLOCKEDであり、v0.6.61のinsert order確認後に再開する。
 
 v0.6.61実機試験ではT-0614 / E-20260815-0032のsame-section D&D detection、Markdown保存、保存後order検証、enqueue attemptまで成功したが、`enqueueBridgeTaskMoved()`が`markdown_section_mismatch`でfalseを返した。expected / physical / index sectionは`morning`、row section resolutionは`__no_section__`だった。コード確認ではrow commentに明示`__no_section__`があったのではなく、`task-insert-below`行の`section` / `section_id`欠落を`getSectionByNameOrId("")`がno-section definitionへfallbackした結果だった。v0.6.62はsame-section D&D保存前に欠落metaをphysical headingから補完し、row `section_id`が物理sectionと一致する場合だけ欠落・古いlabelを正規化して、保存後にentry_idで再読込検証する。明示section ID不一致の一般guardは維持する。
+
+v0.6.62実機試験では通常C `T-0624 / E-20260815-0042`のA/B/C→C/A/B D&Dがdevで`drag_drop_enqueue_succeeded`まで到達し、section / physical / resolved IDは`morning`だった。ただしremote / mobile / D1最終確認は未完了でPASS確定しない。missing metadata B `T-0623 / E-20260815-0041`はreload後にgrab/drop gestureが成立してもcommitされず、`drag_drop_section_identity_blocked`、`physical_section_unresolved`、`enqueue_attempted=false`となった。filter stateは空で、試験前backupでもB rowのsection metadataは欠落していた。コード確認では画面add formが通る`addTask()`だけがv0.6.62でも`estimate_min`しかrowへ保存しておらず、欠落行を作り得た。v0.6.63はcurrent Markdownからexact source/target entryの物理見出しを解決し、generic add rowにもsection metadataを保存する。
 
 ## 実装済み
 
@@ -89,10 +91,10 @@ v0.6.61実機試験ではT-0614 / E-20260815-0032のsame-section D&D detection�
 - v0.6.56 safe rekeyの実Vault回帰。実行コードはv0.6.54と同一で、過去データ混在により現在保留。
 - v0.6.57 Auto Flush lost wake-upのAF-LWU-02 / AF-LWU-03実Vault回帰。AF-LWU-01はv0.6.58でPASS証跡あり。
 - v0.6.58 inbound Ack / cursor recoveryの実mobile回帰。
-- v0.6.62でsame-section D&Dの欠落row section meta補完、TaskMoved 1件、remote / mobile order反映を確認する。v0.6.61ではenqueue guardでFAIL。
-- v0.6.61 explicit insert-below物理順とTC-RENAME-SECTION-TOP / SEQUENCEをv0.6.62で回帰する。
-- TMV4-BASIC-01のv0.6.62実Vault再試験。
-- TMV4-EMPTY-SOURCE-01のv0.6.62実Vault回帰。
+- v0.6.63でreload後runtime section空のmissing-metadata rowをsame-section D&Dし、TaskMoved 1件、remote / mobile order反映を確認する。v0.6.62では物理context未解決でFAIL。
+- generic add formで作成したrowに`section` / `section_id`が保存されることをv0.6.63実Vaultで確認する。
+- v0.6.61 explicit insert-below物理順とTC-RENAME-SECTION-TOP / SEQUENCEをv0.6.63で回帰する。
+- TMV4-BASIC-01とTMV4-EMPTY-SOURCE-01のv0.6.63実Vault回帰。
 - v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の日付移動、section移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
@@ -123,12 +125,12 @@ v0.6.61実機試験ではT-0614 / E-20260815-0032のsame-section D&D detection�
 
 ## 現在確認できる問題点
 
-- 現行統合文書はv0.6.62へ整合したが、旧詳細資料には過去versionの記述が残る。
+- 現行統合文書はv0.6.63へ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。v0.6.62は実機試験用Prereleaseであり、本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。v0.6.63は実機試験用Prereleaseであり、本番可否は要確認。
 
 ## 将来候補・明示的対象外
 

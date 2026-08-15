@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.62。same-section D&Dの保存後entry section identityを物理Markdownから再解決し、欠落row metadataだけを補完する実機試験用Prereleaseである。
+調査基準: v0.6.63。same-section D&Dのsource/targetをexact entryと物理Markdown見出しから再解決し、runtime section fieldsに依存しない実機試験用Prereleaseである。
 
 ## 1. 概要
 
@@ -27,7 +27,7 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。約53,147行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.62`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.63`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
@@ -35,6 +35,7 @@ TaskchutePlugin + ItemViews (main.js)
 | `tests/taskcreated-rename-handoff-v0660.js` | pending / in-flight / sent相当のTaskCreated rename handoffを検証するfocused synthetic test。 |
 | `tests/insert-below-order-v0661.js` | explicit insert-belowの物理/visual順、refresh、rename、protected target、task-copy scopeを検証するfocused synthetic test。 |
 | `tests/tmv4-section-handoff-v0662.js` | same-section D&Dの欠落row section meta補完、保存後identity、strict conflict block、TaskMoved 1件を検証するfocused synthetic test。 |
+| `tests/tmv4-physical-context-v0663.js` | reload後runtime section空、exact physical headings、missing meta補完、strict conflict、no-op、generic add metadataを検証するfocused synthetic test。 |
 
 `src/`、`package.json`、bundler設定、汎用test runnerは存在しない。`tests/`にはv0.6.59以降のfocused standalone testだけがある。
 
@@ -171,6 +172,8 @@ explicit insert-belowと「下にコピー」は`insertTaskAfterKey()`へ`insert
 同一sectionのtask-row D&Dは、操作前Markdownからsource entry orderを保存し、移動後Markdownを書き込み、再読込したtarget entry orderとの一致を確認してからD&D専用TaskMoved v4を1件enqueueする。UIのdrop handlerは`moveTaskByDrag()`へ集約され、no-op orderは保存・enqueue前に除外する。
 
 same-section D&Dでは、moved rowのraw `section` / `section_id`を物理見出しと比較する。`section_id`欠落は物理見出しから補完し、IDが物理sectionを確定している場合に限って欠落・古いlabelも正規化して同じMarkdown保存へ含める。UI refresh後のMarkdownから対象`entry_id`を一意再解決し、`task_id`、physical section、row section IDが揃った後だけ既存`enqueueBridgeTaskMoved()`へ渡す。明示section IDの不一致は補正せず一般guardへ到達する前にも停止する。
+
+v0.6.63では、D&D開始時にも`resolveTaskDragPhysicalContext()`がcurrent Markdownからsource/target `entry_id`を一意解決し、各行の物理見出しを取得する。same-section判定とrow metadata補完はこのcontextを使い、view/runtime taskの空sectionをhandoffしない。画面add formが通る`addTask()`も行作成時にsection metadataを保存する。
 
 TaskCreated送信時はoutboxからHTTP用snapshotを作り、そのevent ID集合をflush終了までruntimeで保持する。create直後renameは同一identityのTaskCreatedがこの集合に含まれなければoutboxへmergeし、含まれる場合またはTaskCreated不在ならTaskUpdatedをappendする。flush完了mutationは新規TaskUpdatedを保持したまま送信済みTaskCreatedだけを除去する。
 

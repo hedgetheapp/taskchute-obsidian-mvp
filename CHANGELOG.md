@@ -8,6 +8,43 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.63 - 2026-08-15
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- same-section row D&Dのsource/targetをcurrent Markdownからexact `entry_id`で一意解決し、各物理見出しからsection contextを構築するようにした。
+- reload後のruntime task `section` / `sectionId`が空でも、source/destination physical section一致時はmissing row metadataを正規化してD&Dを続行する。
+- 画面add formが通るgeneric `addTask()`でも、新規rowへ`section` / `section_id`を保存するようにした。
+- source/target physical heading、physical context source、exact entry不一致をD&D diagnosticsへ追加した。
+- explicit `__no_section__` / wrong section ID block、一般`markdown_section_mismatch` guard、TaskMoved v4 / Ack / cursor semanticsは維持した。
+- reload runtime空、missing metadata、TaskMoved 1件、wrong ID block、no-op、generic add metadataを検証するfocused synthetic testを追加した。
+- `manifest.json`を`0.6.63`へ更新した。
+
+### Verification
+
+- `node --check .\main.js`: OK
+- `git diff --check`: OK
+- TMV4 physical context focused synthetic: PASS
+- v0.6.62 section handoff regression: PASS
+- existing TMV4 synthetic / no-op / duplicate prevention: PASS
+- v0.6.60 rename handoff regression: PASS
+- v0.6.61 insert-below order regression: PASS
+- v0.6.63実Vault / 実mobile: `NOT_VERIFIED`
+
+### v0.6.62 device evidence
+
+- TMV4-BASIC-01はC `T-0624 / E-20260815-0042`でdev enqueue succeededまで確認。remote / mobile / D1最終確認未完了のためPASS確定なし。
+- TMV4-SECTION-HANDOFF-01はB `T-0623 / E-20260815-0041`で`physical_section_unresolved`、`enqueue_attempted=false`となりFAIL。試験前backupでもrow metadataは欠落していた。
+
+Tag: `v0.6.63`
+GitHub Release: [v0.6.63 BRAT Prerelease](https://github.com/hedgetheapp/taskchute-obsidian-mvp/releases/tag/v0.6.63)
+Assets: `main.js`, `manifest.json`, `styles.css`
+Release notes: [`docs/release/v0.6.63.md`](docs/release/v0.6.63.md)
+
+---
+
 ## v0.6.62 - 2026-08-15
 
 Type: Runtime BRAT Prerelease for device testing

@@ -202,6 +202,12 @@
 - 根拠: `resolveTaskLineSectionIdentityForPhysicalHeading()`、`moveTaskByDrag()`、`inspectBridgeTaskMovedVaultState()`。
 - 理由: 空row metadataを`getSectionByNameOrId()`へ渡すとfallback `__no_section__`となり、物理見出しが正しくてもTaskMoved guardでblockされる。一方、`__no_section__`をwildcard化するとgenuine mismatchを見逃すため、欠落と明示値をraw metadataで区別する必要がある。
 
+## D-034: D&D section contextはexact entryの物理見出しから構築する
+
+- 判断: row dropのsource/targetをcurrent Markdownからexact `entry_id`で一意解決し、両方の物理見出しをsection contextの正とする。reload後のview/runtime section fieldsはsame-section判定に使わない。generic `addTask()`を含む新規通常行には作成時からsection metadataを保存する。
+- 根拠: `collectTaskBoardPhysicalOccurrences()`、`resolveTaskDragPhysicalContext()`、`moveTaskByDrag()`、`addTask()`。
+- 理由: row metadata欠落後のreloadではruntime sectionも空になり得る。物理Markdownに一意なentryと見出しが残っているのにview stateをhandoffすると、正当なD&Dを`physical_section_unresolved`で停止できるため。明示row conflictの補正禁止と一般guardはD-033のまま維持する。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

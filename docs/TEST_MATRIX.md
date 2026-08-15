@@ -2,11 +2,11 @@
 
 ## 基準と読み方
 
-- 対象release: v0.6.62 BRAT Prerelease
-- canonical docs checkpoint: `v0.6.62` tag target
-- v0.6.62はsame-section D&Dの保存後section identityを物理Markdownから再解決し、欠落row metadataだけを補完する実機試験用version。
+- 対象release: v0.6.63 BRAT Prerelease
+- canonical docs checkpoint: `v0.6.63` tag target
+- v0.6.63はsame-section D&Dのsource/targetをexact entryと物理Markdown見出しから再解決し、reload後runtime section空でもhandoffする実機試験用version。
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
-- dev / remote / mobile列と`Status`列は、いずれもv0.6.62についての判定を示す。
+- dev / remote / mobile列と`Status`列は、いずれもv0.6.63についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
 - Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
@@ -59,11 +59,20 @@
 
 この証跡はv0.6.61についての判定であり、v0.6.62へ自動継承しない。
 
-## Current v0.6.62 Matrix
+## v0.6.62 Device Evidence
+
+| Test case | Result | Evidence |
+|---|---|---|
+| TMV4-BASIC-01 | `NOT_VERIFIED` | C `T-0624 / E-20260815-0042`。devでA/B/C→C/A/B、`drag_drop_move_detected`、`drag_drop_enqueue_attempted`、`drag_drop_enqueue_succeeded`、section / physical / resolved ID=`morning`を確認。remote / mobile / D1最終確認が未完了のためPASSにしない。 |
+| TMV4-SECTION-HANDOFF-01 | `FAIL` | B `T-0623 / E-20260815-0041`。row section metadataなし、grab/drop gesture成立後にcommitされず元表示へ戻る。`drag_drop_section_identity_blocked`、`physical_section_unresolved`、`enqueue_attempted=false`。filter/search/query stateは空。試験前backup復元後もB row metadataは欠落。 |
+
+この証跡はv0.6.62についての判定であり、v0.6.63へ自動継承しない。
+
+## Current v0.6.63 Matrix
 
 | Area | Test case | dev | remote | mobile | Last verified version | Status | Evidence / Notes |
 |---|---|---|---|---|---|---|---|
-| Auto Flush lost wake-up | AF-LWU-01: create直後renameを手動flushなしで両event送信 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.58 | `NOT_VERIFIED` | v0.6.58で実機PASS。v0.6.62のcurrent evidenceへは未昇格。Auto Flush scheduler本体はv0.6.58から変更なし。 |
+| Auto Flush lost wake-up | AF-LWU-01: create直後renameを手動flushなしで両event送信 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.58 | `NOT_VERIFIED` | v0.6.58で実機PASS。v0.6.63のcurrent evidenceへは未昇格。Auto Flush scheduler本体はv0.6.58から変更なし。 |
 | Auto Flush lost wake-up | AF-LWU-02: flush中の複数enqueueを終了後に再schedule | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic checkのみ。実機で同時flushなし・全送信を要確認。 |
 | Auto Flush lost wake-up | AF-LWU-03: failedのみでloopせず新規pendingは送信 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic checkのみ。実outboxでmax retry failedとの共存を要確認。 |
 | Inbound Ack / cursor | ACK-CURSOR-GUARD-01: Ack 2xx後のcursor保存失敗をreconcile | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic PASS。実mobileでMarkdown二重applyなし、永久safe-stopなしを未確認。 |
@@ -73,14 +82,15 @@
 | Inbound Ack / cursor | CURSOR-MERGE-01: latest dataへmonotonic merge | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic PASS。外部reloadを伴う実data.json競合は未確認。 |
 | Mobile rescue | MOBILE-RESCUE-01: recoverable Ack / cursor stopからdrain再開 | `NOT_APPLICABLE` | `NOT_APPLICABLE` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic / structural PASS。実mobile rescueは未実施。 |
 | TaskCreated | 通常taskを作成し、他2端末のMarkdown/UIとAckを確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | `bridge-v6.5-rc1-checklist.md`に三端末起点PASSあり。ただし後続のTaskCreated guard / collision変更を含むv0.6.56回帰は未記録。 |
-| TaskCreated / TaskUpdated | TC-RENAME-SECTION-TOP-01: 空section先頭へ作成後即rename | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 | `NOT_VERIFIED` | v0.6.60実機PASS。v0.6.62ではrename handoffコード未変更、focused synthetic再PASSだがcurrent実機証跡へは未昇格。 |
-| TaskCreated / TaskUpdated | TC-RENAME-SEQUENCE-01: insert-belowと3件連続create→rename | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 | `NOT_VERIFIED` | v0.6.60でA/B/Cのrename、identity、remote / mobile appliedはPASS。v0.6.62実機回帰は未実施。 |
-| TaskCreated | INSERT-BELOW-ORDER-01: Aの下へB、Bの下へCを作成し物理/UI順を確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 FAIL | `NOT_VERIFIED` | v0.6.61 / v0.6.62 focused syntheticでA / B / C、refresh、rename、physical / visual一致、protected targetを確認。v0.6.62実Vaultは未試験。 |
+| TaskCreated / TaskUpdated | TC-RENAME-SECTION-TOP-01: 空section先頭へ作成後即rename | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 | `NOT_VERIFIED` | v0.6.60実機PASS。v0.6.63ではrename handoffコード未変更、focused synthetic再PASSだがcurrent実機証跡へは未昇格。 |
+| TaskCreated / TaskUpdated | TC-RENAME-SEQUENCE-01: insert-belowと3件連続create→rename | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 | `NOT_VERIFIED` | v0.6.60でA/B/Cのrename、identity、remote / mobile appliedはPASS。v0.6.63実機回帰は未実施。 |
+| TaskCreated | TASK-ADD-SECTION-META-01: generic add form rowへsection metadata保存 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.62の`addTask()`はrowへ`estimate_min`だけを保存していた。v0.6.63 structural syntheticはPASS。実Vault未試験。 |
+| TaskCreated | INSERT-BELOW-ORDER-01: Aの下へB、Bの下へCを作成し物理/UI順を確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 FAIL | `NOT_VERIFIED` | v0.6.61からv0.6.63のfocused syntheticでA / B / C、refresh、rename、physical / visual一致、protected targetを確認。v0.6.63実Vaultは未試験。 |
 | TaskUpdated | 通常taskのtitle・値変更を物理MarkdownとAckまで確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3証跡はある。v0.6.48以降のfalse Ack対策を含む現行三端末回帰はrepository内に未記録。 |
 | TaskMoved v4 | section移動・日付移動・同一task_id複数entry・空source section | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | RC3のTaskMoved v3 PASSはあるが、v4の現行保証には使わない。 |
-| TaskMoved v4 | TMV4-BASIC-01: v4 entry orderの基本移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.61 FAIL | `NOT_VERIFIED` | v0.6.61実機はsection metadata欠落がfallback `__no_section__`となりenqueue guardでFAIL。v0.6.62 focused syntheticはPASSしたが実Vaultは未試験。 |
-| TaskMoved v4 | TMV4-SECTION-HANDOFF-01: missing row section metaをphysical headingから補完 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | missing meta normalization、保存後entry再解決、TaskMoved 1件、明示conflict block、no-op 0件のsynthetic PASS。実機未試験。 |
-| TaskMoved v4 | TMV4-EMPTY-SOURCE-01: source sectionが空になる移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.62でinbound empty-source処理に変更はない。実Vault回帰は未実施。 |
+| TaskMoved v4 | TMV4-BASIC-01: v4 entry orderの基本移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.62 dev partial | `NOT_VERIFIED` | v0.6.62でdev enqueue succeededまで確認したがremote / mobile / D1最終確認未完了。v0.6.63実Vaultは未試験。 |
+| TaskMoved v4 | TMV4-SECTION-HANDOFF-01: missing row section metaをphysical headingから補完 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.62 FAIL | `NOT_VERIFIED` | v0.6.62はreload後`physical_section_unresolved`でFAIL。v0.6.63はexact source/target physical context、missing normalization、TaskMoved 1件、明示conflict block、no-op 0件のsynthetic PASS。実機未試験。 |
+| TaskMoved v4 | TMV4-EMPTY-SOURCE-01: source sectionが空になる移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.63でinbound empty-source処理に変更はない。実Vault回帰は未実施。 |
 | TaskDeleted | 通常・create直後・完了済み・一括削除 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3で通常一連操作と完了済みTaskDeletedのPASS記録あり。後続identity変更後のfull regressionは未記録。 |
 | TaskStarted | Board / Log / LogDaily / runtime保存後検証とAck | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3三端末起点PASS。v0.6.49 lifecycle classifier後の現行統合証跡なし。 |
 | TaskStopped / Paused / Resumed | stop・pause・resumeとruntime / log整合 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | TaskStoppedを含む実装記録はあるが、3イベントを覆う現行実Vault証跡はない。 |
