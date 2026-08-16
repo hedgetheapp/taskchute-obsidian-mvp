@@ -5,7 +5,7 @@
 - 対象実装: v0.6.69（main統合対象、未配布、実機`NOT_VERIFIED`）
 - 配布済みcheckpoint: immutable `v0.6.68` BRAT Prerelease、tag target `2c33fdaaf5f990d0045120502094934eb195bb20`
 - v0.6.69はD&D semantic actionのhistory-top commit invariantを追加する。synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.69についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
