@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current implementation and immutable test distribution: `v0.6.67` BRAT Prerelease. Integrated: Yes. Prereleased / Test-distributed: Yes. Verified: No. Released: No.
-- v0.6.66 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed because Ctrl+Z consumed a semanticless snapshot while the forward D&D had already synchronized. v0.6.67 gives the D&D Undo batch an operation identity and permits commit only after exact TaskMoved semantic attachment. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
+- Current implementation candidate: `v0.6.68` (not tagged or distributed). Current immutable test distribution remains `v0.6.67` BRAT Prerelease. v0.6.68 Integrated / Prereleased / Verified / Released are all No until the normal workflow advances them.
+- v0.6.67 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed because TaskBoard Ctrl+Z could pass through the generic editable/button guard into Obsidian local Undo before the semantic TaskChute route owned it. v0.6.68 routes TaskBoard non-text Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z through one capture-phase gateway while editor/input contexts remain native. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 

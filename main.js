@@ -6674,6 +6674,125 @@ function decideTaskMovedUndoBatchCommit(batch, operation, options = {}) {
   return { ok: true, defer: false, reason: "taskmoved_semantic_commit_allowed" };
 }
 
+function normalizeTaskchuteUndoRedoShortcut(eventLike) {
+  const event = eventLike && typeof eventLike === "object" ? eventLike : {};
+  const key = String(event.key || "").trim().toLowerCase();
+  const primaryModifier = !!(event.ctrlKey || event.metaKey);
+  if (!primaryModifier || event.altKey) return "";
+  if (key === "z" && !event.shiftKey) return "undo";
+  if ((key === "y" && !event.shiftKey) || (key === "z" && !!event.shiftKey)) return "redo";
+  return "";
+}
+
+function decideTaskchuteUndoRedoShortcutRoute(input = {}) {
+  const shortcut = String(input.shortcut || "").trim().toLowerCase();
+  if (shortcut !== "undo" && shortcut !== "redo") {
+    return { handled: false, operation: "", routing_decision: "native/editor-passthrough", reason: "not_undo_redo_shortcut" };
+  }
+  if (!input.hasTaskchuteView) {
+    return { handled: false, operation: shortcut, routing_decision: "native/editor-passthrough", reason: "taskchute_view_inactive" };
+  }
+  if (input.textEditing) {
+    return { handled: false, operation: shortcut, routing_decision: "native/editor-passthrough", reason: "text_editing_context" };
+  }
+  if (input.externalOverlay) {
+    return { handled: false, operation: shortcut, routing_decision: "native/editor-passthrough", reason: "external_overlay_context" };
+  }
+  if (!input.targetInTaskchute && !input.activeElementInTaskchute && !input.targetNeutral) {
+    return { handled: false, operation: shortcut, routing_decision: "native/editor-passthrough", reason: "outside_taskchute_context" };
+  }
+  if (input.lifecycleActive) {
+    return { handled: true, operation: shortcut, routing_decision: "blocked-lifecycle", reason: "taskmoved_semantic_lifecycle_active" };
+  }
+  return { handled: true, operation: shortcut, routing_decision: "taskchute-owned", reason: "taskchute_board_context" };
+}
+
+function routeTaskchuteUndoRedoShortcut(eventLike, context = {}, callbacks = {}) {
+  const event = eventLike && typeof eventLike === "object" ? eventLike : {};
+  const shortcut = normalizeTaskchuteUndoRedoShortcut(event);
+  const decision = decideTaskchuteUndoRedoShortcutRoute(Object.assign({}, context || {}, { shortcut }));
+  const diagnostic = typeof callbacks.diagnostic === "function" ? callbacks.diagnostic : () => {};
+  diagnostic({
+    phase: "keyboard_shortcut_observed",
+    shortcut,
+    routing_decision: decision.routing_decision,
+    reason_code: decision.reason,
+    context: String(context.context || ""),
+    active_view: String(context.activeView || ""),
+    top_action_semantic: !!context.topActionSemantic,
+    inverse_enqueue_attempted: false,
+    inverse_enqueue_succeeded: false,
+    inverse_enqueue_failed: false
+  });
+  if (!decision.handled) return Promise.resolve(Object.assign({}, decision, { invoked: false, result: false }));
+
+  if (event.__tcTaskchuteUndoRedoHandled) {
+    return Promise.resolve(Object.assign({}, decision, { invoked: false, result: false, reason: "duplicate_keyboard_event" }));
+  }
+  event.__tcTaskchuteUndoRedoHandled = true;
+  if (typeof event.preventDefault === "function") event.preventDefault();
+  if (typeof event.stopPropagation === "function") event.stopPropagation();
+  if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+  if (decision.routing_decision === "blocked-lifecycle") {
+    diagnostic({
+      phase: "keyboard_shortcut_blocked",
+      shortcut,
+      routing_decision: "blocked-lifecycle",
+      reason_code: decision.reason,
+      context: String(context.context || ""),
+      active_view: String(context.activeView || ""),
+      top_action_semantic: !!context.topActionSemantic,
+      inverse_enqueue_attempted: false,
+      inverse_enqueue_succeeded: false,
+      inverse_enqueue_failed: false
+    });
+    if (typeof callbacks.blocked === "function") callbacks.blocked(decision);
+    return Promise.resolve(Object.assign({}, decision, { invoked: false, result: false }));
+  }
+
+  const invoke = typeof callbacks.invoke === "function" ? callbacks.invoke : null;
+  if (!invoke) return Promise.resolve(Object.assign({}, decision, { invoked: false, result: false, reason: "handler_missing" }));
+  let invoked;
+  try {
+    invoked = invoke(decision.operation);
+  } catch (error) {
+    invoked = Promise.reject(error);
+  }
+  return Promise.resolve(invoked).then(result => {
+    const ok = result === true;
+    diagnostic({
+      phase: "keyboard_handler_completed",
+      shortcut,
+      routing_decision: decision.routing_decision,
+      reason_code: ok ? "" : "taskchute_handler_failed",
+      context: String(context.context || ""),
+      active_view: String(context.activeView || ""),
+      handler_invoked: decision.operation,
+      top_action_semantic: !!context.topActionSemantic,
+      inverse_enqueue_attempted: !!context.topActionSemantic,
+      inverse_enqueue_succeeded: !!context.topActionSemantic && ok,
+      inverse_enqueue_failed: !!context.topActionSemantic && !ok
+    });
+    return Object.assign({}, decision, { invoked: true, result: ok });
+  }, error => {
+    diagnostic({
+      phase: "keyboard_handler_failed",
+      shortcut,
+      routing_decision: decision.routing_decision,
+      reason_code: "taskchute_handler_exception",
+      context: String(context.context || ""),
+      active_view: String(context.activeView || ""),
+      handler_invoked: decision.operation,
+      top_action_semantic: !!context.topActionSemantic,
+      inverse_enqueue_attempted: !!context.topActionSemantic,
+      inverse_enqueue_succeeded: false,
+      inverse_enqueue_failed: !!context.topActionSemantic
+    });
+    return Object.assign({}, decision, { invoked: true, result: false, error });
+  });
+}
+
 function getTaskMovedUndoBridgeRestorePlan(semantic, restoreState = "before") {
   const value = semantic && typeof semantic === "object" ? semantic : {};
   const targetKey = restoreState === "after" ? "after" : "before";
@@ -11361,8 +11480,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.addCommand({ id: "move-selected-task-down", name: "選択中タスクを下へ移動", callback: () => this.moveSelectedTask(1) });
       this.addCommand({ id: "toggle-current-task-selection", name: "現在行を選択/解除", callback: () => this.toggleCurrentTaskSelection() });
       this.addCommand({ id: "delete-current-task", name: "現在行/選択タスクを削除", callback: () => this.deleteCurrentTaskOrSelection() });
-      this.addCommand({ id: "undo-last-taskchute-action", name: "直前のTaskchute操作を元に戻す", callback: () => this.undoLastTaskchuteAction() });
-      this.addCommand({ id: "redo-last-taskchute-action", name: "元に戻したTaskchute操作をやり直す", callback: () => this.redoLastTaskchuteAction() });
+      this.addCommand({ id: "undo-last-taskchute-action", name: "直前のTaskchute操作を元に戻す", callback: () => this.invokeTaskchuteUndoRedo("undo", { source: "command" }) });
+      this.addCommand({ id: "redo-last-taskchute-action", name: "元に戻したTaskchute操作をやり直す", callback: () => this.invokeTaskchuteUndoRedo("redo", { source: "command" }) });
       this.addCommand({ id: "open-taskchute-shortcut-help", name: "ショートカット一覧を開く", callback: () => this.openShortcutHelpModal() });
       this.addCommand({ id: "insert-task-below-current", name: "現在行の下にタスクを追加", callback: () => this.insertTaskBelowCurrent() });
       this.addCommand({ id: "start-or-complete-current-task", name: "現在行を開始/終了", callback: () => this.startOrCompleteCurrentTask() });
@@ -11733,6 +11852,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.settings.bridgeTaskMovedLastFinalPayloadSummary = String(this.settings.bridgeTaskMovedLastFinalPayloadSummary || "").trim();
     this.settings.bridgeTaskDragMoveDiagnostics = Array.isArray(this.settings.bridgeTaskDragMoveDiagnostics)
       ? this.settings.bridgeTaskDragMoveDiagnostics.slice(-120)
+      : [];
+    this.settings.taskchuteUndoRoutingDiagnostics = Array.isArray(this.settings.taskchuteUndoRoutingDiagnostics)
+      ? this.settings.taskchuteUndoRoutingDiagnostics.slice(-80)
       : [];
     this.settings.bridgeTaskCreatedRenameMergeCount = Math.max(0, Math.floor(Number(this.settings.bridgeTaskCreatedRenameMergeCount || 0)));
     this.settings.bridgeTaskCreatedLastRenameMergeTaskId = String(this.settings.bridgeTaskCreatedLastRenameMergeTaskId || "").trim();
@@ -15222,6 +15344,126 @@ class TaskchutePlugin extends obsidian.Plugin {
     return !!(el.closest && el.closest("input, textarea, select, [contenteditable='true']"));
   }
 
+  recordTaskchuteUndoRoutingDiagnostic(detail = {}, options = {}) {
+    const entry = {
+      recorded_at: nowIso(),
+      phase: String(detail.phase || "").trim(),
+      shortcut: String(detail.shortcut || "").trim(),
+      context: String(detail.context || "").trim(),
+      active_view: String(detail.active_view || "").trim(),
+      routing_decision: String(detail.routing_decision || "").trim(),
+      reason_code: String(detail.reason_code || "").trim(),
+      handler_invoked: String(detail.handler_invoked || "").trim(),
+      top_action_semantic: !!detail.top_action_semantic,
+      inverse_enqueue_attempted: !!detail.inverse_enqueue_attempted,
+      inverse_enqueue_succeeded: !!detail.inverse_enqueue_succeeded,
+      inverse_enqueue_failed: !!detail.inverse_enqueue_failed
+    };
+    const current = Array.isArray(this.settings && this.settings.taskchuteUndoRoutingDiagnostics)
+      ? this.settings.taskchuteUndoRoutingDiagnostics
+      : [];
+    this.settings.taskchuteUndoRoutingDiagnostics = current.concat(entry).slice(-80);
+    this.debugKeyLog("Undo/Redo routing", entry);
+    if (options && options.persist) {
+      Promise.resolve(this.savePluginData({
+        skipTaskchuteUndo: true,
+        deviceWriterOperation: "taskchute-undo-routing-diagnostic"
+      })).catch(() => {});
+    }
+    return entry;
+  }
+
+  getTaskchuteUndoRedoShortcutContext(evt, operation = "undo") {
+    const view = this.getActiveTaskchuteView();
+    const container = view && view.containerEl ? view.containerEl : null;
+    const toElement = target => {
+      if (!target) return null;
+      return target.nodeType === 3 ? target.parentElement : target;
+    };
+    const target = toElement(evt && evt.target);
+    const active = toElement(typeof document !== "undefined" ? document.activeElement : null);
+    const contains = element => !!(container && element && typeof container.contains === "function" && container.contains(element));
+    const targetInTaskchute = contains(target);
+    const activeElementInTaskchute = contains(active);
+    const tag = target && target.tagName ? String(target.tagName).toLowerCase() : "";
+    const targetNeutral = !target
+      || target === window
+      || target === document
+      || target === document.body
+      || target === document.documentElement
+      || tag === "body"
+      || tag === "html";
+    const textEditing = this.isTextInputEventTarget(target) || this.isTextInputEventTarget(active);
+    const overlaySelector = ".modal, .menu, .suggestion-container, .tc-task-links-popover";
+    const targetOverlay = target && target.closest ? target.closest(overlaySelector) : null;
+    const activeOverlay = active && active.closest ? active.closest(overlaySelector) : null;
+    const externalOverlay = !!((targetOverlay && !contains(targetOverlay)) || (activeOverlay && !contains(activeOverlay)));
+    const stack = operation === "redo" ? this.redoStack : this.undoStack;
+    const topAction = Array.isArray(stack) && stack.length ? stack[stack.length - 1] : null;
+    const topActionSemantic = !!(topAction && topAction.bridgeTaskMovedSemantic && topAction.bridgeTaskMovedSemantic.kind === "task-moved-v4");
+    const lifecycleActive = !!(this.activeTaskMovedUndoOperation
+      || this.pendingTaskchuteUndoBatch && this.pendingTaskchuteUndoBatch.taskMovedUndoSemanticRequired);
+    return {
+      hasTaskchuteView: !!view,
+      targetInTaskchute,
+      activeElementInTaskchute,
+      targetNeutral,
+      textEditing,
+      externalOverlay,
+      lifecycleActive,
+      topActionSemantic,
+      context: targetInTaskchute || activeElementInTaskchute ? "taskchute-board" : (textEditing ? "text-editing" : (externalOverlay ? "external-overlay" : "workspace")),
+      activeView: view && view.getViewType ? String(view.getViewType() || "") : ""
+    };
+  }
+
+  async invokeTaskchuteUndoRedo(operation = "undo", options = {}) {
+    const normalized = operation === "redo" ? "redo" : "undo";
+    const stack = normalized === "redo" ? this.redoStack : this.undoStack;
+    const topAction = Array.isArray(stack) && stack.length ? stack[stack.length - 1] : null;
+    const topActionSemantic = !!(topAction && topAction.bridgeTaskMovedSemantic && topAction.bridgeTaskMovedSemantic.kind === "task-moved-v4");
+    this.recordTaskchuteUndoRoutingDiagnostic({
+      phase: "command_handler_invoked",
+      shortcut: normalized,
+      context: String(options.source || "command"),
+      active_view: this.getActiveTaskchuteView() ? VIEW_TYPE : "",
+      routing_decision: "taskchute-command",
+      handler_invoked: normalized,
+      top_action_semantic: topActionSemantic,
+      inverse_enqueue_attempted: false
+    });
+    const result = normalized === "redo"
+      ? await this.redoLastTaskchuteAction()
+      : await this.undoLastTaskchuteAction();
+    this.recordTaskchuteUndoRoutingDiagnostic({
+      phase: "command_handler_completed",
+      shortcut: normalized,
+      context: String(options.source || "command"),
+      active_view: this.getActiveTaskchuteView() ? VIEW_TYPE : "",
+      routing_decision: "taskchute-command",
+      handler_invoked: normalized,
+      top_action_semantic: topActionSemantic,
+      inverse_enqueue_attempted: topActionSemantic,
+      inverse_enqueue_succeeded: topActionSemantic && result === true,
+      inverse_enqueue_failed: topActionSemantic && result !== true,
+      reason_code: result === true ? "" : "taskchute_handler_failed"
+    }, { persist: true });
+    return result === true;
+  }
+
+  async handleTaskchuteUndoRedoShortcut(evt) {
+    const shortcut = normalizeTaskchuteUndoRedoShortcut(evt);
+    if (!shortcut) return { handled: false, invoked: false, result: false };
+    const context = this.getTaskchuteUndoRedoShortcutContext(evt, shortcut);
+    return await routeTaskchuteUndoRedoShortcut(evt, context, {
+      diagnostic: entry => this.recordTaskchuteUndoRoutingDiagnostic(entry, {
+        persist: entry.phase === "keyboard_handler_completed" || entry.phase === "keyboard_handler_failed" || entry.phase === "keyboard_shortcut_blocked"
+      }),
+      blocked: () => new obsidian.Notice("TaskMovedのUndo履歴を確定中です。処理完了後にもう一度実行してください。"),
+      invoke: operation => this.invokeTaskchuteUndoRedo(operation, { source: "keyboard" })
+    });
+  }
+
   releaseBoardFocus(reason = "") {
     const active = document.activeElement;
     if (active && active instanceof HTMLElement) {
@@ -15376,6 +15618,12 @@ class TaskchutePlugin extends obsidian.Plugin {
       const isShortcutHelp = !evt.altKey && !evt.ctrlKey && !evt.metaKey
         && ((evt.shiftKey && evt.key === "/") || evt.key === "?");
 
+      const undoRedoShortcut = normalizeTaskchuteUndoRedoShortcut(evt);
+      if (undoRedoShortcut) {
+        const undoRedoRouting = await this.handleTaskchuteUndoRedoShortcut(evt);
+        if (undoRedoRouting && undoRedoRouting.handled) return;
+      }
+
       if (this.isEditableEventTarget(evt.target) || this.isEditableEventTarget(document.activeElement)) {
         if (isArrow) this.debugKeyLog("ignored: editable target", { target: tag, activeElement: document.activeElement && document.activeElement.tagName });
         return;
@@ -15387,29 +15635,6 @@ class TaskchutePlugin extends obsidian.Plugin {
         if (evt.stopImmediatePropagation) evt.stopImmediatePropagation();
         this.showKeyDebug("? ショートカット一覧");
         this.openShortcutHelpModal();
-        return;
-      }
-
-      const isUndoShortcut = (evt.ctrlKey || evt.metaKey) && !evt.altKey && !evt.shiftKey && keyName === "z";
-      if (isUndoShortcut) {
-        if (!isTaskchuteRelatedScreen) return;
-        evt.preventDefault();
-        evt.stopPropagation();
-        if (evt.stopImmediatePropagation) evt.stopImmediatePropagation();
-        this.showKeyDebug("Ctrl+Z 元に戻す");
-        await this.undoLastTaskchuteAction();
-        return;
-      }
-
-      const isRedoShortcut = (evt.ctrlKey || evt.metaKey) && !evt.altKey
-        && ((!evt.shiftKey && keyName === "y") || (evt.shiftKey && keyName === "z"));
-      if (isRedoShortcut) {
-        if (!isTaskchuteRelatedScreen) return;
-        evt.preventDefault();
-        evt.stopPropagation();
-        if (evt.stopImmediatePropagation) evt.stopImmediatePropagation();
-        this.showKeyDebug(evt.shiftKey ? "Ctrl+Shift+Z やり直し" : "Ctrl+Y やり直し");
-        await this.redoLastTaskchuteAction();
         return;
       }
 

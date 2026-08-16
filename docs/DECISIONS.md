@@ -241,6 +241,13 @@
 - 理由: v0.6.66では`taskMovedUndoCaptureInProgress`がtimer callbackだけを延期し、同期的な通常commitはpending D&D snapshotをsemantic付与前に確定できた。mouse release直後のCtrl+Zなどawait中の介入でsemanticless actionが消費され、local snapshotだけが戻る可能性があったため。
 - 根拠: v0.6.66 T-0648 / E-20260816-0025 device failure、`decideTaskMovedUndoSemanticAttachment()`、`decideTaskMovedUndoBatchCommit()`、`beginTaskMovedUndoOperation()`、`tests/taskmoved-undo-semantic-lifecycle-v0667.js`。
 
+## D-040: TaskBoardのUndo / Redo shortcutだけをcapture-phaseで所有する
+
+- 判断: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Zは、active TaskBoard内の非テキストtargetまたはneutral workspace focusに限り、汎用editable/button filterより先に単一gatewayがconsumeする。TaskBoard内でもtext input、textarea、select、contenteditableはnative/editorへpass-throughし、TaskBoard外のmodal / menu / editorも奪わない。
+- 判断: TaskMoved semantic lifecycleがactiveな場合はshortcutをconsumeしたままblockし、Obsidian local Undoへfall-throughさせない。command paletteのTaskChute Undo / Redoも同じinvocation gatewayを使用する。
+- 理由: v0.6.67のcapture handlerは存在したが、shortcut判定より前の`isEditableEventTarget()`がbuttonを含んでいた。TaskBoard controlへfocusがあるCtrl+ZはpreventDefault前にreturnし、Obsidian local Undoがdev Markdownだけを戻してinverse TaskMovedを生成しなかったため。
+- 根拠: v0.6.67 T-0650 / E-20260816-0026、D1 seq 2392 / event `806ddfc4-fc55-47fa-b3dd-0d5ea1f1d676`、`routeTaskchuteUndoRedoShortcut()`、`handleTaskchuteUndoRedoShortcut()`、`tests/ctrlz-bridge-undo-routing-v0668.js`。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

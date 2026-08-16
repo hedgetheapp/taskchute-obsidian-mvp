@@ -359,7 +359,9 @@ assert(redoMethod.includes("try { restored = await this.restoreTaskchuteActionSn
 const inboundMoved = extractMethod("  async applyBridgeInboundTaskMovedEvent(", "\n  async applyBridgeInboundTaskDeletedEvent(");
 assert(inboundMoved.includes("skipTaskchuteUndo: true"), "inbound TaskMoved must not enter local undo history");
 const keyboard = extractMethod("  setupKeyboardHandlers()", "\n  activateKeyboardScope(");
-assert(keyboard.includes("evt.shiftKey && keyName === \"z\""), "Ctrl+Shift+Z must invoke redo");
+const shortcutNormalizer = extractFunction("normalizeTaskchuteUndoRedoShortcut");
+assert(shortcutNormalizer.includes('key === "z" && !!event.shiftKey'), "Ctrl+Shift+Z must resolve to redo");
+assert(keyboard.includes("handleTaskchuteUndoRedoShortcut(evt)"), "keyboard Undo/Redo must use the TaskChute routing gateway");
 assert(dragMethod.includes("this.discardPendingTaskchuteUndoBatch({"), "semantic capture failure must invalidate the exact D&D Undo entry");
 assert(dragMethod.includes("taskMovedUndoOperationId"), "D&D Undo invalidation must be operation-scoped");
 

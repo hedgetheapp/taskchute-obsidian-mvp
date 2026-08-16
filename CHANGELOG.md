@@ -8,6 +8,30 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.68 - 2026-08-16
+
+Type: Runtime candidate for BRAT device testing (not yet published)
+
+### Changed
+
+- TaskBoard Ctrl+Z / Ctrl+Y / Ctrl+Shift+Zのownership判定を、汎用editable/button filterより前のcapture-phase gatewayへ移した。
+- TaskBoard内の非テキストcontrolはTaskChute Undo / Redoをexactly onceで実行し、text input / textarea / select / contenteditableとTaskBoard外modal / editorはnative操作へpass-throughする。
+- TaskMoved semantic lifecycle中はshortcutをconsumeしたままblockし、Obsidian local UndoによるMarkdownだけの変更を防ぐ。
+- command paletteのTaskChute Undo / Redoも共通invocation gatewayを使用する。
+- shortcut、context、routing decision、top semantic、inverse enqueue結果をbounded diagnosticへ記録する。
+- `manifest.json`を`0.6.68`へ更新した。
+
+### Verification
+
+- `ctrlz-bridge-undo-routing-v0668.js`: TaskBoard ownership、exactly-once、Redo 2種、editor/input/modal passthrough、lifecycle block、command gateway: PASS
+- v0.6.67 semantic lifecycle、v0.6.66 Undo / Redo、TMV4、interrupt continuation、rename、insert-below focused tests: PASS
+- v0.6.68 real Vault / remote / mobile: `NOT_VERIFIED`
+- Delivery state: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.68.md`](docs/release/v0.6.68.md)
+
+---
+
 ## v0.6.67 - 2026-08-16
 
 Type: Runtime BRAT Prerelease for device testing
@@ -27,7 +51,8 @@ Type: Runtime BRAT Prerelease for device testing
 - `taskmoved-undo-semantic-lifecycle-v0667.js`: async / timer race、wrong batch、invalid semantic、unrelated history、same-task multi-entry: PASS
 - existing Undo / Redo TaskMoved、TMV4、interrupt continuation、rename handoff、insert-below focused tests: PASS
 - `node --check .\main.js`: PASS
-- v0.6.67 real Vault / remote / mobile: `NOT_VERIFIED`
+- v0.6.67 `UNDO-BRIDGE-CROSS-SECTION-01`: `FAIL`。T-0650 / E-20260816-0026のforward D1 seq 2392 / event `806ddfc4-fc55-47fa-b3dd-0d5ea1f1d676`はremote / mobile appliedだが、Ctrl+Z後のinverseは0件でdevだけafternoonへ戻った。
+- v0.6.67 plugin全体 / full matrix: `NOT_VERIFIED`
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - v0.6.66 `UNDO-BRIDGE-CROSS-SECTION-01`: `FAIL`。T-0648 / E-20260816-0025のforward D1 seq 2386はremote / mobile appliedだが、Ctrl+Z後のinverseは0件で、消費された履歴は`hasSemantic:false`だった。
 
