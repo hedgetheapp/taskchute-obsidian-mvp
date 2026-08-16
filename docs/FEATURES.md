@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はmain統合済み・未配布v0.6.70の現行feature inventoryである。配布済みv0.6.69では実TaskBoard D&D直後にoperation / batch / semantic / diagnosticが作られないroute bypassが確認された。v0.6.70はrow / section-container dropを共通gatewayからdispatchし、single-task same-date routeへ同一semantic lifecycleを要求する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
+この一覧はBRAT試験配布済みv0.6.70の現行feature inventoryである。配布済みv0.6.69では実TaskBoard D&D直後にoperation / batch / semantic / diagnosticが作られないroute bypassが確認された。v0.6.70はrow / section-container dropを共通gatewayからdispatchし、single-task same-date routeへ同一semantic lifecycleを要求する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
 
 ## ステータス定義
 

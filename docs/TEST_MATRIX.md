@@ -2,10 +2,10 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.70（main統合済み・未配布、実機`NOT_VERIFIED`）
-- 配布済みcheckpoint: immutable `v0.6.69` BRAT Prerelease、tag target `d49ad9d217e21e6412f86abdee86cf9787191507`
+- 対象実装: v0.6.70 BRAT Prerelease（main統合・試験配布済み、実機`NOT_VERIFIED`）
+- 配布済みcheckpoint: immutable `v0.6.70` BRAT Prerelease、tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`
 - v0.6.70は実TaskBoard row / section drop callbackを共通gatewayへ接続し、section-target helperにもoperation-scoped semantic lifecycleを適用する。synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.70についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
@@ -181,7 +181,7 @@ v0.6.68はPrereleased / Test-distributedだが、このtargeted testはFAILで�
 
 v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立していない。v0.6.69はimmutable Prereleased / Test-distributedのまま、Verified / Releasedではない。
 
-## v0.6.70 Candidate Synthetic Evidence
+## v0.6.70 Prerelease Synthetic Evidence
 
 | Test case | Synthetic result | Device status |
 |---|---|---|

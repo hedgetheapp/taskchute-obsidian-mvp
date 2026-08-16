@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation: `v0.6.70` (Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No). Current immutable test distribution remains `v0.6.69` BRAT Prerelease at tag target `d49ad9d217e21e6412f86abdee86cf9787191507`.
+- Current implementation and immutable test distribution: `v0.6.70` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No), tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`.
 - v0.6.69 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed before Ctrl+Z: the actual TaskBoard D&D route left no active operation, pending batch, semantic action, or lifecycle diagnostic. v0.6.70 routes row and section-container drops through one UI dispatch gateway and applies the same operation-scoped semantic contract to the legacy section-target helper. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
