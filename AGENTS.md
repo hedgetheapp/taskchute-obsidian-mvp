@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current implementation and immutable test distribution: `v0.6.68` BRAT Prerelease (tag target `2c33fdaaf5f990d0045120502094934eb195bb20`). v0.6.68 is Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No.
-- v0.6.67 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed because TaskBoard Ctrl+Z could pass through the generic editable/button guard into Obsidian local Undo before the semantic TaskChute route owned it. v0.6.68 routes TaskBoard non-text Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z through one capture-phase gateway while editor/input contexts remain native. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
+- Current implementation: `v0.6.69` (Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No). Current immutable test distribution remains `v0.6.68` BRAT Prerelease (tag target `2c33fdaaf5f990d0045120502094934eb195bb20`).
+- v0.6.68 real-device `UNDO-BRIDGE-CROSS-SECTION-01` proved shortcut routing worked but the top Undo action still lacked TaskMoved semantics, so Ctrl+Z restored only dev Markdown. v0.6.69 requires the exact semantic action to be committed at history top; otherwise it removes the exact unsafe generic snapshot and installs a blocking history marker. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 
@@ -51,7 +51,7 @@ Otherwise leave the event unacked and record a diagnostic such as identity confl
 ## Change And Test Discipline
 
 - Do not weaken post-save verification, false-applied prevention, cursor safety, mobile hidden drain guards, or identity collision guards.
-- A successfully synchronized supported TaskMoved D&D must not enter Undo history without exact `bridgeTaskMovedSemantic`. Scheduled or unrelated commits must not finalize its operation-scoped batch.
+- A successfully synchronized supported TaskMoved D&D must not enter usable Undo history without exact `bridgeTaskMovedSemantic` at history top. Scheduled or unrelated commits must not finalize its operation-scoped batch; an unprovable handoff must block local-only Undo instead of reporting normal Undoable success.
 - Runtime or Bridge changes require reviewing the affected rows in `docs/TEST_MATRIX.md` and recording real verification state. Do not promote historical PASS results to the current release without current evidence.
 - Keep `PASS`, `FAIL`, `BLOCKED`, and `NOT_VERIFIED` distinct. Unknown or mixed test data is not PASS.
 - Update root `CHANGELOG.md` for every release/version change. Keep it to release-level summaries; it does not replace Git history, and historical docs must not be copied into it wholesale.

@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: main統合済み・BRAT試験配布済みのv0.6.68。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護したまま、TaskBoard shortcut ownershipをcapture-phase gatewayへ集約する。v0.6.68はIntegratedかつPrereleased / Test-distributedでsynthetic PASSだが、実機`NOT_VERIFIED`で、Verified / Releasedではない。公開済みv0.6.68以前のassetsは変更しない。
+調査基準: main統合対象のv0.6.69。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護し、TaskBoard shortcut ownershipをcapture-phase gatewayへ集約する。v0.6.69はIntegrated、未配布、synthetic PASS、実機`NOT_VERIFIED`で、Verified / Releasedではない。現在のimmutable test distributionはv0.6.68であり、公開済みassetsは変更しない。
 
 ## 1. 概要
 
@@ -39,6 +39,7 @@ TaskchutePlugin + ItemViews (main.js)
 | `tests/interrupt-continuation-placement-v0664.js` | interrupt taskの最終section、continuation隣接順、entry identity、metadata mismatch block、lifecycle handoff構造を検証するfocused synthetic test。 |
 | `tests/interrupt-continuation-taskmoved-preflight-v0665.js` | 後続continuationによるTaskMoved v4 send-preflight order projectionとstrict fallbackを検証するfocused synthetic test。 |
 | `tests/undo-redo-taskmoved-bridge-v0666.js` | same-date D&D Undo / Redoのsemantic movement、multi-entry、outbox race、negative guardを検証するfocused synthetic test。 |
+| `tests/dnd-semantic-undo-handoff-v0669.js` | 実際の`moveTaskByDrag()`からhistory commit、shortcut gateway、Undo / Redo inverse enqueueまでを通し、handoff失敗barrierも検証するfocused integration test。 |
 
 `src/`、`package.json`、bundler設定、汎用test runnerは存在しない。`tests/`にはv0.6.59以降のfocused standalone testだけがある。
 
@@ -179,6 +180,8 @@ v0.6.67では`moveTaskByDrag()`が最初のD&D file write前にoperation ID / ba
 `undoLastTaskchuteAction()` / `redoLastTaskchuteAction()`はoperation確定中の実行を停止し、確定済みsemantic actionだけを復元前source state検証へ進める。`restoreTaskchuteActionSnapshot()`でlocal snapshotを戻した後、`syncRestoredTaskMovedUndoRedo()`がtarget stateを再読込検証して通常の`enqueueBridgeTaskMoved()`へ渡す。意味論を持たない通常履歴は従来のlocal restoreだけを行う。Inbound TaskMoved writeは`skipTaskchuteUndo`で履歴化しない。
 
 v0.6.68ではwindow capture-phase `keydown`が`normalizeTaskchuteUndoRedoShortcut()`でUndo / Redoを先に識別し、`getTaskchuteUndoRedoShortcutContext()`と`decideTaskchuteUndoRedoShortcutRoute()`でownershipを決める。TaskBoard内の非テキストtargetは`routeTaskchuteUndoRedoShortcut()`が同期的にeventをconsumeし、`invokeTaskchuteUndoRedo()`へexactly onceで渡す。text input / textarea / select / contenteditable、TaskBoard外overlayはnative/editorへpass-throughする。active semantic lifecycleはeventをconsumeしたままblockするため、local-only Undoへfall-throughしない。command paletteも同じinvocation gatewayを使う。
+
+v0.6.69では`commitPendingTaskchuteUndoBatch()`がactionへoperation ID / batch ID / semantic fingerprintを保持し、push後に`inspectCommittedTaskMovedUndoHistory()`でexact matching actionが1件だけstack topにあることを確認する。`moveTaskByDrag()`もcommit結果を再検証し、semantic handoffを証明できない場合は`neutralizeUnsafeTaskMovedUndoHistory()`が操作開始後に追加された保存前Markdownと完全一致するgeneric snapshotだけを除去して`task-moved-undo-blocked` markerを積む。操作開始前の履歴はmarkerの下に維持する。`undoLastTaskchuteAction()`はこのmarkerを復元せず拒否する。これによりforward event送信済みのD&Dをlocal-only snapshotで戻す経路を閉じる。
 
 Undo snapshot内のplugin dataはplugin-data save queue内でcurrent Bridge namespaceとorder diagnosticsを再mergeしてから適用し、outbox / cursor / logical clock / Ack・retry・Auto Flush状態を過去へ戻さない。`appendBridgeTaskMovedCoalescedEvent()`はactive flush snapshot eventをcoalesce候補から除外する。active外の未送信forwardと、task / entry / from-to / entry-task orderが完全な逆関係にある候補1件だけはnet-zeroとして両方を`superseded`にする。非exact・複数候補・active / sent / failed / retried forwardは変更せず、inverseを別eventとして保持する。復元後検証またはenqueue失敗時はcounterpart snapshotでlocal stateとhistory stackをrollbackし、rollback不能時は未同期状態を明示する。
 

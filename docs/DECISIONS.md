@@ -248,6 +248,13 @@
 - 理由: v0.6.67のcapture handlerは存在したが、shortcut判定より前の`isEditableEventTarget()`がbuttonを含んでいた。TaskBoard controlへfocusがあるCtrl+ZはpreventDefault前にreturnし、Obsidian local Undoがdev Markdownだけを戻してinverse TaskMovedを生成しなかったため。
 - 根拠: v0.6.67 T-0650 / E-20260816-0026、D1 seq 2392 / event `806ddfc4-fc55-47fa-b3dd-0d5ea1f1d676`、`routeTaskchuteUndoRedoShortcut()`、`handleTaskchuteUndoRedoShortcut()`、`tests/ctrlz-bridge-undo-routing-v0668.js`。
 
+## D-041: 同期済みD&Dはsemantic付きhistory topを証明できる場合だけUndo可能にする
+
+- 判断: forward TaskMovedをenqueueしたsupported D&Dは、exact operation ID / batch ID / fingerprintを持つsemantic actionがUndo stack topに1件だけcommitされたことを検証してから通常成功とする。
+- 判断: semantic build / attach / commit / history invariantのいずれかを証明できない場合、操作開始後に追加された保存前Markdownと完全一致するsemanticless snapshotだけを除去し、明示barrierでlocal-only Undoを拒否する。操作開始前の履歴、generic TaskMoved v4、shortcut routingは緩和・削除しない。
+- 理由: v0.6.68ではshortcut routingはTaskChute-ownedだったが、top actionがsemanticlessのままdevだけを復元し、inverse TaskMovedを生成しなかった。失敗stageを観測できない状態で通常成功を返すこと自体がunsafeだったため。
+- 根拠: v0.6.68 T-0651 / E-20260816-0027、D1 seq 2396 / event `3a69bd85-bdc3-4858-8ddc-35245b1beb17`、`inspectCommittedTaskMovedUndoHistory()`、`neutralizeUnsafeTaskMovedUndoHistory()`、`tests/dnd-semantic-undo-handoff-v0669.js`。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

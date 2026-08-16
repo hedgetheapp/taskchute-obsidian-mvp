@@ -204,7 +204,7 @@ const wrongMultiOperation = createOperation({ task_id: "T-SAME", entry_id: "E-1"
 assert.strictEqual(context.validate(sameSection.semantic, wrongMultiOperation).reason, "entry_identity_mismatch");
 
 const dragMethod = extractMethod("  async moveTaskByDrag(", "\n  async moveSelectedTaskGroupToSectionByDrag(");
-assert(dragMethod.includes("beginTaskMovedUndoOperation(sourceBridgeTaskId, sourceBridgeEntryId)"));
+assert(/beginTaskMovedUndoOperation\(sourceBridgeTaskId,\s*sourceBridgeEntryId,\s*\{/.test(dragMethod));
 assert(dragMethod.includes("taskMovedUndoOperationId"));
 assert(dragMethod.includes("forceTaskMovedSemanticCommit: true"));
 assert(dragMethod.includes("operation_finally_without_semantic_commit"));

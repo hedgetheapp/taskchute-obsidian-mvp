@@ -8,6 +8,30 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.69 - 2026-08-16
+
+Type: Runtime candidate, not yet test-distributed
+
+### Changed
+
+- synchronized D&DのUndo batch commit後に、exact operation ID / batch ID / semantic fingerprintを持つactionがUndo stack topに1件だけ存在することを検証する。
+- semantic build / attach / commit / history invariantを証明できない場合、exact pre-D&D Markdownを持つunsafe generic snapshotだけを除去し、明示barrierでlocal-only Undoを停止する。
+- generic snapshotの遅延duplicateを短いoperation guardで拒否し、semantic付きactionをhistory topから押し下げない。
+- lifecycle diagnosticへcapture count、history length、history check、commit resultを追加し、Undo snapshot復元後もBridge diagnostic namespaceを維持する。
+- actual `moveTaskByDrag()`、shortcut gateway、Undo / Redo inverse enqueueまで通すfocused integration testを追加した。
+- `manifest.json`を`0.6.69`へ更新した。
+
+### Verification
+
+- `dnd-semantic-undo-handoff-v0669.js`: actual cross-section / same-section D&D、Undo / Redo inverse、capture / attach / fingerprint / commit failure barrier、duplicate rejection: PASS
+- v0.6.68 routing、v0.6.67 semantic lifecycle、v0.6.66 Undo / Redo、TMV4、interrupt continuation、rename、insert-below focused tests: PASS
+- v0.6.69 real Vault / remote / mobile: `NOT_VERIFIED`
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.69.md`](docs/release/v0.6.69.md)
+
+---
+
 ## v0.6.68 - 2026-08-16
 
 Type: Runtime BRAT Prerelease for device testing
@@ -26,6 +50,7 @@ Type: Runtime BRAT Prerelease for device testing
 - `ctrlz-bridge-undo-routing-v0668.js`: TaskBoard ownership、exactly-once、Redo 2種、editor/input/modal passthrough、lifecycle block、command gateway: PASS
 - v0.6.67 semantic lifecycle、v0.6.66 Undo / Redo、TMV4、interrupt continuation、rename、insert-below focused tests: PASS
 - v0.6.68 real Vault / remote / mobile: `NOT_VERIFIED`
+- post-publication `UNDO-BRIDGE-CROSS-SECTION-01`: `FAIL`。T-0651 / E-20260816-0027のforward D1 seq 2396はremote / mobile applied。Ctrl+Z routingはTaskChute-ownedだったがtop action semantic=false、inverse TaskMoved 0件でdevだけafternoonへ戻った。
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
 Release notes: [`docs/release/v0.6.68.md`](docs/release/v0.6.68.md)

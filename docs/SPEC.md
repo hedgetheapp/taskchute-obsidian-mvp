@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様はmain統合済み・BRAT試験配布済みの`v0.6.68`を基準とする。v0.6.68はIntegratedかつPrereleased / Test-distributedだが、実機`NOT_VERIFIED`で、Verified / Releasedではない。公開済みv0.6.68以前の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様はmain統合対象の`v0.6.69`を基準とする。v0.6.69はIntegratedだが未配布・実機`NOT_VERIFIED`で、Verified / Releasedではない。現在のimmutable test distributionはv0.6.68である。公開済みv0.6.68以前の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -93,7 +93,8 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - TaskChute shortcut ownershipはTaskBoardのactive viewとevent target / active elementを確認する。TaskBoard内の非テキストcontrol、row、board containerではCtrl+Z / Ctrl+Y / Ctrl+Shift+Zをcapture-phaseで1回だけconsumeし、TaskChute Undo / Redo gatewayへrouteする。textarea、text input、select、contenteditable、TaskBoard外のeditor / modal / menuではconsumeせずObsidian/nativeへpass-throughする。
 - TaskMoved semantic lifecycleがactiveな間のTaskBoard Undo / Redo shortcutはgatewayがconsumeしてblockする。native/editor Undoへfall-throughしてlocal Markdownだけを変更してはならない。
 - supported D&DのUndo captureはoperation IDとbatch IDを持つ。timer、履歴表示、別操作capture、Undo / Redo開始などの通常経路はsemantic未付与batchをcommitできない。exact operation、task / entry、before / after order fingerprintが一致するsemanticを付けたD&D経路だけがbatchをcommitできる。
-- forward TaskMoved同期後にsemantic build / attach / commitが失敗した場合、そのD&D専用pending batchだけを無効化し、semanticlessなlocal-only Undo actionを残さない。既存の無関係なUndo履歴は維持する。
+- forward TaskMoved同期後はsemantic build / attach / commitに加え、exact operation ID / batch ID / semantic fingerprintを持つactionがUndo stack topに1件だけ存在することを検証する。成立した場合だけ通常のUndoable D&D成功とする。
+- semantic handoffを証明できない場合、操作開始後に追加されたexact pre-D&D file snapshotに一致するsemanticless actionだけを除去し、topへ明示barrierを置いてlocal-only Undoを拒否する。操作開始前の履歴とforward TaskMoved eventは維持し、操作は通常成功として返さない。
 - same-section Undo / Redoは`source_order_entry_ids`を正とし、duplicate task IDがあってもentry identityを維持する。cross-sectionも保存後のphysical headingとrow metadata一致を必須とする。
 - exact forwardが未送信かつactive flush snapshot外と証明できる場合だけforward / inverseをnet-zeroとしてsend対象外にできる。active flush中・送信済み・状態不明ならforwardを変更せず、より後のlogical clockでinverseを追加する。
 - net-zeroは`task_id + entry_id`、from / to、entry order、task orderが完全な逆関係で、候補が1件だけの場合に限る。非exact・複数候補・欠落fieldでは既存eventをcoalesceせず、Undo / Redo eventを後続追加する。

@@ -3,13 +3,13 @@
 ## 調査基準
 
 - 調査日: 2026-08-16
-- manifest version: `0.6.68`
+- manifest version: `0.6.69`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.68 Ctrl+Z Bridge Undo routing BRAT Prerelease
+- canonical docs checkpoint: v0.6.69 D&D semantic Undo handoff candidate
 - release tag: `v0.6.68`（BRAT実機試験用Prerelease。tag target `2c33fdaaf5f990d0045120502094934eb195bb20`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.67はBRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はFAILした。main統合済みのv0.6.68はimmutable BRAT Prereleaseとして試験配布され、TaskBoardの非テキストCtrl+Z / Ctrl+Y / Ctrl+Shift+Zをcapture-phaseの単一gatewayへ通し、editor/input/modalではnative Undo / Redoを維持する。synthetic PASSだけで、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedとはしない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.68はimmutable BRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はFAILした。v0.6.69はD&D後にexact semantic actionがUndo履歴topへcommitされたことを検証し、証明できない場合はlocal-only Undoをblockする実装候補である。synthetic PASSだけで、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedとはしない。
 
 ## 文書運用
 
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.68 BRAT Prerelease |
+| State | v0.6.69 |
 |---|---|
 | Integrated | Yes |
-| Prereleased / Test-distributed | Yes |
+| Prereleased / Test-distributed | No |
 | Verified | No |
 | Released | No |
 
@@ -73,6 +73,8 @@ v0.6.65のUNDO-BRIDGE-CROSS-SECTION-01はFAILだった。T-0647 / E-20260816-002
 v0.6.66実機試験でもUNDO-BRIDGE-CROSS-SECTION-01はFAILした。T-0648 / E-20260816-0025のafternoon→morning forward TaskMovedはD1 seq 2386 / event `c2863685-ada9-4fb8-8090-7c0661e16741`としてremote / mobile appliedになったが、Ctrl+Z後はdevだけafternoonへ戻り、remote / mobileはmorningに残った。inverse TaskMoved、`task-undo-confirmed-markdown-v4`、`net_zero=true`はいずれも観測されず、Undo後のredoStack actionは`hasSemantic:false`だった。契約上の原因は、Ctrl+Zが消費したsnapshotに`bridgeTaskMovedSemantic`がなかったことである。コード上はv0.6.66のcapture guardが650ms timerだけを延期し、await中の通常commit / Undo開始をoperation identityで拒否していなかった。v0.6.67はD&D batchをoperation-scopedにし、semanticless commitを禁止する。
 
 v0.6.67実機試験でもUNDO-BRIDGE-CROSS-SECTION-01はFAILした。T-0650 / E-20260816-0026のafternoon→morning forward TaskMovedはD1 seq 2392 / event `806ddfc4-fc55-47fa-b3dd-0d5ea1f1d676`としてremote / mobile appliedになった。Ctrl+Z後、dev physicalはafternoonへ戻ったがremote / mobileはmorningに残り、inverse TaskMovedは0件だった。配布asset hashとloaded runtime functionを確認済みでstale runtimeではなく、single-task route条件からgroup D&Dも除外された。コード上のrouting defectは、capture-phase keydown handlerがCtrl+Z判定より先に`isEditableEventTarget()`を実行し、TaskBoard上のbuttonもeditableとしてreturnした点である。この場合eventをconsumeせずObsidian local Undoへ渡し、TaskChute semantic Undoを呼ばない。v0.6.68候補はshortcut ownershipを汎用button guardより先に判定し、TaskBoard非テキストcontextだけをexactly onceで所有する。
+
+v0.6.68実機試験ではrouting自体は成功したが、UNDO-BRIDGE-CROSS-SECTION-01は再びFAILした。T-0651 / E-20260816-0027のforward TaskMovedはD1 seq 2396 / event `3a69bd85-bdc3-4858-8ddc-35245b1beb17`としてremote / mobile appliedとなった。Ctrl+ZはTaskChute-owned routeへ入りdevをafternoonへ戻したが、top actionはsemanticlessでinverse TaskMovedは0件、remote / mobileはmorningに残った。残存diagnosticだけではsemantic build / attach / commitのどのstageが失敗したか確定できないが、`moveTaskByDrag()`がその失敗を警告後も成功として返し、古いgeneric snapshotを利用可能なまま残し得ることをコード上で確認した。v0.6.69はsemantic付きactionのexact operation / batch / fingerprintとhistory topをcommit直後に検証し、失敗時はexact pre-D&D snapshotを除去して明示barrierを置く。
 
 同fixtureを使ったTMV4-MULTI-ENTRY-01もPASSした。control T-0643 / E-20260816-0019を加え、同一task_id T-0641のoriginalを維持したままcontinuation E-20260816-0018だけをcontrol直下へD&Dした。D1 seq 2364 / event `23081df0-5c86-4e56-aa7b-86a7e1bf4bb4`のTaskMoved v4はduplicate task IDを保ったentry orderを使用し、remote / mobile applied、三端末が同一順へ収束した。
 
@@ -138,7 +140,7 @@ Routine occurrence interrupt continuationもPASSした。T-0644のoriginal E-202
 - `main.js:17348`に旧Routine duplicate guardが`if (false && ...)`として残る。到達不能だが削除されていない。
 - `TaskLinksModal` (`main.js:7579`) は定義以外の参照が見つからない。現在のリンクUIはpopover / menu経路を使用しているため、未使用候補。削除可否は要確認。
 - v6.6の旧詳細仕様・引継ぎ・回帰チェックリストはv0.6.16からv0.6.17時点の記述を含む。現行統合文書と併読する場合はHistorical資料として扱う。
-- 汎用自動テスト基盤は存在しない。`tests/`にはv0.6.59からv0.6.68のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation placement / preflight、same-date D&D Undo / Redo lifecycle / keyboard routingを対象とするfocused Node testがある。
+- 汎用自動テスト基盤は存在しない。`tests/`にはv0.6.59からv0.6.69のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation placement / preflight、same-date D&D Undo / Redo lifecycle / keyboard routing / actual D&D handoffを対象とするfocused Node testがある。
 - `projectNoteMeta`は名前キー中心の互換層を残す。`project_id`中心への全面移行は未実装と既存docsに記載されている。
 
 ## TODO
