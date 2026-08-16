@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current implementation candidate: `v0.6.65` (not yet committed, tagged, or distributed for BRAT testing).
-- v0.6.65 keeps generic TaskMoved v4 send-preflight strict while projecting out one exact, later, sendable interrupt-continuation TaskCreated entry only for `task-start-section-move-confirmed-markdown-v3` lifecycle moves. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until the candidate is distributed and current evidence is recorded.
+- Current test distribution: `v0.6.65` BRAT Prerelease (`Prereleased / Test-distributed`, not a stable Released build).
+- v0.6.65 keeps generic TaskMoved v4 send-preflight strict while projecting out one exact, later, sendable interrupt-continuation TaskCreated entry only for `task-start-section-move-confirmed-markdown-v3` lifecycle moves. Current dev / remote / mobile evidence passes interrupt final placement, same-task multi-entry D&D, and Routine occurrence interrupt continuation. The full plugin matrix remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 

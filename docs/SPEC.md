@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は未公開の`v0.6.65`候補を基準とする。公開済みv0.6.64の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は公開済み`v0.6.65` BRAT Prereleaseを基準とする。公開済みv0.6.64 / v0.6.65の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -227,5 +227,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.65候補をVerified / Releasedとみなす条件。interrupt lifecycle TaskMoved projection、Routine continuation、TaskMoved v4同一task_id複数entryを含むcurrent実Vault / 実mobile証跡が未完了である。
+- v0.6.65のinterrupt lifecycle TaskMoved projection、Routine continuation、TaskMoved v4同一task_id複数entryというtargeted scopeはcurrent実Vault / 実mobile証跡でPASSした。plugin全体をVerified / stable Releasedとみなす条件は、残る`TEST_MATRIX.md`の`NOT_VERIFIED` / `BLOCKED`範囲を含めて要確認である。
 - Widget、Watch、MCP/API、外部calendarの仕様。

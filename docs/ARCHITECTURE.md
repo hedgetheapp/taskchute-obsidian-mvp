@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: 未公開v0.6.65候補。interrupt continuation追加後も、その直前にenqueueされたTaskMoved v4のintermediate target orderを安全に送信前検証する。公開済みv0.6.64は変更しない。
+調査基準: 公開済みv0.6.65 BRAT Prerelease。interrupt continuation追加後も、その直前にenqueueされたTaskMoved v4のintermediate target orderを安全に送信前検証する。v0.6.65のtargeted device regressionはPASS、plugin full matrixは`NOT_VERIFIED`であり、公開済みv0.6.64 / v0.6.65 assetsは変更しない。
 
 ## 1. 概要
 

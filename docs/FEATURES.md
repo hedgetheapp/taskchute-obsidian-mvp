@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.65候補の現行feature inventoryである。v0.6.65は`task-start-section-move-confirmed-markdown-v3`のinterrupt lifecycle中間TaskMoved v4に限り、後続のexact continuation TaskCreatedだけを除外したprojected orderで送信前検証する未公開候補である。
+この一覧はv0.6.65 BRAT Prereleaseの現行feature inventoryである。v0.6.65は`task-start-section-move-confirmed-markdown-v3`のinterrupt lifecycle中間TaskMoved v4に限り、後続のexact continuation TaskCreatedだけを除外したprojected orderで送信前検証する。final placement、same-task multi-entry D&D、Routine occurrence continuationのtargeted device regressionはPASSしたが、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 
@@ -44,10 +44,10 @@
 | 開始 | 実装済み | runtime.running、TaskBoard、Log、LogDailyを更新。 |
 | 完了 | 実装済み | checkbox、実績時刻、done log、runtimeを更新。 |
 | 中断・再開 | 実装済み | runtime.pausedとlifecycle logを扱う。 |
-| 割り込み | 実装済み・実機未試験 | 実行中taskをinterruptedにする。continuation identityは停止時に予約し、interrupting taskのtask-start section移動確定後、final physical entry直後へsection metadata付きで保存・再検証してからTaskCreatedへhandoffする。 |
+| 割り込み | 実装済み | 実行中taskをinterruptedにする。continuation identityは停止時に予約し、interrupting taskのtask-start section移動確定後、final physical entry直後へsection metadata付きで保存・再検証してからTaskCreatedへhandoffする。v0.6.65で開始割り込みchainと三端末最終配置はPASS。resume / completionを含むfull lifecycleは要確認。 |
 | running cleanup | 実装済み | exec_id、occurrence key、entry_id、task_idの優先順でrunning行を閉じる。 |
 | 実績時刻手入力 | 実装済み | start_actual / end_actualとLog / LogDailyを再整合する。 |
-| 同一task_id複数entry | 一部実装 | TaskMoved v4・lifecycle cleanupはentry-safe化済み。全経路の現行回帰は要確認。 |
+| 同一task_id複数entry | 一部実装 | TaskMoved v4・lifecycle cleanupはentry-safe化済み。v0.6.65の同一sectionD&Dは三端末PASSだが、全経路の現行回帰は要確認。 |
 
 ## Task詳細
 
@@ -82,7 +82,7 @@
 | 今回のみ操作 | 実装済み | skip / cancel / deleteをRoutineHistoryとBridgeへ記録。 |
 | Routine occurrence override | 実装済み | title等の個別変更をoccurrence keyで解決する。 |
 | Routine実行lifecycle | 実装済み | occurrence key主キーで開始・完了・Logを同期する。 |
-| interrupt continuation | 一部実装 | Routine metadata継承とcontinuation-aware duplicate guardあり。現行full regressionは要確認。 |
+| interrupt continuation | 実装済み | Routine metadata継承とcontinuation-aware duplicate guardあり。v0.6.65で同一occurrence key・別entry、三端末metadata、再評価後の重複なしを確認。resume / completionを含むfull regressionは要確認。 |
 | safe rekey | 一部実装 | 未実行等の安全条件下でentry_idをrekey。実Vault回帰は保留。 |
 | Rotation Routine | 実装済み（ローカル） | menu rotation、preview、生成、履歴。Bridge同期は対象外。 |
 | RoutineHistory全体Bridge同期 | 未実装 | occurrence操作に必要な状態だけ同期する。 |
@@ -97,7 +97,7 @@
 | 整合性診断 | 実装済み | folder、ID、frontmatter、duplicate、runtime等を検査。 |
 | one-click repair | 実装済み | backupとreportを作り、安全と判断した項目だけ修復。 |
 | error log管理 | 実装済み | Taskchute由来logの保存・cleanup・診断表示。 |
-| 自動テスト | 一部実装 | `tests/tmv4-basic-v0659.js`と`tests/taskcreated-rename-handoff-v0660.js`でD&D v4とcreate/rename handoffをfocused synthetic確認する。汎用test runnerと広範な自動回帰は未実装。 |
+| 自動テスト | 一部実装 | `tests/`にv0.6.59からv0.6.65のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation focused testsがある。汎用test runnerと広範な自動回帰は未実装。 |
 
 ## Bridge
 
@@ -113,7 +113,7 @@
 | Ack / cursor result separation | 実装済み・実機未試験 | server Ack成功とlocal cursor保存結果を別状態で返し、cursor保存失敗をserver Ack失敗と表示しない。 |
 | trusted cursor persistence | 実装済み・実機未試験 | inbound Ack cursorだけに限定した保存経路で最新data.jsonへmonotonic mergeする。 |
 | cursor-only reconciliation | 一部実装 | server Ack済みeventをMarkdownへ再適用せずcursorへ反映する。現行client記録またはlegacy cache / diagnostic証跡を使う。cold cacheでの任意server照会はAPI未実装。 |
-| TaskMoved v4 | 実装済み・実機未試験 | `target_order_entry_ids` / `source_order_entry_ids`を正とする。同一section D&Dは移動前後のentry順と保存後Markdownを検証して1件enqueueする。v0.6.59実Vault回帰は未実施。 |
+| TaskMoved v4 | 実装済み | `target_order_entry_ids` / `source_order_entry_ids`を正とする。v0.6.63でbasic / section handoff / cross-section / empty-source / date move、v0.6.65でsame-task multi-entry D&Dが三端末PASS。現行versionでの全組合せ回帰は未完了。 |
 | lifecycle classifier | 実装済み | normal / routine_occurrence / identity_conflict。 |
 | mobile resume drain | 実装済み・実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。 |
 | オフライン復帰 | 一部実装 | network error分類と再試行はある。長時間実機試験は要確認。 |

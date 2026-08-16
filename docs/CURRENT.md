@@ -5,12 +5,11 @@
 - 調査日: 2026-08-16
 - manifest version: `0.6.65`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.65 implementation candidate based on main `4ac0c980e539bcf8b48694cdcc47d09d8e0191b2`
-- release tag: `v0.6.64`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
-- v0.6.65 candidate base: main `4ac0c980e539bcf8b48694cdcc47d09d8e0191b2`
+- canonical docs checkpoint: v0.6.65 post-prerelease device evidence based on main `a0ec81fb9bfa2f3597b49236834782bc28ff0b0d`
+- release tag: `v0.6.65`（BRAT実機試験用Prerelease。tag target `a0ec81fb9bfa2f3597b49236834782bc28ff0b0d`）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.65は`task-start-section-move-confirmed-markdown-v3`に限定したinterrupt continuation後のTaskMoved v4 send-preflight projectionを含む未公開候補であり、Integrated、Prereleased、Verifiedのいずれでもない。公開済みv0.6.64はBRAT実機試験用Prereleaseのまま固定する。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.65は`task-start-section-move-confirmed-markdown-v3`に限定したinterrupt continuation後のTaskMoved v4 send-preflight projectionを含み、BRAT Prereleaseとして`Prereleased / Test-distributed`である。interrupt final placement、same-task multi-entry D&D、Routine occurrence interrupt continuationのtargeted scopeはcurrent device evidenceでPASSしたが、plugin全体 / full matrixは`NOT_VERIFIED`であり、stable Releasedとはしない。公開済みv0.6.64 / v0.6.65のtag・Release・assetsは固定する。
 
 ## 文書運用
 
@@ -58,7 +57,13 @@ TMV4-DATE-MOVE-01もcurrent PASSとなった。T-0630を2026-08-16 / E-20260816-
 
 v0.6.63のinterrupt実機試験では、original T-0635 / E-20260816-0008をinterrupt task T-0636 / E-20260816-0009で停止し、continuation T-0635 / E-20260816-0010を作成した。continuation TaskCreated seq 2325はinterrupt taskが開始前にいた午後を保持し、その後seq 2326でinterrupt taskだけが午前へ移動したため、三端末の最終状態でcontinuationだけ午後へ残った。v0.6.64候補は停止処理でcontinuation identityだけを予約し、interrupt taskの開始時section移動確定後にfinal physical entry直後へ行を作成する。保存後にexact entry、同section、隣接順、row metadataを再検証してからTaskCreatedをenqueueする。focused syntheticはPASSだが実Vaultは`NOT_VERIFIED`である。
 
-v0.6.64実機試験ではfinal placement自体は成功した。original T-0638 / E-20260816-0012、interrupt T-0639 / E-20260816-0013、continuation T-0638 / E-20260816-0014は最終的にafternoonでinterrupt直後・row metadata一致となり、`interrupt_continuation_final_placement_verified`も記録された。一方、logical clock 1021のTaskMovedはcontinuation作成前のtarget order `[E-0012,E-0013]`を保持し、後続1022 TaskCreatedがE-0014を物理追加した後のsend-preflightでcurrent order `[E-0012,E-0013,E-0014]`と不一致になりfailedとなった。TaskCreatedと1023 TaskStartedもpendingに残ったため、INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01は`FAIL`、TMV4-MULTI-ENTRY-01は`NOT_RUN`、v0.6.64全体は`NOT_VERIFIED`である。v0.6.65候補はexact後続continuationが1件だけ一致する場合に限りE-0014をcurrent orderから一時投影除外し、TaskMovedのintermediate orderをstrict検証する。
+v0.6.64実機試験ではfinal placement自体は成功した。original T-0638 / E-20260816-0012、interrupt T-0639 / E-20260816-0013、continuation T-0638 / E-20260816-0014は最終的にafternoonでinterrupt直後・row metadata一致となり、`interrupt_continuation_final_placement_verified`も記録された。一方、logical clock 1021のTaskMovedはcontinuation作成前のtarget order `[E-0012,E-0013]`を保持し、後続1022 TaskCreatedがE-0014を物理追加した後のsend-preflightでcurrent order `[E-0012,E-0013,E-0014]`と不一致になりfailedとなった。TaskCreatedと1023 TaskStartedもpendingに残ったため、INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01は`FAIL`、TMV4-MULTI-ENTRY-01は`NOT_RUN`、v0.6.64全体は`NOT_VERIFIED`である。v0.6.65はexact後続continuationが1件だけ一致する場合に限りE-0014をcurrent orderから一時投影除外し、TaskMovedのintermediate orderをstrict検証する。
+
+v0.6.65実機試験ではINTERRUPT-CONTINUATION-FINAL-PLACEMENT-01がPASSした。original T-0641 / E-20260816-0016、interrupt T-0642 / E-20260816-0017、continuation T-0641 / E-20260816-0018はafternoonでこの順に隣接した。D1 seq 2358 TaskStopped、2359 TaskMoved、2360 TaskCreated continuation、2361 TaskStartedはremote / mobile appliedで、三端末の物理順と最終sectionが一致した。
+
+同fixtureを使ったTMV4-MULTI-ENTRY-01もPASSした。control T-0643 / E-20260816-0019を加え、同一task_id T-0641のoriginalを維持したままcontinuation E-20260816-0018だけをcontrol直下へD&Dした。D1 seq 2364 / event `23081df0-5c86-4e56-aa7b-86a7e1bf4bb4`のTaskMoved v4はduplicate task IDを保ったentry orderを使用し、remote / mobile applied、三端末が同一順へ収束した。
+
+Routine occurrence interrupt continuationもPASSした。T-0644のoriginal E-20260816-0020とcontinuation E-20260816-0022は`routine:T-0644:2026-08-16`、routine date / generated date、scheduled time 15:10、routine sourceを三端末で保持した。D1 seq 2373〜2376のlifecycle chainはremote / mobile appliedで、再評価後もoccurrence row countは2件のまま、第三の重複行は生成されなかった。これにより明示interrupt continuationの同一key・別entry作成もtargeted PASSとする。
 
 ## 実装済み
 
@@ -105,12 +110,10 @@ v0.6.64実機試験ではfinal placement自体は成功した。original T-0638 
 - v0.6.58 inbound Ack / cursor recoveryの実mobile回帰。
 - generic add formのdev row metadata保存はT-0628で確認済み。remote / mobileのphysical row metadataは未確認。
 - v0.6.61 explicit insert-below物理順とTC-RENAME-SECTION-TOP / SEQUENCEをv0.6.63で回帰する。
-- TaskMoved v4の同一task_id複数entryに対するv0.6.63実Vault回帰。section移動、日付移動、empty-sourceはcurrent PASS済み。
+- TaskMoved v4の同一task_id複数entryD&Dはv0.6.65でPASS。coalesce、日付移動との組合せ、その他entry-safe経路は引き続き要確認。
 - v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の同一task_id複数entryとcoalesceの組合せ試験。
-- normal / routine / interrupt continuationのlifecycle identity回帰。
-- v0.6.65 INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01の三端末回帰。TaskStopped・TaskMoved・TaskCreated・TaskStartedのD1到達順、projected preflight、最終配置、Routine metadataを確認する。
-- TMV4-MULTI-ENTRY-01はv0.6.64で未実施。v0.6.65配布後も独立fixtureで確認する。
+- normal / routine / interrupt continuationのresume・completion・terminal logまで含むfull lifecycle回帰。v0.6.65では開始割り込みchainとRoutine metadata継承までPASS。
 - Routine定義同期とRoutine occurrenceの三端末同時起動・オフライン復帰試験。
 - TaskCommentAdded、Section、Category / Area / Clientのv0.6.56上での回帰。
 - mobile長時間hidden、OS強制停止、通信断・圏外復帰。
@@ -122,7 +125,7 @@ v0.6.64実機試験ではfinal placement自体は成功した。original T-0638 
 - `main.js:17348`に旧Routine duplicate guardが`if (false && ...)`として残る。到達不能だが削除されていない。
 - `TaskLinksModal` (`main.js:7579`) は定義以外の参照が見つからない。現在のリンクUIはpopover / menu経路を使用しているため、未使用候補。削除可否は要確認。
 - v6.6の旧詳細仕様・引継ぎ・回帰チェックリストはv0.6.16からv0.6.17時点の記述を含む。現行統合文書と併読する場合はHistorical資料として扱う。
-- 汎用自動テスト基盤は存在しない。`tests/`にはv0.6.59 TaskMoved D&D、v0.6.60 create/rename handoff、v0.6.61 insert-below order、v0.6.62 section handoffのfocused Node testだけがある。
+- 汎用自動テスト基盤は存在しない。`tests/`にはv0.6.59からv0.6.65のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation placement / preflightを対象とするfocused Node testがある。
 - `projectNoteMeta`は名前キー中心の互換層を残す。`project_id`中心への全面移行は未実装と既存docsに記載されている。
 
 ## TODO
@@ -138,12 +141,12 @@ v0.6.64実機試験ではfinal placement自体は成功した。original T-0638 
 
 ## 現在確認できる問題点
 
-- 現行統合文書はv0.6.65候補へ整合したが、旧詳細資料には過去versionの記述が残る。
+- 現行統合文書はv0.6.65 post-prerelease evidenceへ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。v0.6.65は未公開候補、v0.6.64は実機試験用Prereleaseであり、本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。v0.6.65は実機試験用BRAT Prereleaseであり、targeted scopeはPASSしたがplugin全体は`NOT_VERIFIED`のため本番可否は要確認。
 
 ## 将来候補・明示的対象外
 

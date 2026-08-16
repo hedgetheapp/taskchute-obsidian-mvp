@@ -8,9 +8,9 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
-## v0.6.65 - Unreleased
+## v0.6.65 - 2026-08-16
 
-Type: Runtime candidate for review; not tagged or distributed
+Type: Runtime BRAT Prerelease for device testing
 
 ### Changed
 
@@ -26,8 +26,11 @@ Type: Runtime candidate for review; not tagged or distributed
 - INTERRUPT-TMV4-PREFLIGHT-01から10 focused synthetic: PASS
 - INTERRUPT-CONTINUATION-01から10 regression: PASS
 - existing TMV4、rename handoff、insert-below focused tests: PASS
-- 実Vault / 実mobile: `NOT_VERIFIED`
-- TMV4-MULTI-ENTRY-01: v0.6.64 `NOT_RUN`、v0.6.65 `NOT_VERIFIED`
+- INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01: `PASS`。T-0641 / E-20260816-0016、T-0642 / E-20260816-0017、continuation E-20260816-0018がafternoonで隣接し、D1 seq 2358〜2361はremote / mobile applied、三端末が収束した。
+- TMV4-MULTI-ENTRY-01: `PASS`。同一task_id T-0641のoriginal E-20260816-0016を維持したままcontinuation E-20260816-0018だけを移動し、D1 seq 2364 TaskMoved v4がremote / mobile applied、三端末順が一致した。
+- Routine occurrence interrupt continuation: `PASS`。T-0644のoriginal E-20260816-0020とcontinuation E-20260816-0022が同じoccurrence metadataを保持し、D1 seq 2373〜2376はremote / mobile applied。再評価後もoccurrence rowは2件で、unexpected duplicateはなかった。
+- 明示interrupt continuationの同一key・別entry作成: `PASS`。同じ`routine_occurrence_key=routine:T-0644:2026-08-16`で別entryを作成し、三端末でmetadata・配置・重複抑止を確認した。
+- v0.6.65の上記targeted scopeはcurrent device evidenceでPASS。plugin全体 / full matrixは引き続き`NOT_VERIFIED`。
 
 Release notes: [`docs/release/v0.6.65.md`](docs/release/v0.6.65.md)
 
