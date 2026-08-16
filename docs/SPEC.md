@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.63`を基準とする。v0.6.63はsame-section D&Dのsource/targetをexact `entry_id`と物理Markdown見出しから再解決し、reload後のruntime section fieldsへ依存しない実機試験用Prereleaseである。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は未公開の`v0.6.64`候補を基準とする。公開済みv0.6.63の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -51,7 +51,7 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - 新規taskにはtask noteと日付noteのentry行を作成する。
 - 通常追加、section先頭、現在行の下、コピーで作る日付note行には作成時から`section` / `section_id`を保存する。
 - explicitな「下にタスクを追加」と「下にコピー」は、通常targetを人工的なprotected keyにせず、選択target直下へ物理Markdownを保存する。
-- target自体がcompleted、running、pausedとして保護対象なら、既存どおりprotected block直後へ挿入する。section先頭追加、interrupt continuation、inbound continuationの既存placementは変更しない。
+- target自体がcompleted、running、pausedとして保護対象なら、既存どおりprotected block直後へ挿入する。section先頭追加は既存placementを維持する。interrupt continuationはこの保護規則へ降格せず、exact anchor `entry_id`の直後という専用placementを使う。
 - 作成時のphysical orderとvisual orderを同じ挿入結果から構築し、order修復目的のTaskMovedは生成しない。
 - task noteの既定pathは`Taskchute/Tasks/{file_base}.md`。
 - Bridge有効時はTaskCreatedをoutboxへ追加する。
@@ -112,7 +112,11 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 
 - 実行中taskをinterruptedとして停止する。
 - interrupting taskへ`is_interrupt`とinterrupted task identityを記録する。
-- 元taskのcontinuation entryを作成できる。
+- 元taskのcontinuation identityはTaskStopped時に予約するが、board行はinterrupting taskのtask-start section移動が完了して最終物理配置を確認した後に作成する。
+- continuationはcurrent Markdown上のinterrupting `entry_id`を一意解決し、その同一物理section内の直後へ配置する。row `section` / `section_id`は物理見出しと一致させる。
+- 保存後にinterrupt taskとcontinuationのexact `entry_id`、task identity、同section、隣接順、row metadataを再読込検証し、成功した場合だけinterrupt-continuation TaskCreatedをenqueueする。
+- inboundの明示interrupt-continuation TaskCreatedは`continuation_after_entry_id`を必須とし、payload dateのMarkdown上でexact entryを一意解決できた場合だけその直後へ挿入する。anchor欠落・重複・task identity不一致・section不一致では保存せず、同じsection・隣接順・row metadataを保存後検証してからAckする。
+- 開始時section移動がない場合も同じ最終配置検証を行う。section移動・保存・TaskMoved enqueueが確定しない場合、continuation行自体を作成せず、未確認のTaskCreatedも送信しない。
 - Routine occurrenceのcontinuationは元entryのRoutine metadataを引き継ぐ。
 
 ## 8. コメント・リンク・サブタスク
@@ -220,5 +224,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.63を本番版とみなす条件。現状はreload後のmissing-metadata D&Dとgeneric task row metadataを含む実Vault / 実mobile未試験のPrereleaseである。
+- v0.6.64候補をVerified / Releasedとみなす条件。interrupt continuation最終配置、Routine continuation、TaskMoved v4同一task_id複数entryを含むcurrent実Vault / 実mobile証跡が未完了である。
 - Widget、Watch、MCP/API、外部calendarの仕様。

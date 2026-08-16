@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.63。same-section D&Dのsource/targetをexact entryと物理Markdown見出しから再解決し、runtime section fieldsに依存しない実機試験用Prereleaseである。
+調査基準: 未公開v0.6.64候補。interrupt continuationをinterrupting taskの最終physical placement確定後に作成・検証してBridgeへhandoffする。公開済みv0.6.63は変更しない。
 
 ## 1. 概要
 
@@ -27,7 +27,7 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。約53,147行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.63`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.64`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
@@ -36,6 +36,7 @@ TaskchutePlugin + ItemViews (main.js)
 | `tests/insert-below-order-v0661.js` | explicit insert-belowの物理/visual順、refresh、rename、protected target、task-copy scopeを検証するfocused synthetic test。 |
 | `tests/tmv4-section-handoff-v0662.js` | same-section D&Dの欠落row section meta補完、保存後identity、strict conflict block、TaskMoved 1件を検証するfocused synthetic test。 |
 | `tests/tmv4-physical-context-v0663.js` | reload後runtime section空、exact physical headings、missing meta補完、strict conflict、no-op、generic add metadataを検証するfocused synthetic test。 |
+| `tests/interrupt-continuation-placement-v0664.js` | interrupt taskの最終section、continuation隣接順、entry identity、metadata mismatch block、lifecycle handoff構造を検証するfocused synthetic test。 |
 
 `src/`、`package.json`、bundler設定、汎用test runnerは存在しない。`tests/`にはv0.6.59以降のfocused standalone testだけがある。
 
@@ -167,13 +168,15 @@ UI / command
 
 操作により順番は異なる。Bridge event payloadは可能な限り保存後Markdownからrefreshする。
 
-explicit insert-belowと「下にコピー」は`insertTaskAfterKey()`へ`insertPlacement=explicit-below`を渡す。これにより通常targetをprotected集合へ自動追加せず、物理Markdownをtarget直下へ保存してから同じanchorでvisual rowを追加する。実際のcompleted / running / paused keyは既存protected集合とstatus判定に残る。default top insertion、inbound / interrupt continuationはこのoptionを使わない。
+explicit insert-belowと「下にコピー」は`insertTaskAfterKey()`へ`insertPlacement=explicit-below`を渡す。これにより通常targetをprotected集合へ自動追加せず、物理Markdownをtarget直下へ保存してから同じanchorでvisual rowを追加する。実際のcompleted / running / paused keyは既存protected集合とstatus判定に残る。default top insertionはこのoptionを使わない。Inboundの明示interrupt continuationも、exact `continuation_after_entry_id`を保存前検証した後に限り同じoptionでanchor直下へ保存する。source側continuationは専用builderがexact final interrupt entry直後へ直接挿入する。
 
 同一sectionのtask-row D&Dは、操作前Markdownからsource entry orderを保存し、移動後Markdownを書き込み、再読込したtarget entry orderとの一致を確認してからD&D専用TaskMoved v4を1件enqueueする。UIのdrop handlerは`moveTaskByDrag()`へ集約され、no-op orderは保存・enqueue前に除外する。
 
 same-section D&Dでは、moved rowのraw `section` / `section_id`を物理見出しと比較する。`section_id`欠落は物理見出しから補完し、IDが物理sectionを確定している場合に限って欠落・古いlabelも正規化して同じMarkdown保存へ含める。UI refresh後のMarkdownから対象`entry_id`を一意再解決し、`task_id`、physical section、row section IDが揃った後だけ既存`enqueueBridgeTaskMoved()`へ渡す。明示section IDの不一致は補正せず一般guardへ到達する前にも停止する。
 
 v0.6.63では、D&D開始時にも`resolveTaskDragPhysicalContext()`がcurrent Markdownからsource/target `entry_id`を一意解決し、各行の物理見出しを取得する。same-section判定とrow metadata補完はこのcontextを使い、view/runtime taskの空sectionをhandoffしない。画面add formが通る`addTask()`も行作成時にsection metadataを保存する。
+
+interrupt開始は二段階で保存する。`closeRunningTaskForInterrupt()`はoriginal taskをterminal化し、Log / LogDaily cleanup、TaskStopped enqueue、continuation `entry_id`予約までを行うが、provisionalなcontinuation行やTaskCreatedは作らない。`startTask()`がinterrupting taskのtask-start section moveとTaskMoved handoffを確定した後、`finalizeInterruptContinuationAfterStartPlacement()`がcurrent Markdownのfinal interrupt `entry_id`直後へcontinuationを挿入する。最終placementが未確認ならfinalizerは行作成前に停止する。`buildInterruptContinuationPlacement()`は物理見出しからrow section metadataを構築し、保存後は`inspectInterruptContinuationPlacement()`がexact identity、同section、隣接順、metadata一致を検証する。検証成功後だけTaskCreatedをenqueueし、失敗は`interrupt-continuation` structured diagnosticとして記録する。Inbound TaskCreatedも明示continuationに限ってanchor entry IDを必須とし、保存前のexact anchor identity / date / section検証後に`insertPlacement=explicit-below`を使用し、同じinspectorで保存後配置を検証してからAckする。
 
 日付移動は`bulkMoveTasksToDate()`がsource date noteから旧entryを除去し、destination date noteで`nextUniqueEntryId()`を使って新entryを採番する。`enqueueBridgeTaskMoved()`には旧identityを`from` / `before`、新identityを`to` / `after`およびtop-level `entry_id`として渡し、source / target orderも各date noteの保存後Markdownから構築する。inboundは`applyBridgeInboundTaskMovedEvent()`が旧entryでsourceを解決し、destination行を新entryへ書き換え、`inspectBridgeTaskMovedDateChangeVaultState()`で旧entry消失、新entry存在、両dateのentry orderとtarget sectionを再読込検証してからAckへ進む。task note link targetと`task_id`は変更しない。
 

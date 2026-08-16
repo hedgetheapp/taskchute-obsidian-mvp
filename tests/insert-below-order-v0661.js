@@ -150,7 +150,7 @@ assert(belowValidateIndex < belowSaveIndex && belowSaveIndex < belowBridgeIndex)
 assert(belowBridgeIndex < belowVisualIndex, "visual insertion must follow physical save and Bridge create handoff");
 
 const inboundCreated = extractMethod("  async applyBridgeInboundTaskCreatedEvent(", "\n  async applyBridgeInboundTaskUpdatedEvent(");
-assert(!inboundCreated.includes('insertPlacement: "explicit-below"'), "inbound continuation placement remains unchanged");
+assert(inboundCreated.includes('insertPlacement: "explicit-below"'), "explicit inbound continuation must preserve final anchor adjacency");
 
 console.log("INSERT-BELOW-ORDER-01 physical A/B/C: PASS");
 console.log("INSERT-BELOW-ORDER-02 refresh and renamed order: PASS");

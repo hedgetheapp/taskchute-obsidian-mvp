@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.63の現行feature inventoryである。v0.6.63はreload後のruntime section fieldsに依存せず、exact entryと物理Markdown見出しからsame-section D&D identityを解決する実機試験用Prereleaseである。
+この一覧はv0.6.64候補の現行feature inventoryである。v0.6.64はinterrupt continuationをinterrupting taskの開始処理完了後の物理配置へ確定してから作成・Bridge handoffする未公開候補である。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.63で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.64で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -44,7 +44,7 @@
 | 開始 | 実装済み | runtime.running、TaskBoard、Log、LogDailyを更新。 |
 | 完了 | 実装済み | checkbox、実績時刻、done log、runtimeを更新。 |
 | 中断・再開 | 実装済み | runtime.pausedとlifecycle logを扱う。 |
-| 割り込み | 実装済み | 実行中taskをinterruptedにし、割り込みtaskとcontinuationを作る。 |
+| 割り込み | 実装済み・実機未試験 | 実行中taskをinterruptedにする。continuation identityは停止時に予約し、interrupting taskのtask-start section移動確定後、final physical entry直後へsection metadata付きで保存・再検証してからTaskCreatedへhandoffする。 |
 | running cleanup | 実装済み | exec_id、occurrence key、entry_id、task_idの優先順でrunning行を閉じる。 |
 | 実績時刻手入力 | 実装済み | start_actual / end_actualとLog / LogDailyを再整合する。 |
 | 同一task_id複数entry | 一部実装 | TaskMoved v4・lifecycle cleanupはentry-safe化済み。全経路の現行回帰は要確認。 |

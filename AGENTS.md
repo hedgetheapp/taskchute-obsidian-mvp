@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current release candidate: `v0.6.63` BRAT Prerelease for device testing.
-- v0.6.63 resolves same-section D&D source and target from exact `entry_id` occurrences and physical Markdown headings even when reloaded runtime section fields are empty. Generic task creation now persists row section metadata. Explicit conflicts remain blocked. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until current evidence is recorded.
+- Current implementation candidate: `v0.6.64` (not yet committed, tagged, or distributed for BRAT testing).
+- v0.6.64 finalizes interrupt continuations only after the interrupting task's task-start section move is confirmed. The continuation is saved directly after the final interrupt entry with matching row section metadata, then re-read and verified before TaskCreated enqueue. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until the candidate is distributed and current evidence is recorded.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 

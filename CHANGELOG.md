@@ -8,6 +8,39 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.64 - Unreleased
+
+Type: Runtime candidate for review; not tagged or distributed
+
+### Changed
+
+- interrupt stop時はcontinuation `entry_id`だけを予約し、provisionalなcontinuation行とTaskCreatedを作らないようにした。
+- interrupting taskのtask-start section moveとTaskMoved handoff確定後、final physical entry直後へcontinuationをsection metadata付きで保存する。
+- 保存後にexact entry identity、同一physical section、隣接順、row metadataを再検証し、成功時だけinterrupt-continuation TaskCreatedをenqueueする。
+- inboundの明示continuationはanchor entry IDを必須とし、payload date上のexact anchor identity / sectionを保存前に確認してから直後へ保存し、同じ配置検証後だけAckする。
+- task-start placement未確定時はcontinuation行の作成自体を抑止し、TaskCreatedも送信しない。
+- placement不一致、保存失敗、検証失敗、TaskCreated enqueue失敗を`interrupt-continuation` structured diagnosticsへ記録する。
+- section移動なし／あり、同一task_id別entry、metadata mismatch block、lifecycle handoff構造のfocused synthetic testを追加した。
+- `manifest.json`を`0.6.64`へ更新した。
+
+### Verification
+
+- `node --check .\main.js`: OK
+- `git diff --check`: OK
+- INTERRUPT-CONTINUATION-01から10 focused synthetic: PASS
+- existing TMV4、rename handoff、insert-below focused tests: PASS
+- 実Vault / 実mobile: `NOT_VERIFIED`
+- TMV4-MULTI-ENTRY-01: `NOT_VERIFIED`
+
+### v0.6.63 failure evidence
+
+- original T-0635 / E-20260816-0008、interrupt T-0636 / E-20260816-0009、continuation T-0635 / E-20260816-0010。
+- continuation TaskCreated seq 2325は午後で生成され、その後TaskMoved seq 2326がinterrupt taskだけを午前へ移動したため、三端末でcontinuationだけ午後へ残った。
+
+Release notes: [`docs/release/v0.6.64.md`](docs/release/v0.6.64.md)
+
+---
+
 ## v0.6.63 - 2026-08-15
 
 Type: Runtime BRAT Prerelease for device testing

@@ -214,6 +214,12 @@
 - 根拠: `bulkMoveTasksToDate()`、`enqueueBridgeTaskMoved()`、`applyBridgeInboundTaskMovedEvent()`、`inspectBridgeTaskMovedDateChangeVaultState()`、v0.6.63 TMV4-DATE-MOVE-01。
 - 理由: `entry_id`はdate note上のboard occurrence / placement identityであり、destination dateへ移った配置はsource dateの旧identityに固定しない。受信側は旧IDでsourceを特定し、新IDでdestinationを検証する必要がある。このdate-move rekeyはRoutine occurrence collisionを扱うD-013のsafe rekeyとは別の通常TaskMoved semanticsである。
 
+## D-036: interrupt continuationはinterrupting taskの最終physical placement確定後に作成する
+
+- 判断: TaskStopped時はcontinuation identityだけを予約し、interrupting taskのtask-start section moveが保存・検証・TaskMoved handoffまで確定した後、final interrupt entry直後へcontinuation行を作る。最終placementが未確認なら行作成自体を抑止する。保存後のexact identity、同section、隣接順、row metadata検証に成功した場合だけTaskCreatedをenqueueする。Inboundの明示continuationはanchor entry IDを必須とし、payload date上のexact anchorを一意検証してから直後へ配置し、同じ検証後だけAckする。
+- 根拠: `closeRunningTaskForInterrupt()`、`finalizeInterruptContinuationAfterStartPlacement()`、`buildInterruptContinuationPlacement()`、`inspectInterruptContinuationPlacement()`、v0.6.63 T-0635 / T-0636 failure evidence。
+- 理由: continuationを開始前のinterrupt task直後へ先に作ると、その後のtask-start section moveがinterrupt taskだけを移動し、continuationが旧sectionへ残る。TaskCreated後に補正TaskMovedを追加するより、最終配置を正として1回だけ作成する方が中間不整合と二重eventを避けられるため。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

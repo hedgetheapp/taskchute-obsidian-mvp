@@ -2,11 +2,11 @@
 
 ## 基準と読み方
 
-- 対象release: v0.6.63 BRAT Prerelease
-- canonical docs checkpoint: `v0.6.63` tag target
-- v0.6.63はsame-section D&Dのsource/targetをexact entryと物理Markdown見出しから再解決し、reload後runtime section空でもhandoffする実機試験用version。
+- 対象実装: v0.6.64候補（未公開・未配布）
+- 配布済みcheckpoint: `v0.6.63` tag target
+- v0.6.64候補はinterrupt continuationをinterrupting taskの開始処理完了後の最終物理配置へ作成する。
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
-- dev / remote / mobile列と`Status`列は、いずれもv0.6.63についての判定を示す。
+- dev / remote / mobile列と`Status`列は、いずれもv0.6.64候補についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
 - Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
@@ -77,10 +77,11 @@
 | TMV4-CROSS-SECTION-01 | `PASS` | `tmv4-v663-cross-01`、T-0628 / E-20260816-0001。generic add formで午後sectionへ作成し、dev physical rowに`section=午後 section_id=afternoon`を確認。remote / mobile UIも午後。devで午後→午前へcross-section D&Dし、revert・同期準備失敗Noticeなし。dev物理Markdownは`### 午前`直下、`section=午前 section_id=morning`。D1 seq 2298 / event `6ce13f31-c1bd-418b-bb85-46aa0d6a7036`はTaskMoved v4、payload source=`confirmed-markdown-v2`、from=`afternoon`、to=`morning`。remote / mobile applied、両UI午前。 |
 | TMV4-EMPTY-SOURCE-01 | `PASS` | `tmv4-v663-empty-source-01`、T-0629 / E-20260816-0002。devで夜（`night`）→午後（`afternoon`）へcross-section D&Dし、sourceの夜sectionを空にした。dev / remoteは夜task count=0、fixtureは午後で`section=午後 section_id=afternoon`。mobileもfixtureは午後で夜にfixtureなし。D1 matching event=1、seq 2301 / event `c346e9aa-d15f-451f-a375-cebcc774e8f1`はTaskMoved v4、`source_order_entry_ids=[]`、source entry count=0、target order=`[E-20260816-0002]`、remote / mobile applied。 |
 | TMV4-DATE-MOVE-01 | `PASS` | `tmv4-v663-date-move-01`、T-0630。2026-08-16のE-20260816-0003を2026-08-17の午後へ移動し、destination identityはE-20260817-0001。三端末でsource日から消失、destination日に1件、task_idとtask noteを維持。dev / remote rowは`section=午後 section_id=afternoon`、mobile UIも同じ最終状態。D1 TaskCreated seq 2302は旧entryでremote / mobile applied。TaskMoved v4 seq 2303 / event `bf7d8eaf-7d1f-45df-8f1a-4a6d2c53fb77`はmove type=`date-change`、source=`date-move-confirmed-markdown-v3`、top-level/to/after=E-20260817-0001、from/before=E-20260816-0003、remote / mobile applied。 |
+| INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01 | `FAIL` | original T-0635 / E-20260816-0008、interrupt T-0636 / E-20260816-0009、continuation T-0635 / E-20260816-0010。originalは開始時に午後→午前へ移動。interrupt taskが午後にいる間にcontinuation TaskCreated seq 2325 / event `30ac88db-38fe-4871-ac90-2cd0f381661b`が`section_id=afternoon`、`continuation_after_entry_id=E-20260816-0009`で生成され、その後seq 2326 / event `64d3b5b0-19f8-4178-901c-02cc329a8234`がinterrupt taskだけを午前へ移動した。三端末の最終状態はoriginal=午前、interrupt=午前、continuation=午後。 |
 
-この5件だけをv0.6.63のcurrent TaskMoved PASSとする。v0.6.63全体および他のtest caseをVerifiedへ昇格しない。
+この5件だけをv0.6.63のTaskMoved PASS evidenceとする。interrupt continuation failureを含むためv0.6.63全体をVerifiedへ昇格しない。
 
-## Current v0.6.63 Matrix
+## Current v0.6.64 Candidate Matrix
 
 | Area | Test case | dev | remote | mobile | Last verified version | Status | Evidence / Notes |
 |---|---|---|---|---|---|---|---|
@@ -96,20 +97,22 @@
 | TaskCreated | 通常taskを作成し、他2端末のMarkdown/UIとAckを確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | `bridge-v6.5-rc1-checklist.md`に三端末起点PASSあり。ただし後続のTaskCreated guard / collision変更を含むv0.6.56回帰は未記録。 |
 | TaskCreated / TaskUpdated | TC-RENAME-SECTION-TOP-01: 空section先頭へ作成後即rename | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 | `NOT_VERIFIED` | v0.6.60実機PASS。v0.6.63ではrename handoffコード未変更、focused synthetic再PASSだがcurrent実機証跡へは未昇格。 |
 | TaskCreated / TaskUpdated | TC-RENAME-SEQUENCE-01: insert-belowと3件連続create→rename | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 | `NOT_VERIFIED` | v0.6.60でA/B/Cのrename、identity、remote / mobile appliedはPASS。v0.6.63実機回帰は未実施。 |
-| TaskCreated | TASK-ADD-SECTION-META-01: generic add form rowへsection metadata保存 | `PASS` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 dev partial | `NOT_VERIFIED` | T-0628 / E-20260816-0001をgeneric add formから午後へ作成し、dev physical rowで`section=午後 section_id=afternoon`を確認。remote / mobile UIの午後配置は確認済みだが、両端末のphysical row metadataは未確認。 |
+| TaskCreated | TASK-ADD-SECTION-META-01: generic add form rowへsection metadata保存 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 dev partial | `NOT_VERIFIED` | T-0628 / E-20260816-0001のdev physical rowはv0.6.63で確認済み。v0.6.64候補では未試験。 |
 | TaskCreated | INSERT-BELOW-ORDER-01: Aの下へB、Bの下へCを作成し物理/UI順を確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 FAIL | `NOT_VERIFIED` | v0.6.61からv0.6.63のfocused syntheticでA / B / C、refresh、rename、physical / visual一致、protected targetを確認。v0.6.63実Vaultは未試験。 |
 | TaskUpdated | 通常taskのtitle・値変更を物理MarkdownとAckまで確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3証跡はある。v0.6.48以降のfalse Ack対策を含む現行三端末回帰はrepository内に未記録。 |
 | TaskMoved v4 | section移動・日付移動・同一task_id複数entry・空source section | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 section / date / empty-source | `NOT_VERIFIED` | section移動、日付移動、empty-sourceはcurrent PASS。同一task_id複数entryのcurrent実機証跡が未完了のため複合行は昇格しない。 |
-| TaskMoved v4 | TMV4-BASIC-01: v4 entry orderの基本移動 | `PASS` | `PASS` | `PASS` | v0.6.63 | `PASS` | A/B/C→C/A/B。D1 seq 2284、event `465fc34f-a559-4cc5-afdd-9b355abe63f3`、T-0627 / E-20260815-0045。remote / mobile applied、三端末UI・dev物理順一致。 |
-| TaskMoved v4 | TMV4-SECTION-HANDOFF-01: missing row section metaをphysical headingから補完 | `PASS` | `PASS` | `PASS` | v0.6.63 | `PASS` | B row metadata欠落をreload後D&Dで`午後 / afternoon`へ自動補完。D1 seq 2285、event `7aa1ac1a-d13d-4b74-a691-252502c7e4a3`、T-0626 / E-20260815-0044。remote / mobile applied、三端末B/C/A。 |
-| TaskMoved v4 | TMV4-CROSS-SECTION-01: section間D&D | `PASS` | `PASS` | `PASS` | v0.6.63 | `PASS` | T-0628 / E-20260816-0001を午後→午前へD&D。dev物理rowは`午前 / morning`、D1 seq 2298 / event `6ce13f31-c1bd-418b-bb85-46aa0d6a7036`はremote / mobile applied、三端末UI午前。 |
-| TaskMoved v4 | TMV4-EMPTY-SOURCE-01: source sectionが空になる移動 | `PASS` | `PASS` | `PASS` | v0.6.63 | `PASS` | T-0629 / E-20260816-0002を夜（`night`）→午後（`afternoon`）へ移動し、source orderは空。D1 seq 2301 / event `c346e9aa-d15f-451f-a375-cebcc774e8f1`、remote / mobile applied。dev / remoteの夜task count=0、三端末でfixtureは午後。 |
-| TaskMoved v4 | TMV4-DATE-MOVE-01: 日付移動とdestination entry rekey | `PASS` | `PASS` | `PASS` | v0.6.63 | `PASS` | T-0630を2026-08-16 / E-20260816-0003から2026-08-17 / E-20260817-0001へ移動。TaskMoved v4 seq 2303 / event `bf7d8eaf-7d1f-45df-8f1a-4a6d2c53fb77`は旧IDをfrom/before、新IDをtop-level/to/afterに保持し、remote / mobile applied。三端末でsource消失・destination 1件。 |
+| TaskMoved v4 | TMV4-BASIC-01: v4 entry orderの基本移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 | `NOT_VERIFIED` | v0.6.63で三端末PASS。v0.6.64候補のcurrent実機回帰は未実施。 |
+| TaskMoved v4 | TMV4-SECTION-HANDOFF-01: missing row section metaをphysical headingから補完 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 | `NOT_VERIFIED` | v0.6.63で三端末PASS。v0.6.64候補のcurrent実機回帰は未実施。 |
+| TaskMoved v4 | TMV4-CROSS-SECTION-01: section間D&D | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 | `NOT_VERIFIED` | v0.6.63で三端末PASS。v0.6.64候補のcurrent実機回帰は未実施。 |
+| TaskMoved v4 | TMV4-EMPTY-SOURCE-01: source sectionが空になる移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 | `NOT_VERIFIED` | v0.6.63で三端末PASS。v0.6.64候補のcurrent実機回帰は未実施。 |
+| TaskMoved v4 | TMV4-DATE-MOVE-01: 日付移動とdestination entry rekey | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 | `NOT_VERIFIED` | v0.6.63で三端末PASS。v0.6.64候補のcurrent実機回帰は未実施。 |
+| TaskMoved v4 | TMV4-MULTI-ENTRY-01: 同一task_id・異なるentry_id | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | TaskMoved v4実装とsynthetic coverageはあるが、v0.6.64候補のcurrent実Vault証跡はない。 |
 | TaskDeleted | 通常・create直後・完了済み・一括削除 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3で通常一連操作と完了済みTaskDeletedのPASS記録あり。後続identity変更後のfull regressionは未記録。 |
 | TaskStarted | Board / Log / LogDaily / runtime保存後検証とAck | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3三端末起点PASS。v0.6.49 lifecycle classifier後の現行統合証跡なし。 |
 | TaskStopped / Paused / Resumed | stop・pause・resumeとruntime / log整合 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | TaskStoppedを含む実装記録はあるが、3イベントを覆う現行実Vault証跡はない。 |
 | TaskCompleted | done row、Log / LogDaily、running cleanup、Ack | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3三端末起点PASS。v0.6.45以降のoccurrence key検証とcleanup変更後は未統合確認。 |
 | interrupt / continuation | normal interruption、continuation作成・移動・再開・完了 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.50からv0.6.53に実装変更あり。現行HEADの証跡はrepository内にない。 |
+| interrupt / continuation | INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 FAIL | `NOT_VERIFIED` | v0.6.64 focused synthetic 01〜10はsection移動なし／あり、同一task_id別entry、metadata mismatch、anchor missing / duplicate / wrong task、保存後隣接失敗、二重TaskCreated防止、Routine metadata、terminal save/enqueue failure guardをPASS。実Vault / remote / mobileは未試験。 |
 | interrupt / continuation | Routine occurrence interruptionとmetadata継承 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | continuation-aware duplicate guardを含むfull regression未記録。 |
 | Comments | TaskCommentAddedを三端末で作成・物理保存・Ack確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | 実装はあるがv0.6.56上の明示的な実Vault証跡なし。編集・削除同期は仕様自体が要確認。 |
 | Section | Created / Updated / Deleted / Reorderedとtask位置整合 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v6.6回帰チェックリストは未チェック。`section_id` / label揺れは監視項目。 |

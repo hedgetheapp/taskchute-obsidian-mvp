@@ -3042,6 +3042,130 @@ function collectTaskBoardPhysicalOccurrences(markdown) {
   return { lines, occurrences };
 }
 
+function inspectInterruptContinuationPlacement(markdown, settings, options = {}) {
+  const interruptEntryId = String(options.interruptEntryId || "").trim();
+  const continuationEntryId = String(options.continuationEntryId || "").trim();
+  const expectedInterruptTaskId = String(options.interruptTaskId || "").trim();
+  const expectedTaskId = String(options.taskId || "").trim();
+  const collected = collectTaskBoardPhysicalOccurrences(markdown);
+  const interruptMatches = collected.occurrences.filter(item => item.entry_id === interruptEntryId);
+  const continuationMatches = collected.occurrences.filter(item => item.entry_id === continuationEntryId);
+  const result = {
+    ok: false,
+    reason_code: "",
+    reason: "",
+    interrupt_entry_id: interruptEntryId,
+    continuation_entry_id: continuationEntryId,
+    interrupt_match_count: interruptMatches.length,
+    continuation_match_count: continuationMatches.length,
+    physical_section_id: "",
+    physical_section_label: "",
+    row_section_id: "",
+    row_section_label: "",
+    adjacent_after_interrupt: false
+  };
+  if (!interruptEntryId || !continuationEntryId || interruptMatches.length !== 1 || continuationMatches.length !== 1) {
+    result.reason_code = "interrupt_continuation_identity_not_unique";
+    result.reason = "割り込みtaskまたはcontinuationのentry_idを物理Markdownから一意に解決できませんでした。";
+    return result;
+  }
+  const interruptOccurrence = interruptMatches[0];
+  const continuationOccurrence = continuationMatches[0];
+  const interruptOrderIndex = collected.occurrences.indexOf(interruptOccurrence);
+  const continuationOrderIndex = collected.occurrences.indexOf(continuationOccurrence);
+  result.adjacent_after_interrupt = continuationOrderIndex === interruptOrderIndex + 1;
+  if (!result.adjacent_after_interrupt) {
+    result.reason_code = "interrupt_continuation_not_adjacent";
+    result.reason = "continuationがinterrupting taskの直後にありません。";
+    return result;
+  }
+  if (String(interruptOccurrence.physical_section_label || "").trim() !== String(continuationOccurrence.physical_section_label || "").trim()) {
+    result.reason_code = "interrupt_continuation_section_mismatch";
+    result.reason = "continuationとinterrupting taskの物理sectionが一致しません。";
+    return result;
+  }
+  if (expectedInterruptTaskId && interruptOccurrence.task_id !== expectedInterruptTaskId) {
+    result.reason_code = "interrupt_task_identity_mismatch";
+    result.reason = "interrupting taskのtask_idが期待値と一致しません。";
+    return result;
+  }
+  if (expectedTaskId && continuationOccurrence.task_id !== expectedTaskId) {
+    result.reason_code = "interrupt_continuation_task_identity_mismatch";
+    result.reason = "continuationのtask_idが元taskと一致しません。";
+    return result;
+  }
+  const rowIdentity = resolveTaskLineSectionIdentityForPhysicalHeading(
+    continuationOccurrence.line,
+    settings,
+    continuationOccurrence.physical_section_label,
+    { normalizeMissing: false }
+  );
+  result.physical_section_id = String(rowIdentity.physical_section_id || "").trim();
+  result.physical_section_label = String(continuationOccurrence.physical_section_label || "").trim();
+  result.row_section_id = String(rowIdentity.parsed_row_section_id || "").trim();
+  result.row_section_label = String(tcMetaFromTaskLine(continuationOccurrence.line).section || "").trim();
+  if (!rowIdentity.ok || result.row_section_id !== result.physical_section_id) {
+    result.reason_code = rowIdentity.reason_code || "interrupt_continuation_row_section_mismatch";
+    result.reason = rowIdentity.reason || "continuationの行section metadataが物理見出しと一致しません。";
+    return result;
+  }
+  result.ok = true;
+  result.reason_code = "interrupt_continuation_placement_verified";
+  result.reason = "continuationの最終section、隣接順、行metadataを確認しました。";
+  result.interrupt_occurrence = interruptOccurrence;
+  result.continuation_occurrence = continuationOccurrence;
+  return result;
+}
+
+function buildInterruptContinuationPlacement(markdown, settings, options = {}) {
+  const interruptEntryId = String(options.interruptEntryId || "").trim();
+  const continuationEntryId = String(options.continuationEntryId || "").trim();
+  const taskId = String(options.taskId || "").trim();
+  const file = String(options.file || "").trim();
+  if (!taskId || !file) {
+    return { ok: false, reason_code: "interrupt_continuation_definition_identity_missing", reason: "continuation作成に必要なtask_idまたはtask note link targetがありません。" };
+  }
+  const collected = collectTaskBoardPhysicalOccurrences(markdown);
+  const interruptMatches = collected.occurrences.filter(item => item.entry_id === interruptEntryId);
+  const continuationMatches = collected.occurrences.filter(item => item.entry_id === continuationEntryId);
+  if (!interruptEntryId || !continuationEntryId || interruptMatches.length !== 1 || continuationMatches.length !== 0) {
+    return {
+      ok: false,
+      reason_code: continuationMatches.length ? "interrupt_continuation_entry_already_exists" : "interrupt_entry_identity_not_unique",
+      reason: continuationMatches.length
+        ? "continuation entry_idが作成前に既に存在します。"
+        : "interrupting taskのentry_idを物理Markdownから一意に解決できませんでした。"
+    };
+  }
+  const interruptOccurrence = interruptMatches[0];
+  const section = findBoardSection(settings || {}, interruptOccurrence.physical_section_label);
+  if (!section) {
+    return { ok: false, reason_code: "interrupt_final_section_unresolved", reason: "interrupting taskの最終物理sectionを解決できませんでした。" };
+  }
+  const continuationMeta = Object.assign({}, options.meta || {}, {
+    section: section.name,
+    section_id: section.id
+  });
+  const continuationLine = taskLine(
+    file,
+    String(options.title || "").trim(),
+    false,
+    continuationEntryId,
+    continuationMeta
+  );
+  const lines = collected.lines.slice();
+  lines.splice(interruptOccurrence.index + 1, 0, continuationLine);
+  const nextMarkdown = lines.join("\n");
+  const inspected = inspectInterruptContinuationPlacement(nextMarkdown, settings, {
+    interruptEntryId,
+    continuationEntryId,
+    interruptTaskId: options.interruptTaskId,
+    taskId
+  });
+  if (!inspected.ok) return Object.assign({ markdown: nextMarkdown }, inspected);
+  return Object.assign({ ok: true, markdown: nextMarkdown, section, continuation_line: continuationLine }, inspected);
+}
+
 function resolveTaskDragPhysicalContext(markdown, settings, sourceEntryId, targetEntryId) {
   const sourceId = String(sourceEntryId || "").trim();
   const targetId = String(targetEntryId || "").trim();
@@ -17828,6 +17952,8 @@ class TaskchutePlugin extends obsidian.Plugin {
     const notePath = this.getTaskchutePath(date);
     let md = await readFileText(this.app, notePath);
     const requestedEntryId = String(payload.entry_id || "").trim();
+    const continuationAfterEntryId = String(payload.continuation_after_entry_id || "").trim();
+    const expectedContinuationAnchorTaskId = String(payload.continuation_next_task_id || payload.next_task_id || "").trim();
     const requestedEntryLines = requestedEntryId
       ? String(md || "").split(/\r?\n/).filter(line => isTaskLine(line) && taskKeyFromTaskLine(line) === requestedEntryId)
       : [];
@@ -17852,6 +17978,38 @@ class TaskchutePlugin extends obsidian.Plugin {
           }
         });
         return { ok: false, message: "TaskCreated entry_id_collision: same entry_id already belongs to another task_id." };
+      }
+      if (isContinuation) {
+        const existingPlacement = continuationAfterEntryId
+          ? inspectInterruptContinuationPlacement(md, this.settings, {
+            interruptEntryId: continuationAfterEntryId,
+            continuationEntryId: requestedEntryId,
+            interruptTaskId: expectedContinuationAnchorTaskId,
+            taskId
+          })
+          : { ok: false, reason_code: "continuation_anchor_entry_id_missing", reason: "interrupt continuation payloadにcontinuation_after_entry_idがありません。" };
+        const existingPlacementSectionMatches = existingPlacement.ok
+          && String(existingPlacement.physical_section_id || "").trim() === String(sec.id || "").trim();
+        if (!existingPlacement.ok || !existingPlacementSectionMatches) {
+          this.recordBridgeStructuredDiagnostic({
+            level: "error",
+            category: "interrupt-continuation",
+            phase: "inbound_interrupt_continuation_existing_placement_blocked",
+            reason: existingPlacement.ok ? "continuation_existing_payload_section_mismatch" : existingPlacement.reason_code,
+            event,
+            status: "failed_unacked",
+            message: existingPlacement.ok ? "既存continuationの物理sectionがpayloadと一致しません。" : existingPlacement.reason,
+            detail: {
+              interrupt_entry_id: continuationAfterEntryId,
+              continuation_entry_id: requestedEntryId,
+              expected_anchor_task_id: expectedContinuationAnchorTaskId,
+              physical_section_id: String(existingPlacement.physical_section_id || ""),
+              payload_section_id: String(sec.id || ""),
+              adjacent_after_interrupt: !!existingPlacement.adjacent_after_interrupt
+            }
+          });
+          return { ok: false, message: "既存interrupt continuationの配置を検証できないためAckしません。" };
+        }
       }
       const expectedRoutineFields = getExplicitTaskCreatedRoutineFields(payload);
       const actualRoutineFields = getExplicitTaskCreatedRoutineFields({
@@ -18027,11 +18185,57 @@ class TaskchutePlugin extends obsidian.Plugin {
     });
     if (!lineMeta.routine_source && generatedRoutineId && fileBase) lineMeta.routine_source = fileBase;
     const createdLine = taskLine(fileBase, title, false, entryId, lineMeta);
-    const insertAfterEntryId = String(payload.continuation_after_entry_id || "").trim();
-    const insertAfterTask = insertAfterEntryId ? parseTasks(md).find(task => taskKey(task) === insertAfterEntryId) : null;
-    const insertAfterSameSection = !!(insertAfterTask && resolveTaskSection(this.settings, insertAfterTask.sectionId || insertAfterTask.section).name === sec.name);
+    const insertAfterEntryId = continuationAfterEntryId;
+    if (isContinuation && !insertAfterEntryId) {
+      this.recordBridgeStructuredDiagnostic({
+        level: "error",
+        category: "interrupt-continuation",
+        phase: "inbound_interrupt_continuation_anchor_blocked",
+        reason: "continuation_anchor_entry_id_missing",
+        event,
+        status: "failed_unacked",
+        message: "interrupt continuation payloadにcontinuation_after_entry_idがないため保存しません。",
+        detail: { continuation_entry_id: entryId, payload_section_id: String(sec.id || "") }
+      });
+      return { ok: false, message: "interrupt continuationのanchor entry_idがないため保存・Ackしません。" };
+    }
+    const physicalBeforeCreate = collectTaskBoardPhysicalOccurrences(md);
+    const insertAfterOccurrences = insertAfterEntryId
+      ? physicalBeforeCreate.occurrences.filter(item => item.entry_id === insertAfterEntryId)
+      : [];
+    const insertAfterOccurrence = insertAfterOccurrences.length === 1 ? insertAfterOccurrences[0] : null;
+    const insertAfterSection = insertAfterOccurrence
+      ? findBoardSection(this.settings, insertAfterOccurrence.physical_section_label)
+      : null;
+    const expectedAnchorTaskId = expectedContinuationAnchorTaskId;
+    const insertAfterTaskIdentityMatches = !expectedAnchorTaskId
+      || !!(insertAfterOccurrence && insertAfterOccurrence.task_id === expectedAnchorTaskId);
+    const insertAfterSameSection = !!(insertAfterOccurrence && insertAfterSection && String(insertAfterSection.id || "") === String(sec.id || ""));
+    if (isContinuation && insertAfterEntryId && (!insertAfterSameSection || !insertAfterTaskIdentityMatches)) {
+      this.recordBridgeStructuredDiagnostic({
+        level: "error",
+        category: "interrupt-continuation",
+        phase: "inbound_interrupt_continuation_anchor_blocked",
+        reason: insertAfterOccurrences.length !== 1
+          ? "continuation_anchor_identity_not_unique"
+          : (!insertAfterTaskIdentityMatches ? "continuation_anchor_task_mismatch" : "continuation_anchor_section_mismatch"),
+        event,
+        status: "failed_unacked",
+        message: "interrupt continuationのanchorをpayload section内で一意に確認できませんでした。",
+        detail: {
+          interrupt_entry_id: insertAfterEntryId,
+          continuation_entry_id: entryId,
+          anchor_match_count: insertAfterOccurrences.length,
+          expected_anchor_task_id: expectedAnchorTaskId,
+          actual_anchor_task_id: String(insertAfterOccurrence && insertAfterOccurrence.task_id || ""),
+          anchor_physical_section_id: String(insertAfterSection && insertAfterSection.id || ""),
+          payload_section_id: String(sec.id || "")
+        }
+      });
+      return { ok: false, message: "interrupt continuationのanchor section検証に失敗したため保存・Ackしません。" };
+    }
     md = isContinuation && insertAfterEntryId && insertAfterSameSection
-      ? insertTaskAfterKey(md, this.settings, insertAfterEntryId, createdLine, sec.name)
+      ? insertTaskAfterKey(md, this.settings, insertAfterEntryId, createdLine, sec.name, { insertPlacement: "explicit-below" })
       : insertTaskIntoSection(md, this.settings, sec.name, createdLine);
     const boardWriteOk = await this.writeFileText(notePath, md, { deviceWriterOperation: "bridge-inbound-task-created-board" });
     if (this.isTaskchuteWriteAborted(boardWriteOk)) return { ok: false, message: "Taskchuteノートへの追加が保存前確認で停止しました。" };
@@ -18040,6 +18244,33 @@ class TaskchutePlugin extends obsidian.Plugin {
       .filter(line => isTaskLine(line) && taskKeyFromTaskLine(line) === entryId);
     if (savedEntryLines.length !== 1) {
       return { ok: false, message: "TaskCreated保存後にentry_id一致行を一意に検証できないためAckしません。" };
+    }
+    if (isContinuation && insertAfterEntryId) {
+      const continuationPlacement = inspectInterruptContinuationPlacement(savedMarkdown, this.settings, {
+        interruptEntryId: insertAfterEntryId,
+        continuationEntryId: entryId,
+        interruptTaskId: expectedAnchorTaskId || (insertAfterOccurrence && insertAfterOccurrence.task_id),
+        taskId
+      });
+      if (!continuationPlacement.ok) {
+        this.recordBridgeStructuredDiagnostic({
+          level: "error",
+          category: "interrupt-continuation",
+          phase: "inbound_interrupt_continuation_post_save_verification_failed",
+          reason: continuationPlacement.reason_code,
+          event,
+          status: "failed_unacked",
+          message: continuationPlacement.reason,
+          detail: {
+            interrupt_entry_id: insertAfterEntryId,
+            continuation_entry_id: entryId,
+            physical_section_id: continuationPlacement.physical_section_id,
+            row_section_id: continuationPlacement.row_section_id,
+            adjacent_after_interrupt: continuationPlacement.adjacent_after_interrupt
+          }
+        });
+        return { ok: false, message: "interrupt continuation保存後のsection/order検証に失敗したためAckしません。" };
+      }
     }
     const expectedRoutineFields = getExplicitTaskCreatedRoutineFields(payload);
     const savedLink = linkTitleFromLine(savedEntryLines[0]);
@@ -39066,7 +39297,17 @@ class TaskchutePlugin extends obsidian.Plugin {
     let interruptedInfo = null;
     if (this.runtime.running && !this.sameTaskEntry(this.runtime.running, task)) {
       interruptedInfo = await this.closeRunningTaskForInterrupt(task);
+      if (!interruptedInfo) {
+        new obsidian.Notice("実行中タスクの割り込み停止を確認できなかったため、新しいタスクを開始しませんでした。", 5500);
+        return false;
+      }
     }
+    const finalizeInterruptedContinuation = async (options = {}) => {
+      if (!interruptedInfo) return { ok: true };
+      const result = await this.finalizeInterruptContinuationAfterStartPlacement(interruptedInfo, task, options);
+      if (result && result.interruptedInfo) interruptedInfo = result.interruptedInfo;
+      return result;
+    };
     const start = nowIso();
     const actualStartClock = formatClock(start || "");
     const actualSection = getSectionForStartPlan(this.settings, actualStartClock);
@@ -39090,6 +39331,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         if (movedMd !== md) {
           const moveWriteOk = await this.writeFileText(notePath, movedMd);
           if (this.isTaskchuteWriteAborted(moveWriteOk)) {
+            await finalizeInterruptedContinuation({ enqueueBridge: false, reason: "start-section-move-write-aborted" });
             new obsidian.Notice("開始時セクション移動の保存が停止したため、タスク開始を中止しました。", 5000);
             return false;
           }
@@ -39098,10 +39340,12 @@ class TaskchutePlugin extends obsidian.Plugin {
         afterStartMoveSnapshot = await this.buildBridgeTaskMoveSnapshotFromOccurrence(task.taskId, startKey, sourceDate);
       } catch (e) {
         console.error("Taskchute startTask section move error", e);
+        await finalizeInterruptedContinuation({ enqueueBridge: false, reason: "start-section-move-error" });
         new obsidian.Notice("開始時セクション移動に失敗したため、タスク開始を中止しました。", 5000);
         return false;
       }
       if (!afterStartMoveSnapshot || String(afterStartMoveSnapshot.section_id || "") !== String(actualSection.id || "")) {
+        await finalizeInterruptedContinuation({ enqueueBridge: false, reason: "start-section-move-verification-failed" });
         new obsidian.Notice("開始時セクション移動後のMarkdown確認に失敗したため、タスク開始を中止しました。", 5000);
         return false;
       }
@@ -39115,10 +39359,20 @@ class TaskchutePlugin extends obsidian.Plugin {
           "task-start-section-move-confirmed-markdown-v3"
         );
         if (!movedEvent || !movedEvent.ok) {
+          await finalizeInterruptedContinuation({ enqueueBridge: false, reason: "start-section-move-enqueue-failed" });
           new obsidian.Notice("開始時セクション移動のBridgeイベントを追加できなかったため、タスク開始を中止しました。", 5000);
           return false;
         }
       }
+    }
+
+    const finalizedContinuation = await finalizeInterruptedContinuation({
+      enqueueBridge: true,
+      reason: movedAtStart ? "start-section-move-confirmed" : "start-section-stable"
+    });
+    if (!finalizedContinuation || finalizedContinuation.ok === false) {
+      new obsidian.Notice("続き用タスクの最終配置を確認できなかったため、タスク開始を中止しました。", 5500);
+      return false;
     }
 
     const startEntryMeta = task && task.entryMeta && typeof task.entryMeta === "object" ? task.entryMeta : {};
@@ -39184,6 +39438,137 @@ class TaskchutePlugin extends obsidian.Plugin {
     } finally {
       releaseDeviceWriteGuardBypass();
     }
+  }
+
+  async finalizeInterruptContinuationAfterStartPlacement(interruptedInfo, nextTask, options = {}) {
+    const info = interruptedInfo && typeof interruptedInfo === "object" ? interruptedInfo : null;
+    if (!info) return { ok: true, interruptedInfo: info };
+    if (info.continuationFinalized) return { ok: true, interruptedInfo: info, idempotent: true };
+    const date = this.normalizeDate(info.sourceDate || this.getDateForTask(nextTask) || this.getToday());
+    const notePath = this.getTaskchutePath(date);
+    const interruptEntryId = String(nextTask && (nextTask.entryId || nextTask.taskKey || nextTask.taskId) || "").trim();
+    const continuationEntryId = String(info.continuationEntryId || "").trim();
+    const diagnosticBase = {
+      task_id: String(info.taskId || "").trim(),
+      entry_id: continuationEntryId,
+      interrupt_entry_id: interruptEntryId,
+      continuation_entry_id: continuationEntryId,
+      reason: String(options.reason || "").trim()
+    };
+    const recordDiagnostic = (phase, detail = {}, level = "info", status = "") => {
+      const safeDetail = {};
+      Object.entries(detail && typeof detail === "object" ? detail : {}).forEach(([key, value]) => {
+        if (["markdown", "line", "normalized_line", "interrupt_occurrence", "continuation_occurrence"].includes(key)) return;
+        if (value == null || ["string", "number", "boolean"].includes(typeof value)) safeDetail[key] = value;
+      });
+      this.recordBridgeStructuredDiagnostic({
+        category: "interrupt-continuation",
+        phase,
+        level,
+        status,
+        task_id: diagnosticBase.task_id,
+        entry_id: continuationEntryId,
+        reason: String(safeDetail.reason_code || diagnosticBase.reason || "").trim(),
+        message: String(safeDetail.reason || "").trim(),
+        detail: Object.assign({}, diagnosticBase, safeDetail)
+      });
+    };
+    if (options.enqueueBridge === false) {
+      recordDiagnostic("interrupt_continuation_creation_suppressed", {
+        reason_code: String(options.reason || "start-placement-not-confirmed"),
+        reason: "interrupt taskの最終配置を確認できなかったため、continuationの作成とTaskCreated送信を抑止しました。"
+      }, "warn", "blocked");
+      return { ok: false, interruptedInfo: info, suppressed: true };
+    }
+    let markdown = "";
+    try {
+      markdown = await readFileText(this.app, notePath);
+    } catch (e) {
+      recordDiagnostic("interrupt_continuation_read_failed", { reason_code: "continuation_note_read_failed", reason: String(e && e.message || e) }, "error", "blocked");
+      return { ok: false, interruptedInfo: info };
+    }
+    const built = buildInterruptContinuationPlacement(markdown, this.settings, {
+      interruptEntryId,
+      continuationEntryId,
+      interruptTaskId: nextTask && nextTask.taskId,
+      taskId: info.taskId,
+      file: info.file,
+      title: info.title,
+      meta: info.continuationMeta || {}
+    });
+    if (!built.ok) {
+      recordDiagnostic("interrupt_continuation_placement_blocked", built, "error", "blocked");
+      return { ok: false, interruptedInfo: info };
+    }
+    const writeOk = await this.writeFileText(notePath, built.markdown);
+    if (this.isTaskchuteWriteAborted(writeOk)) {
+      recordDiagnostic("interrupt_continuation_save_blocked", { reason_code: "continuation_save_aborted", reason: "continuationの最終配置保存が停止しました。" }, "error", "blocked");
+      return { ok: false, interruptedInfo: info };
+    }
+    let savedMarkdown = "";
+    try {
+      savedMarkdown = await readFileText(this.app, notePath);
+    } catch (e) {
+      recordDiagnostic("interrupt_continuation_verify_read_failed", { reason_code: "continuation_verify_read_failed", reason: String(e && e.message || e) }, "error", "blocked");
+      return { ok: false, interruptedInfo: info };
+    }
+    const verified = inspectInterruptContinuationPlacement(savedMarkdown, this.settings, {
+      interruptEntryId,
+      continuationEntryId,
+      interruptTaskId: nextTask && nextTask.taskId,
+      taskId: info.taskId
+    });
+    if (!verified.ok) {
+      recordDiagnostic("interrupt_continuation_post_save_verification_failed", verified, "error", "blocked");
+      return { ok: false, interruptedInfo: info };
+    }
+    const savedContinuation = parseTasks(savedMarkdown).find(item => taskKey(item) === continuationEntryId) || null;
+    if (!savedContinuation || String(savedContinuation.taskId || "").trim() !== String(info.taskId || "").trim()) {
+      recordDiagnostic("interrupt_continuation_post_save_identity_failed", { reason_code: "continuation_saved_task_identity_mismatch", reason: "保存後continuationのtask_idを確認できませんでした。" }, "error", "blocked");
+      return { ok: false, interruptedInfo: info };
+    }
+    const section = findBoardSection(this.settings, verified.physical_section_id || verified.physical_section_label);
+    if (!section) {
+      recordDiagnostic("interrupt_continuation_post_save_section_failed", { reason_code: "continuation_saved_section_unresolved", reason: "保存後continuationのsectionを解決できませんでした。" }, "error", "blocked");
+      return { ok: false, interruptedInfo: info };
+    }
+    info.continuationSection = section.name;
+    info.continuationSectionId = section.id;
+    info.continuationFinalized = true;
+    info.continuationEntryMeta = savedContinuation.entryMeta ? Object.assign({}, savedContinuation.entryMeta) : {};
+    const continuationTask = Object.assign({}, info, {
+      entryId: continuationEntryId,
+      taskKey: continuationEntryId,
+      checked: false,
+      logStatus: "",
+      actualTotal: 0,
+      startActual: "",
+      endActual: "",
+      section: section.name,
+      sectionId: section.id,
+      sourceDate: date,
+      entryMeta: info.continuationEntryMeta
+    });
+    const confirmedRoutineFields = getExplicitTaskCreatedRoutineFields(continuationTask);
+    const routineContinuationConfirmed = String(info.lifecycleIdentityClassification || "") !== "routine_occurrence"
+      || !!confirmedRoutineFields.routine_occurrence_key;
+    const created = routineContinuationConfirmed
+      ? await this.enqueueBridgeTaskCreated(Object.assign({}, continuationTask, confirmedRoutineFields), {
+        creationSource: "interrupt-continuation",
+        continuationOfTaskId: info.taskId,
+        continuedFromTaskId: info.taskId,
+        continuationSourceTaskId: info.taskId,
+        continuationAfterEntryId: interruptEntryId,
+        continuationStoppedAt: info.endAt,
+        continuationNextTaskId: nextTask && nextTask.taskId ? nextTask.taskId : ""
+      })
+      : false;
+    if (this.settings.bridgeEnabled && created === false) {
+      recordDiagnostic("interrupt_continuation_taskcreated_enqueue_failed", { reason_code: "continuation_taskcreated_enqueue_failed", reason: "保存後検証済みcontinuationのTaskCreatedをoutboxへ保存できませんでした。" }, "error", "blocked");
+      return { ok: false, interruptedInfo: info };
+    }
+    recordDiagnostic("interrupt_continuation_final_placement_verified", verified, "info", "verified");
+    return { ok: true, interruptedInfo: info, verified };
   }
 
   async closeRunningTaskForInterrupt(nextTask) {
@@ -39252,30 +39637,23 @@ class TaskchutePlugin extends obsidian.Plugin {
       routine_scheduled_time: interruptedRoutineFields.routine_scheduled_time || "",
       routine_source: interruptedRoutineFields.routine_source || r.file || ""
     } : {};
-    const continuationLine = taskLine(r.file, r.title, false, continuationEntryId, continuationMeta);
-    const fallbackSection = resolveTaskSection(this.settings, r.section || (nextTask && nextTask.section) || "").name;
-    if (nextKey) md = insertTaskAfterKey(md, this.settings, nextKey, continuationLine, fallbackSection);
-    else md = insertTaskIntoSection(md, this.settings, fallbackSection, continuationLine);
-    const continuationParsed = parseTasks(md).find(task => taskKey(task) === continuationEntryId) || null;
-    const continuationSection = resolveTaskSection(this.settings, continuationParsed && (continuationParsed.sectionId || continuationParsed.section) || fallbackSection);
 
     md = appendSection(md, "Log", log);
     md = appendSection(md, "LogDaily", logDaily);
     const interruptedWriteOk = await this.writeFileText(notePath, md);
-    let confirmedContinuationSection = continuationSection;
-    let savedContinuationForBridge = null;
-    if (interruptedWriteOk !== false) {
-      try {
-        const savedMarkdown = await readFileText(this.app, notePath);
-        const savedContinuation = parseTasks(savedMarkdown).find(task => taskKey(task) === continuationEntryId) || null;
-        if (savedContinuation) {
-          savedContinuationForBridge = savedContinuation;
-          confirmedContinuationSection = resolveTaskSection(
-            this.settings,
-            savedContinuation.sectionId || savedContinuation.section || continuationSection.id || continuationSection.name
-          );
-        }
-      } catch (e) {}
+    if (this.isTaskchuteWriteAborted(interruptedWriteOk)) {
+      this.recordBridgeStructuredDiagnostic({
+        level: "error",
+        category: "interrupt-continuation",
+        phase: "interrupt_taskstopped_save_blocked",
+        reason: "interrupt_terminal_save_aborted",
+        task_id: r.taskId,
+        entry_id: entryKey,
+        status: "blocked",
+        message: "割り込み停止のMarkdown保存を確認できないため後続開始を停止しました。",
+        detail: { interrupt_entry_id: nextKey, continuation_entry_id: continuationEntryId }
+      });
+      return null;
     }
 
     this.runtime.running = null;
@@ -39285,8 +39663,11 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
     const stopped = Object.assign({}, r, {
       continuationEntryId,
-      continuationSection: confirmedContinuationSection.name,
-      continuationSectionId: confirmedContinuationSection.id,
+      continuationSection: "",
+      continuationSectionId: "",
+      continuationMeta,
+      lifecycleIdentityClassification: interruptedIdentity.classification,
+      continuationFinalized: false,
       actual,
       endAt: end,
       logStatus: "interrupted",
@@ -39295,8 +39676,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       startActual: r.startedAt,
       sourceDate: date
     });
-    if (interruptedWriteOk !== false) {
-      await this.enqueueBridgeLifecycleEvent("TaskStopped", stopped, end, {
+    if (this.settings && this.settings.bridgeEnabled) {
+      const taskStoppedEnqueued = await this.enqueueBridgeLifecycleEvent("TaskStopped", stopped, end, {
         reason: "interrupt",
         stopReason: "auto-stopped-by-starting-another-task",
         nextTaskId: nextTask && nextTask.taskId ? nextTask.taskId : "",
@@ -39312,36 +39693,19 @@ class TaskchutePlugin extends obsidian.Plugin {
         continuationSourceTaskId: r.taskId,
         continuationNextTaskId: nextTask && nextTask.taskId ? nextTask.taskId : ""
       });
-      const continuationTask = Object.assign({}, r, {
-        entryId: continuationEntryId,
-        taskKey: continuationEntryId,
-        checked: false,
-        logStatus: "",
-        actualTotal: 0,
-        startActual: "",
-        endActual: "",
-        section: confirmedContinuationSection.name,
-        sectionId: confirmedContinuationSection.id,
-        sourceDate: date,
-        entryMeta: savedContinuationForBridge && savedContinuationForBridge.entryMeta
-          ? Object.assign({}, savedContinuationForBridge.entryMeta) : {}
-      });
-      const confirmedRoutineFields = getExplicitTaskCreatedRoutineFields(continuationTask);
-      const routineContinuationConfirmed = interruptedIdentity.classification !== "routine_occurrence"
-        || !!confirmedRoutineFields.routine_occurrence_key;
-      const continuationBridgeCreated = routineContinuationConfirmed
-        ? await this.enqueueBridgeTaskCreated(Object.assign({}, continuationTask, confirmedRoutineFields), {
-          creationSource: "interrupt-continuation",
-          continuationOfTaskId: r.taskId,
-          continuedFromTaskId: r.taskId,
-          continuationSourceTaskId: r.taskId,
-          continuationAfterEntryId: nextKey,
-          continuationStoppedAt: end,
-          continuationNextTaskId: nextTask && nextTask.taskId ? nextTask.taskId : ""
-        })
-        : false;
-      if (this.settings.bridgeEnabled && continuationBridgeCreated === false) {
-        new obsidian.Notice("続き用タスクはローカル作成済みですが、TaskCreatedをBridge outboxへ保存できませんでした。後続イベント送信は停止されます。");
+      if (taskStoppedEnqueued === false) {
+        this.recordBridgeStructuredDiagnostic({
+          level: "error",
+          category: "interrupt-continuation",
+          phase: "interrupt_taskstopped_enqueue_failed",
+          reason: "taskstopped_enqueue_failed",
+          task_id: r.taskId,
+          entry_id: entryKey,
+          status: "blocked",
+          message: "TaskStoppedをoutboxへ保存できないためcontinuation作成と新しいタスク開始を停止しました。",
+          detail: { interrupt_entry_id: nextKey, continuation_entry_id: continuationEntryId }
+        });
+        return null;
       }
     }
     return stopped;
