@@ -6564,6 +6564,116 @@ function buildTaskMovedUndoBridgeSemantic(input = {}) {
   };
 }
 
+function fingerprintTaskMovedUndoBridgeSemantic(semantic) {
+  const value = semantic && typeof semantic === "object" ? semantic : {};
+  const state = key => {
+    const source = value[key] && typeof value[key] === "object" ? value[key] : {};
+    return {
+      date: String(source.date || "").trim(),
+      section_id: String(source.section_id || "").trim(),
+      entry_order_ids: (Array.isArray(source.entry_order_ids) ? source.entry_order_ids : []).map(item => String(item || "").trim()),
+      task_order_ids: (Array.isArray(source.task_order_ids) ? source.task_order_ids : []).map(item => String(item || "").trim())
+    };
+  };
+  return JSON.stringify({
+    kind: String(value.kind || "").trim(),
+    task_id: String(value.task_id || "").trim(),
+    entry_id: String(value.entry_id || "").trim(),
+    before: state("before"),
+    after: state("after")
+  });
+}
+
+function validateTaskMovedUndoSemanticForOperation(semantic, operation) {
+  const value = semantic && typeof semantic === "object" ? semantic : {};
+  const active = operation && typeof operation === "object" ? operation : {};
+  if (value.kind !== "task-moved-v4") return { ok: false, reason: "invalid_semantic_kind", fingerprint: "" };
+  if (!active.operation_id || active.state === "committed" || active.state === "invalidated") {
+    return { ok: false, reason: "lifecycle_closed", fingerprint: "" };
+  }
+  if (!value.task_id || String(value.task_id) !== String(active.task_id || "")) {
+    return { ok: false, reason: "task_identity_mismatch", fingerprint: "" };
+  }
+  if (!value.entry_id || String(value.entry_id) !== String(active.entry_id || "")) {
+    return { ok: false, reason: "entry_identity_mismatch", fingerprint: "" };
+  }
+  const validateState = state => {
+    const item = state && typeof state === "object" ? state : {};
+    const entries = (Array.isArray(item.entry_order_ids) ? item.entry_order_ids : []).map(entry => String(entry || "").trim());
+    const tasks = (Array.isArray(item.task_order_ids) ? item.task_order_ids : []).map(task => String(task || "").trim());
+    const entryIndex = entries.indexOf(String(value.entry_id || "").trim());
+    return !!String(item.date || "").trim()
+      && !!String(item.section_id || "").trim()
+      && entries.length > 0
+      && entries.length === tasks.length
+      && entries.every(Boolean)
+      && tasks.every(Boolean)
+      && new Set(entries).size === entries.length
+      && entryIndex >= 0
+      && tasks[entryIndex] === String(value.task_id || "").trim();
+  };
+  if (!validateState(value.before) || !validateState(value.after)) {
+    return { ok: false, reason: "semantic_physical_state_invalid", fingerprint: "" };
+  }
+  if (String(value.before.date || "") !== String(value.after.date || "")) {
+    return { ok: false, reason: "date_move_not_supported", fingerprint: "" };
+  }
+  if (String(value.before.section_id || "") === String(value.after.section_id || "")
+    && JSON.stringify(value.before.entry_order_ids) === JSON.stringify(value.after.entry_order_ids)) {
+    return { ok: false, reason: "semantic_no_order_change", fingerprint: "" };
+  }
+  if (active.scope !== "single-task-same-date-dnd") {
+    return { ok: false, reason: "unsupported_operation_scope", fingerprint: "" };
+  }
+  const fingerprint = fingerprintTaskMovedUndoBridgeSemantic(value);
+  return { ok: true, reason: "", fingerprint };
+}
+
+function decideTaskMovedUndoSemanticAttachment(batch, operation, operationId, semantic) {
+  if (!batch) return { ok: false, reason: "no_pending_batch", fingerprint: "" };
+  if (!operation) return { ok: false, reason: "no_active_operation", fingerprint: "" };
+  const expectedOperationId = String(operationId || "").trim();
+  if (!expectedOperationId
+    || String(batch.taskMovedUndoOperationId || "") !== expectedOperationId
+    || String(operation.operation_id || "") !== expectedOperationId
+    || String(batch.taskMovedUndoBatchId || "") !== String(operation.batch_id || "")) {
+    return { ok: false, reason: "wrong_pending_batch", fingerprint: "" };
+  }
+  if (batch.taskMovedUndoLifecycleState === "committed" || batch.taskMovedUndoLifecycleState === "invalidated") {
+    return { ok: false, reason: "batch_already_closed", fingerprint: "" };
+  }
+  if (batch.bridgeTaskMovedSemantic) return { ok: false, reason: "semantic_already_attached", fingerprint: "" };
+  return validateTaskMovedUndoSemanticForOperation(semantic, operation);
+}
+
+function decideTaskMovedUndoBatchCommit(batch, operation, options = {}) {
+  if (!batch) return { ok: false, defer: false, reason: "no_pending_batch" };
+  if (!batch.taskMovedUndoSemanticRequired) return { ok: true, defer: false, reason: "normal_batch" };
+  const operationId = String(options.taskMovedUndoOperationId || "").trim();
+  const force = options.forceTaskMovedSemanticCommit === true;
+  if (!force) {
+    return {
+      ok: false,
+      defer: true,
+      reason: batch.bridgeTaskMovedSemantic ? "taskmoved_explicit_commit_required" : "taskmoved_semantic_pending"
+    };
+  }
+  if (!operation || !operationId
+    || String(operation.operation_id || "") !== operationId
+    || String(batch.taskMovedUndoOperationId || "") !== operationId
+    || String(batch.taskMovedUndoBatchId || "") !== String(operation.batch_id || "")) {
+    return { ok: false, defer: false, reason: "taskmoved_operation_mismatch" };
+  }
+  const semanticCheck = validateTaskMovedUndoSemanticForOperation(batch.bridgeTaskMovedSemantic, operation);
+  if (!semanticCheck.ok) return { ok: false, defer: false, reason: semanticCheck.reason };
+  if (!batch.taskMovedUndoSemanticFingerprint
+    || batch.taskMovedUndoSemanticFingerprint !== semanticCheck.fingerprint
+    || operation.semantic_fingerprint !== semanticCheck.fingerprint) {
+    return { ok: false, defer: false, reason: "taskmoved_semantic_fingerprint_mismatch" };
+  }
+  return { ok: true, defer: false, reason: "taskmoved_semantic_commit_allowed" };
+}
+
 function getTaskMovedUndoBridgeRestorePlan(semantic, restoreState = "before") {
   const value = semantic && typeof semantic === "object" ? semantic : {};
   const targetKey = restoreState === "after" ? "after" : "before";
@@ -11185,6 +11295,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.pendingTaskchuteUndoBatch = null;
       this.pendingTaskchuteUndoTimer = null;
       this.taskMovedUndoCaptureInProgress = false;
+      this.activeTaskMovedUndoOperation = null;
       this.bridgeAutoFlushTimer = null;
       this.bridgeAutoFlushRunActive = false;
       this.bridgeAutoFlushRescheduleRequested = false;
@@ -15583,8 +15694,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       // data.json保存は直列化し、並行保存の古いスナップショットでoutbox等を巻き戻さない。
       const previousSignature = this.lastSavedRuntimeTaskStateSignature || "";
       const nextSignature = this.runtimeTaskStateSignature(this.runtime);
-      if (!this.isRestoringTaskchuteUndo && previousSignature !== nextSignature) {
-        this.captureTaskchuteUndoPluginDataBefore("状態変更");
+      if (!this.isRestoringTaskchuteUndo && !(options && options.skipTaskchuteUndo) && previousSignature !== nextSignature) {
+        this.captureTaskchuteUndoPluginDataBefore("状態変更", options || {});
       }
       this.settings.hiddenColumns = this.normalizeHiddenColumns(this.settings.hiddenColumns);
       if (this.runtime) this.runtime.hiddenColumns = this.settings.hiddenColumns.slice();
@@ -28792,7 +28903,41 @@ class TaskchutePlugin extends obsidian.Plugin {
     return folders.some(folder => target === folder || target.startsWith(folder + "/"));
   }
 
-  ensurePendingTaskchuteUndoBatch(label = "直前の操作") {
+  recordTaskMovedUndoLifecycleDiagnostic(phase, detail = {}) {
+    const entry = {
+      recorded_at: nowIso(),
+      phase: String(phase || "").trim(),
+      task_id: String(detail.task_id || "").trim(),
+      entry_id: String(detail.entry_id || "").trim(),
+      operation_id: String(detail.operation_id || "").trim(),
+      batch_id: String(detail.batch_id || "").trim(),
+      lifecycle_state: String(detail.lifecycle_state || "").trim(),
+      reason_code: String(detail.reason_code || "").trim(),
+      semantic_attached: !!detail.semantic_attached,
+      message: String(detail.message || "").trim()
+    };
+    const current = Array.isArray(this.settings && this.settings.bridgeTaskDragMoveDiagnostics)
+      ? this.settings.bridgeTaskDragMoveDiagnostics
+      : [];
+    this.settings.bridgeTaskDragMoveDiagnostics = current.concat(entry).slice(-120);
+    return entry;
+  }
+
+  ensurePendingTaskchuteUndoBatch(label = "直前の操作", options = {}) {
+    const requestedOperationId = String(options && options.taskMovedUndoOperationId || "").trim();
+    if (this.pendingTaskchuteUndoBatch && this.pendingTaskchuteUndoBatch.taskMovedUndoSemanticRequired
+      && requestedOperationId !== String(this.pendingTaskchuteUndoBatch.taskMovedUndoOperationId || "")) {
+      this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_capture_rejected", {
+        operation_id: requestedOperationId,
+        batch_id: this.pendingTaskchuteUndoBatch.taskMovedUndoBatchId,
+        task_id: this.pendingTaskchuteUndoBatch.taskMovedUndoTaskId,
+        entry_id: this.pendingTaskchuteUndoBatch.taskMovedUndoEntryId,
+        lifecycle_state: this.pendingTaskchuteUndoBatch.taskMovedUndoLifecycleState,
+        reason_code: "capture_operation_mismatch",
+        message: "別操作のcaptureをTaskMoved D&D batchへ混在させませんでした。"
+      });
+      return null;
+    }
     if (!this.pendingTaskchuteUndoBatch) {
       this.pendingTaskchuteUndoBatch = {
         type: "taskchute-snapshot",
@@ -28810,10 +28955,76 @@ class TaskchutePlugin extends obsidian.Plugin {
     return this.pendingTaskchuteUndoBatch;
   }
 
+  beginTaskMovedUndoOperation(taskId, entryId) {
+    const normalizedTaskId = String(taskId || "").trim();
+    const normalizedEntryId = String(entryId || "").trim();
+    if (!normalizedTaskId || !normalizedEntryId || this.activeTaskMovedUndoOperation || this.pendingTaskchuteUndoBatch) {
+      return {
+        ok: false,
+        reason: this.activeTaskMovedUndoOperation
+          ? "operation_already_active"
+          : (this.pendingTaskchuteUndoBatch ? "pending_batch_exists" : "task_identity_missing")
+      };
+    }
+    const operationId = `taskmoved-undo-${createBridgeEventId()}`;
+    const batchId = `taskmoved-batch-${createBridgeEventId()}`;
+    const operation = {
+      operation_id: operationId,
+      batch_id: batchId,
+      task_id: normalizedTaskId,
+      entry_id: normalizedEntryId,
+      scope: "single-task-same-date-dnd",
+      state: "capturing",
+      semantic_fingerprint: "",
+      created_at: nowIso()
+    };
+    this.activeTaskMovedUndoOperation = operation;
+    this.taskMovedUndoCaptureInProgress = true;
+    const batch = this.ensurePendingTaskchuteUndoBatch("タスク移動", { taskMovedUndoOperationId: operationId });
+    if (!batch) {
+      this.activeTaskMovedUndoOperation = null;
+      this.taskMovedUndoCaptureInProgress = false;
+      return { ok: false, reason: "batch_create_failed" };
+    }
+    Object.assign(batch, {
+      taskMovedUndoSemanticRequired: true,
+      taskMovedUndoOperationId: operationId,
+      taskMovedUndoBatchId: batchId,
+      taskMovedUndoTaskId: normalizedTaskId,
+      taskMovedUndoEntryId: normalizedEntryId,
+      taskMovedUndoLifecycleState: "capturing",
+      taskMovedUndoSemanticFingerprint: ""
+    });
+    this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_batch_created", {
+      operation_id: operationId,
+      batch_id: batchId,
+      task_id: normalizedTaskId,
+      entry_id: normalizedEntryId,
+      lifecycle_state: "capturing",
+      message: "TaskMoved D&D専用Undo batchを作成しました。"
+    });
+    return { ok: true, reason: "", operation_id: operationId, batch_id: batchId };
+  }
+
   scheduleCommitTaskchuteUndoBatch() {
     if (this.pendingTaskchuteUndoTimer) window.clearTimeout(this.pendingTaskchuteUndoTimer);
     this.pendingTaskchuteUndoTimer = window.setTimeout(() => {
       this.pendingTaskchuteUndoTimer = null;
+      const batch = this.pendingTaskchuteUndoBatch;
+      if (batch && batch.taskMovedUndoSemanticRequired) {
+        this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_commit_deferred", {
+          operation_id: batch.taskMovedUndoOperationId,
+          batch_id: batch.taskMovedUndoBatchId,
+          task_id: batch.taskMovedUndoTaskId,
+          entry_id: batch.taskMovedUndoEntryId,
+          lifecycle_state: batch.taskMovedUndoLifecycleState,
+          semantic_attached: !!batch.bridgeTaskMovedSemantic,
+          reason_code: batch.bridgeTaskMovedSemantic ? "explicit_commit_required" : "semantic_pending",
+          message: "TaskMoved semantic lifecycle中のscheduled commitを延期しました。"
+        });
+        if (this.activeTaskMovedUndoOperation) this.scheduleCommitTaskchuteUndoBatch();
+        return;
+      }
       if (this.taskMovedUndoCaptureInProgress) {
         this.scheduleCommitTaskchuteUndoBatch();
         return;
@@ -28822,18 +29033,53 @@ class TaskchutePlugin extends obsidian.Plugin {
     }, 650);
   }
 
-  discardPendingTaskchuteUndoBatch() {
+  discardPendingTaskchuteUndoBatch(options = {}) {
+    const batch = this.pendingTaskchuteUndoBatch;
+    if (batch && batch.taskMovedUndoSemanticRequired) {
+      const operationId = String(options && options.taskMovedUndoOperationId || "").trim();
+      if (!operationId || operationId !== String(batch.taskMovedUndoOperationId || "")) return false;
+      batch.taskMovedUndoLifecycleState = "invalidated";
+      if (this.activeTaskMovedUndoOperation && this.activeTaskMovedUndoOperation.operation_id === operationId) {
+        this.activeTaskMovedUndoOperation.state = "invalidated";
+      }
+      this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_history_invalidated", {
+        operation_id: operationId,
+        batch_id: batch.taskMovedUndoBatchId,
+        task_id: batch.taskMovedUndoTaskId,
+        entry_id: batch.taskMovedUndoEntryId,
+        lifecycle_state: "invalidated",
+        reason_code: String(options.reason || "operation_failed"),
+        message: "semanticを保証できないTaskMoved D&D Undo履歴を無効化しました。"
+      });
+    }
     if (this.pendingTaskchuteUndoTimer) window.clearTimeout(this.pendingTaskchuteUndoTimer);
     this.pendingTaskchuteUndoTimer = null;
     this.pendingTaskchuteUndoBatch = null;
+    return true;
   }
 
-  commitPendingTaskchuteUndoBatch() {
+  commitPendingTaskchuteUndoBatch(options = {}) {
     if (this.pendingTaskchuteUndoTimer) window.clearTimeout(this.pendingTaskchuteUndoTimer);
     this.pendingTaskchuteUndoTimer = null;
     const batch = this.pendingTaskchuteUndoBatch;
-    this.pendingTaskchuteUndoBatch = null;
     if (!batch) return false;
+    const decision = decideTaskMovedUndoBatchCommit(batch, this.activeTaskMovedUndoOperation, options || {});
+    if (!decision.ok) {
+      if (batch.taskMovedUndoSemanticRequired) {
+        this.recordTaskMovedUndoLifecycleDiagnostic(decision.defer ? "taskmoved_undo_commit_deferred" : "taskmoved_undo_semanticless_commit_blocked", {
+          operation_id: batch.taskMovedUndoOperationId,
+          batch_id: batch.taskMovedUndoBatchId,
+          task_id: batch.taskMovedUndoTaskId,
+          entry_id: batch.taskMovedUndoEntryId,
+          lifecycle_state: batch.taskMovedUndoLifecycleState,
+          semantic_attached: !!batch.bridgeTaskMovedSemantic,
+          reason_code: decision.reason,
+          message: "TaskMoved D&D batchの通常commitを拒否しました。"
+        });
+      }
+      return false;
+    }
+    this.pendingTaskchuteUndoBatch = null;
     const files = Array.from((batch.files || new Map()).values()).filter(Boolean);
     if (!files.length && !batch.pluginDataBefore) return false;
     this.pushTaskchuteUndoAction({
@@ -28847,35 +29093,104 @@ class TaskchutePlugin extends obsidian.Plugin {
       previousSelectedTaskId: batch.previousSelectedTaskId || "",
       previousMultiSelectedTaskIds: Array.isArray(batch.previousMultiSelectedTaskIds) ? batch.previousMultiSelectedTaskIds.slice() : []
     });
+    if (batch.taskMovedUndoSemanticRequired) {
+      batch.taskMovedUndoLifecycleState = "committed";
+      if (this.activeTaskMovedUndoOperation && this.activeTaskMovedUndoOperation.operation_id === batch.taskMovedUndoOperationId) {
+        this.activeTaskMovedUndoOperation.state = "committed";
+      }
+      this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_batch_committed_with_semantic", {
+        operation_id: batch.taskMovedUndoOperationId,
+        batch_id: batch.taskMovedUndoBatchId,
+        task_id: batch.taskMovedUndoTaskId,
+        entry_id: batch.taskMovedUndoEntryId,
+        lifecycle_state: "committed",
+        semantic_attached: true,
+        message: "exact semantic付きTaskMoved D&D Undo履歴を確定しました。"
+      });
+    }
     return true;
   }
 
-  attachBridgeTaskMovedSemanticToPendingUndoBatch(semantic) {
-    if (!semantic || semantic.kind !== "task-moved-v4" || !this.pendingTaskchuteUndoBatch) return false;
+  attachBridgeTaskMovedSemanticToPendingUndoBatch(semantic, operationId) {
+    const decision = decideTaskMovedUndoSemanticAttachment(
+      this.pendingTaskchuteUndoBatch,
+      this.activeTaskMovedUndoOperation,
+      operationId,
+      semantic
+    );
+    if (!decision.ok) {
+      const active = this.activeTaskMovedUndoOperation || {};
+      const batch = this.pendingTaskchuteUndoBatch || {};
+      this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_semantic_attach_rejected", {
+        operation_id: operationId || active.operation_id,
+        batch_id: batch.taskMovedUndoBatchId || active.batch_id,
+        task_id: active.task_id || semantic && semantic.task_id,
+        entry_id: active.entry_id || semantic && semantic.entry_id,
+        lifecycle_state: active.state || batch.taskMovedUndoLifecycleState,
+        reason_code: decision.reason,
+        message: "TaskMoved semanticをexact D&D batchへattachできませんでした。"
+      });
+      return decision;
+    }
     this.pendingTaskchuteUndoBatch.bridgeTaskMovedSemantic = JSON.parse(JSON.stringify(semantic));
-    this.scheduleCommitTaskchuteUndoBatch();
-    return true;
+    this.pendingTaskchuteUndoBatch.taskMovedUndoSemanticFingerprint = decision.fingerprint;
+    this.pendingTaskchuteUndoBatch.taskMovedUndoLifecycleState = "semantic-attached";
+    this.activeTaskMovedUndoOperation.semantic_fingerprint = decision.fingerprint;
+    this.activeTaskMovedUndoOperation.state = "semantic-attached";
+    this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_semantic_attached", {
+      operation_id: operationId,
+      batch_id: this.pendingTaskchuteUndoBatch.taskMovedUndoBatchId,
+      task_id: semantic.task_id,
+      entry_id: semantic.entry_id,
+      lifecycle_state: "semantic-attached",
+      semantic_attached: true,
+      message: "TaskMoved semanticをexact D&D batchへattachしました。"
+    });
+    return decision;
   }
 
-  async captureTaskchuteUndoFileBefore(path, label = "直前の操作") {
+  async captureTaskchuteUndoFileBefore(path, label = "直前の操作", options = {}) {
     if (this.isRestoringTaskchuteUndo) return;
     const target = safePath(path || "");
     if (!target || !this.shouldCaptureTaskchuteUndoPath(target)) return;
-    const batch = this.ensurePendingTaskchuteUndoBatch(label);
+    const batch = this.ensurePendingTaskchuteUndoBatch(label, options || {});
+    if (!batch) return;
+    if (batch.taskMovedUndoSemanticRequired) {
+      batch.taskMovedUndoLifecycleState = "capturing";
+      this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_file_capture_started", {
+        operation_id: batch.taskMovedUndoOperationId,
+        batch_id: batch.taskMovedUndoBatchId,
+        task_id: batch.taskMovedUndoTaskId,
+        entry_id: batch.taskMovedUndoEntryId,
+        lifecycle_state: "capturing",
+        message: "TaskMoved D&D変更前file snapshotを取得します。"
+      });
+    }
     if (batch.files.has(target)) {
       this.scheduleCommitTaskchuteUndoBatch();
       return;
     }
     const snap = await this.captureTaskchuteFileSnapshot(target);
     if (snap) batch.files.set(target, snap);
+    if (snap && batch.taskMovedUndoSemanticRequired) {
+      this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_file_captured", {
+        operation_id: batch.taskMovedUndoOperationId,
+        batch_id: batch.taskMovedUndoBatchId,
+        task_id: batch.taskMovedUndoTaskId,
+        entry_id: batch.taskMovedUndoEntryId,
+        lifecycle_state: "capturing",
+        message: "TaskMoved D&D変更前file snapshotを取得しました。"
+      });
+    }
     this.scheduleCommitTaskchuteUndoBatch();
   }
 
-  captureTaskchuteUndoPluginDataBefore(label = "状態変更") {
+  captureTaskchuteUndoPluginDataBefore(label = "状態変更", options = {}) {
     if (this.isRestoringTaskchuteUndo) return;
     const before = this.lastSavedPluginDataSnapshot;
     if (!before) return;
-    const batch = this.ensurePendingTaskchuteUndoBatch(label);
+    const batch = this.ensurePendingTaskchuteUndoBatch(label, options || {});
+    if (!batch) return;
     if (!batch.pluginDataBefore) {
       try { batch.pluginDataBefore = JSON.parse(JSON.stringify(before)); }
       catch (e) { batch.pluginDataBefore = before; }
@@ -28891,7 +29206,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const canWrite = await this.ensureDeviceWriteGuard(options && options.deviceWriterOperation ? options.deviceWriterOperation : "file-write", options || {});
     if (!canWrite) return false;
     if (!(options && options.skipTaskchuteUndo)) {
-      await this.captureTaskchuteUndoFileBefore(path, options && options.undoLabel ? options.undoLabel : "直前の操作");
+      await this.captureTaskchuteUndoFileBefore(path, options && options.undoLabel ? options.undoLabel : "直前の操作", options || {});
     }
     const settings = options && options.skipBoardHistorySnapshot
       ? Object.assign({}, this.settings || DEFAULT_SETTINGS, { skipBoardHistorySnapshot: true })
@@ -34708,7 +35023,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     return { ok: !!enqueued, moved: !!enqueued, after };
   }
 
-  async updateTaskSectionMetadata(file, sectionName, startPlanValue = undefined) {
+  async updateTaskSectionMetadata(file, sectionName, startPlanValue = undefined, options = {}) {
     if (!file) return;
     const sec = getSectionByNameOrId(this.settings, sectionName);
     const path = safePath(`${this.settings.tasksFolder}/${file}.md`);
@@ -34716,7 +35031,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     content = replaceYamlValue(content, "section_id", sec.id);
     content = replaceYamlValue(content, "section", sec.name);
     if (startPlanValue !== undefined) content = replaceYamlValue(content, "start_plan", startPlanValue);
-    const writeOk = await this.writeFileText(path, content);
+    const writeOk = await this.writeFileText(path, content, options || {});
     if (this.isTaskchuteWriteAborted(writeOk)) return false;
     return true;
   }
@@ -35628,6 +35943,11 @@ class TaskchutePlugin extends obsidian.Plugin {
 
   async undoLastTaskchuteAction() {
     if (this.blockIfTaskchuteSyncBusy && this.blockIfTaskchuteSyncBusy("元に戻す")) return false;
+    if (this.activeTaskMovedUndoOperation
+      || this.pendingTaskchuteUndoBatch && this.pendingTaskchuteUndoBatch.taskMovedUndoSemanticRequired) {
+      new obsidian.Notice("TaskMovedのUndo履歴を確定中です。処理完了後にもう一度実行してください。");
+      return false;
+    }
     this.commitPendingTaskchuteUndoBatch();
     if (!Array.isArray(this.undoStack) || !this.undoStack.length) {
       new obsidian.Notice("元に戻せる操作がありません");
@@ -35642,6 +35962,15 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.isRestoringTaskchuteUndo = true;
     try {
       const semantic = action && action.bridgeTaskMovedSemantic;
+      if (semantic && semantic.kind === "task-moved-v4") {
+        this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_semantic_found", {
+          task_id: semantic.task_id,
+          entry_id: semantic.entry_id,
+          lifecycle_state: "undo-started",
+          semantic_attached: true,
+          message: "Undo対象履歴からTaskMoved semanticを確認しました。"
+        });
+      }
       const sourceStateKey = semantic && semantic.restore_state === "after" ? "before" : "after";
       const preflight = await this.inspectTaskMovedUndoRedoPhysicalState(action, sourceStateKey);
       if (!preflight.ok) {
@@ -35706,6 +36035,11 @@ class TaskchutePlugin extends obsidian.Plugin {
 
   async redoLastTaskchuteAction() {
     if (this.blockIfTaskchuteSyncBusy && this.blockIfTaskchuteSyncBusy("やり直す")) return false;
+    if (this.activeTaskMovedUndoOperation
+      || this.pendingTaskchuteUndoBatch && this.pendingTaskchuteUndoBatch.taskMovedUndoSemanticRequired) {
+      new obsidian.Notice("TaskMovedのUndo履歴を確定中です。処理完了後にもう一度実行してください。");
+      return false;
+    }
     this.commitPendingTaskchuteUndoBatch();
     if (!Array.isArray(this.redoStack) || !this.redoStack.length) {
       new obsidian.Notice("やり直せる操作がありません");
@@ -35720,6 +36054,15 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.isRestoringTaskchuteUndo = true;
     try {
       const semantic = action && action.bridgeTaskMovedSemantic;
+      if (semantic && semantic.kind === "task-moved-v4") {
+        this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_redo_semantic_found", {
+          task_id: semantic.task_id,
+          entry_id: semantic.entry_id,
+          lifecycle_state: "redo-started",
+          semantic_attached: true,
+          message: "Redo対象履歴からTaskMoved semanticを確認しました。"
+        });
+      }
       const sourceStateKey = semantic && semantic.restore_state === "after" ? "before" : "after";
       const preflight = await this.inspectTaskMovedUndoRedoPhysicalState(action, sourceStateKey);
       if (!preflight.ok) {
@@ -37143,6 +37486,7 @@ class TaskchutePlugin extends obsidian.Plugin {
 
   async moveTaskByDrag(sourceKey, targetKey, position, view) {
     if (this.blockIfTaskchuteSyncBusy && this.blockIfTaskchuteSyncBusy("ドラッグ＆ドロップ")) return false;
+    let taskMovedUndoOperationId = "";
     try {
       sourceKey = String(sourceKey || "");
       targetKey = String(targetKey || "");
@@ -37156,7 +37500,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
 
       this.commitPendingTaskchuteUndoBatch();
-      this.taskMovedUndoCaptureInProgress = true;
+      if (this.pendingTaskchuteUndoBatch) {
+        new obsidian.Notice("別のUndo履歴を確定できないため、ドラッグ移動を開始できませんでした。");
+        return false;
+      }
 
       const notePath = this.getTaskchutePath(view && view.selectedDate ? view.selectedDate : this.getActiveViewDate());
       let md = await readFileText(this.app, notePath);
@@ -37245,6 +37592,20 @@ class TaskchutePlugin extends obsidian.Plugin {
         await this.sortTasksByStartTime({ silent: true, date: view && view.selectedDate ? view.selectedDate : this.getActiveViewDate() });
         return false;
       }
+      const undoOperation = this.beginTaskMovedUndoOperation(sourceBridgeTaskId, sourceBridgeEntryId);
+      if (!undoOperation.ok) {
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_undo_operation_not_started", {
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          enqueue_attempted: false,
+          enqueue_skipped_reason: undoOperation.reason,
+          message: "TaskMoved D&D専用Undo lifecycleを開始できませんでした。"
+        }, { persist: true });
+        new obsidian.Notice("安全なUndo履歴を準備できないため、ドラッグ移動を停止しました。");
+        return false;
+      }
+      taskMovedUndoOperationId = undoOperation.operation_id;
 
       let movedLine = lines[sourceItem.index];
       lines.splice(sourceItem.index, 1);
@@ -37358,7 +37719,10 @@ class TaskchutePlugin extends obsidian.Plugin {
           return false;
         }
       }
-      if (this.isTaskchuteWriteAborted(await this.writeFileText(notePath, movedMarkdown))) {
+      if (this.isTaskchuteWriteAborted(await this.writeFileText(notePath, movedMarkdown, {
+        undoLabel: "タスク移動",
+        taskMovedUndoOperationId
+      }))) {
           await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
           return false;
         }
@@ -37382,7 +37746,10 @@ class TaskchutePlugin extends obsidian.Plugin {
 
       if (isCrossSectionDragMove) {
         if (routineEditScope !== "today") {
-          const sectionMetaOk = await this.updateTaskSectionMetadata(sourceItem.file, destinationName);
+          const sectionMetaOk = await this.updateTaskSectionMetadata(sourceItem.file, destinationName, undefined, {
+            undoLabel: "タスク移動",
+            taskMovedUndoOperationId
+          });
           if (sectionMetaOk === false) {
             await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
             return false;
@@ -37405,7 +37772,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
 
       this.runtime.selectedTaskId = sourceKey;
-      if (this.isTaskchuteWriteAborted(await this.savePluginData())) {
+      if (this.isTaskchuteWriteAborted(await this.savePluginData({
+        deviceWriterOperation: "task-drag-move-runtime-save",
+        taskMovedUndoOperationId
+      }))) {
           await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
           return false;
         }
@@ -37597,7 +37967,32 @@ class TaskchutePlugin extends obsidian.Plugin {
         original_event_id: this.settings.bridgeLastTaskMovedEventId,
         original_payload_source: isCrossSectionDragMove ? "confirmed-markdown-v2" : "task-drag-reorder-confirmed-markdown-v4"
       });
-      if (!semanticResult.ok || !this.attachBridgeTaskMovedSemanticToPendingUndoBatch(semanticResult.semantic)) {
+      this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_semantic_built", {
+        operation_id: taskMovedUndoOperationId,
+        batch_id: this.activeTaskMovedUndoOperation && this.activeTaskMovedUndoOperation.batch_id,
+        task_id: sourceBridgeTaskId,
+        entry_id: sourceBridgeEntryId,
+        lifecycle_state: this.activeTaskMovedUndoOperation && this.activeTaskMovedUndoOperation.state,
+        reason_code: semanticResult.reason,
+        semantic_attached: false,
+        message: semanticResult.ok ? "TaskMoved Undo semanticを構築しました。" : "TaskMoved Undo semanticを構築できませんでした。"
+      });
+      const attachResult = semanticResult.ok
+        ? this.attachBridgeTaskMovedSemanticToPendingUndoBatch(semanticResult.semantic, taskMovedUndoOperationId)
+        : { ok: false, reason: semanticResult.reason || "semantic_build_failed" };
+      const committed = attachResult.ok && this.commitPendingTaskchuteUndoBatch({
+        taskMovedUndoOperationId,
+        forceTaskMovedSemanticCommit: true
+      });
+      if (committed) {
+        try {
+          await this.savePluginData({
+            deviceWriterOperation: "taskmoved-undo-semantic-lifecycle-committed",
+            skipTaskchuteUndo: true
+          });
+        } catch (e) {}
+      }
+      if (!semanticResult.ok || !attachResult.ok || !committed) {
         await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_undo_semantic_not_recorded", {
           task_id: sourceBridgeTaskId,
           entry_id: sourceBridgeEntryId,
@@ -37606,13 +38001,14 @@ class TaskchutePlugin extends obsidian.Plugin {
           before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
           after_order_entry_ids: destinationAfterSaveInfo.entryIds,
           enqueue_attempted: false,
-          enqueue_skipped_reason: semanticResult.reason || "undo_batch_missing",
+          enqueue_skipped_reason: semanticResult.reason || attachResult.reason || "undo_batch_commit_blocked",
           message: "D&Dは同期済みですが、TaskMoved Undo/Redo意味論を履歴へ保存できませんでした。"
         }, { persist: true });
-        this.discardPendingTaskchuteUndoBatch();
+        this.discardPendingTaskchuteUndoBatch({
+          taskMovedUndoOperationId,
+          reason: semanticResult.reason || attachResult.reason || "undo_batch_commit_blocked"
+        });
         new obsidian.Notice("移動は同期されましたが、安全なUndo履歴を作成できなかったため、この移動のUndoを無効にしました。");
-      } else {
-        this.commitPendingTaskchuteUndoBatch();
       }
       return true;
     } catch (e) {
@@ -37620,8 +38016,19 @@ class TaskchutePlugin extends obsidian.Plugin {
       new obsidian.Notice("ドラッグ移動に失敗: " + (e && e.message ? e.message : e));
       return false;
     } finally {
-      this.taskMovedUndoCaptureInProgress = false;
-      if (this.pendingTaskchuteUndoBatch) this.scheduleCommitTaskchuteUndoBatch();
+      if (taskMovedUndoOperationId
+        && this.pendingTaskchuteUndoBatch
+        && this.pendingTaskchuteUndoBatch.taskMovedUndoOperationId === taskMovedUndoOperationId) {
+        this.discardPendingTaskchuteUndoBatch({
+          taskMovedUndoOperationId,
+          reason: "operation_finally_without_semantic_commit"
+        });
+      }
+      if (this.activeTaskMovedUndoOperation
+        && this.activeTaskMovedUndoOperation.operation_id === taskMovedUndoOperationId) {
+        this.activeTaskMovedUndoOperation = null;
+      }
+      if (!this.activeTaskMovedUndoOperation) this.taskMovedUndoCaptureInProgress = false;
     }
   }
 

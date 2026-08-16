@@ -8,9 +8,35 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
-## v0.6.66 - 2026-08-16
+## v0.6.67 - 2026-08-16
 
 Type: Runtime candidate for BRAT device testing (not yet published)
+
+### Changed
+
+- TaskMoved D&D Undo captureへoperation ID / batch IDを追加し、semantic未付与の専用batchをtimer・履歴表示・Undo / Redo開始などの通常commitから保護した。
+- semantic attachmentを現在の任意pending batchではなく、exact operation / batch、task / entry identity、before / after physical order fingerprintへ束縛した。
+- exact semantic attachment後のD&D経路だけが専用batchをcommitできる。失敗時は該当batchだけを無効化し、無関係な既存Undo履歴を維持する。
+- D&D内のdate note、task note、plugin-data captureへ同じoperation IDを渡し、別操作captureのmerge / stealを拒否する。
+- operation確定中のCtrl+Z / Redoを停止し、semanticless D&D snapshotや背後の古い履歴を誤って消費しない。
+- lifecycle phase / operation / batch / rejection reasonをTaskMoved diagnosticsへ追加した。
+- `manifest.json`を`0.6.67`へ更新した。
+
+### Verification
+
+- `taskmoved-undo-semantic-lifecycle-v0667.js`: async / timer race、wrong batch、invalid semantic、unrelated history、same-task multi-entry: PASS
+- existing Undo / Redo TaskMoved、TMV4、interrupt continuation、rename handoff、insert-below focused tests: PASS
+- `node --check .\main.js`: PASS
+- v0.6.67 real Vault / remote / mobile: `NOT_VERIFIED`
+- v0.6.66 `UNDO-BRIDGE-CROSS-SECTION-01`: `FAIL`。T-0648 / E-20260816-0025のforward D1 seq 2386はremote / mobile appliedだが、Ctrl+Z後のinverseは0件で、消費された履歴は`hasSemantic:false`だった。
+
+Release notes: [`docs/release/v0.6.67.md`](docs/release/v0.6.67.md)
+
+---
+
+## v0.6.66 - 2026-08-16
+
+Type: Runtime BRAT Prerelease for device testing
 
 ### Changed
 
@@ -27,7 +53,8 @@ Type: Runtime candidate for BRAT device testing (not yet published)
 
 - Undo / Redo cross-section、same-section、same-task multi-entry、AUTO-FLUSH-RACE、snapshot Bridge-state、logical-clock、rollback、negative guards focused synthetic: PASS
 - existing TMV4、interrupt continuation、rename handoff、insert-below focused tests: PASS
-- v0.6.66 real Vault / remote / mobile: `NOT_VERIFIED`
+- v0.6.66 real Vault / remote / mobile: `FAIL` for UNDO-BRIDGE-CROSS-SECTION-01; overall `NOT_VERIFIED`
+- v0.6.66 T-0648 / E-20260816-0025: forward D1 seq 2386 / event `c2863685-ada9-4fb8-8090-7c0661e16741` applied、Ctrl+Z後inverse 0件、redoStack action `hasSemantic:false`
 - v0.6.65 `UNDO-BRIDGE-CROSS-SECTION-01`: `FAIL`。T-0647 / E-20260816-0024のforward D1 seq 2383はremote / mobile appliedだが、Ctrl+Z後にreverse TaskMovedがなくdevだけafternoonへ戻りremote / mobileはnightに残った。
 
 Release notes: [`docs/release/v0.6.66.md`](docs/release/v0.6.66.md)

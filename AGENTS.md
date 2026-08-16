@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current implementation candidate: `v0.6.66` (not committed, tagged, or distributed). Current test distribution remains immutable `v0.6.65` BRAT Prerelease.
-- v0.6.66 adds semantic TaskMoved v4 Bridge handoff for same-date D&D undo / redo. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`. v0.6.65 targeted interrupt-continuation PASS evidence remains valid, while `UNDO-BRIDGE-CROSS-SECTION-01` is recorded as a separate v0.6.65 FAIL.
+- Current implementation candidate: `v0.6.67` (not yet tagged or distributed). Current test distribution remains immutable `v0.6.66` BRAT Prerelease.
+- v0.6.66 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed because Ctrl+Z consumed a semanticless snapshot while the forward D&D had already synchronized. v0.6.67 gives the D&D Undo batch an operation identity and permits commit only after exact TaskMoved semantic attachment. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 
@@ -51,6 +51,7 @@ Otherwise leave the event unacked and record a diagnostic such as identity confl
 ## Change And Test Discipline
 
 - Do not weaken post-save verification, false-applied prevention, cursor safety, mobile hidden drain guards, or identity collision guards.
+- A successfully synchronized supported TaskMoved D&D must not enter Undo history without exact `bridgeTaskMovedSemantic`. Scheduled or unrelated commits must not finalize its operation-scoped batch.
 - Runtime or Bridge changes require reviewing the affected rows in `docs/TEST_MATRIX.md` and recording real verification state. Do not promote historical PASS results to the current release without current evidence.
 - Keep `PASS`, `FAIL`, `BLOCKED`, and `NOT_VERIFIED` distinct. Unknown or mixed test data is not PASS.
 - Update root `CHANGELOG.md` for every release/version change. Keep it to release-level summaries; it does not replace Git history, and historical docs must not be copied into it wholesale.

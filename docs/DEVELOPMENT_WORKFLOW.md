@@ -45,6 +45,7 @@ main反映前に以下を確認する。
 - `node --check .\main.js`が成功する。
 - 文書変更時はMarkdown relative link checkが成功する。
 - runtime変更時は影響する`docs/TEST_MATRIX.md`の行を確認する。
+- TaskMoved D&D Undo / Redo変更では、supported D&DのUndo actionがexact semanticなしで履歴へcommitされないことをtimer / async race testで確認する。
 - CI checkがある場合は成功または問題なしと判断できる状態である。
 
 問題、unexpected diff、test failure、競合がある場合だけmain反映を停止して報告する。

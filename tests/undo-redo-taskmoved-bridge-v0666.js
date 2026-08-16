@@ -360,7 +360,8 @@ const inboundMoved = extractMethod("  async applyBridgeInboundTaskMovedEvent(", 
 assert(inboundMoved.includes("skipTaskchuteUndo: true"), "inbound TaskMoved must not enter local undo history");
 const keyboard = extractMethod("  setupKeyboardHandlers()", "\n  activateKeyboardScope(");
 assert(keyboard.includes("evt.shiftKey && keyName === \"z\""), "Ctrl+Shift+Z must invoke redo");
-assert(dragMethod.includes("this.discardPendingTaskchuteUndoBatch()"), "semantic capture failure must not leave a local-only D&D Undo entry");
+assert(dragMethod.includes("this.discardPendingTaskchuteUndoBatch({"), "semantic capture failure must invalidate the exact D&D Undo entry");
+assert(dragMethod.includes("taskMovedUndoOperationId"), "D&D Undo invalidation must be operation-scoped");
 
 console.log("UNDO-BRIDGE-CROSS-SECTION-01: PASS");
 console.log("REDO-BRIDGE-CROSS-SECTION-01: PASS");

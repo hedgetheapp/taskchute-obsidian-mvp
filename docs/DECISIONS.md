@@ -234,6 +234,13 @@
 - 理由: local snapshot restoreとcross-device event semanticsを分離し、identity誤推定、in-flight event消失、ping-pongを避けながら既存TaskMoved v4 strict guardを再利用するため。
 - 根拠: `buildTaskMovedUndoBridgeSemantic()`、`syncRestoredTaskMovedUndoRedo()`、`appendBridgeTaskMovedCoalescedEvent()`、v0.6.65 UNDO-BRIDGE-CROSS-SECTION-01 failure evidence。
 
+## D-039: TaskMoved D&D Undo batchはoperation-scoped semantic commitにする
+
+- 判断: supported D&Dは最初のfile write前にoperation ID / batch ID付き専用Undo batchを作り、exact task / entryとbefore / after fingerprintを検証したsemantic attachment後に限って、そのoperation自身がcommitする。
+- 判断: scheduled commit、履歴表示、Undo / Redo開始、別操作captureは専用batchをcommit・merge・discardできない。semantic attachmentまたはcommitが失敗した場合はexact operationのbatchだけを無効化し、無関係な既存履歴を維持する。
+- 理由: v0.6.66では`taskMovedUndoCaptureInProgress`がtimer callbackだけを延期し、同期的な通常commitはpending D&D snapshotをsemantic付与前に確定できた。mouse release直後のCtrl+Zなどawait中の介入でsemanticless actionが消費され、local snapshotだけが戻る可能性があったため。
+- 根拠: v0.6.66 T-0648 / E-20260816-0025 device failure、`decideTaskMovedUndoSemanticAttachment()`、`decideTaskMovedUndoBatchCommit()`、`beginTaskMovedUndoOperation()`、`tests/taskmoved-undo-semantic-lifecycle-v0667.js`。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

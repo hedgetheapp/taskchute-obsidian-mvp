@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧は未公開v0.6.66候補の現行feature inventoryである。配布済みv0.6.65のtargeted interrupt-continuation evidenceはPASSだが、cross-section D&DのCtrl+Z Bridge同期はFAILした。v0.6.66はsame-date D&DのTaskMoved-class Undo / Redoだけを意味論同期する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
+この一覧はv0.6.67候補の現行feature inventoryである。配布済みv0.6.66のcross-section D&D Ctrl+Zは、semanticless snapshotを消費してinverse TaskMovedを生成できずFAILした。v0.6.67はsame-date D&DのTaskMoved-class Undo / Redoをoperation-scoped semantic batchで保護する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.66で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.67で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -92,13 +92,13 @@
 | 機能 | 状態 | 概要・根拠 |
 |---|---|---|
 | Board履歴 | 実装済み | `.taskchute/board-history/{date}`へsnapshot、preview・restore・delete。 |
-| 操作Undo / Redo | 一部実装 | local snapshot restoreに加え、v0.6.66候補ではsame-date cross-section / same-sectionの単一task D&DだけをTaskMoved v4としてBridge同期する。Ctrl+Z / Ctrl+Y / Ctrl+Shift+Zに対応。create/delete、lifecycle、Routine定義、date moveはcross-device undo対象外。実機未確認。 |
+| 操作Undo / Redo | 一部実装 | local snapshot restoreに加え、same-date cross-section / same-sectionの単一task D&DだけをTaskMoved v4としてBridge同期する。v0.6.67ではD&D batchをoperation IDで固定し、exact semantic前のtimer・別操作commitを拒否する。Ctrl+Z / Ctrl+Y / Ctrl+Shift+Zに対応。create/delete、lifecycle、Routine定義、date moveはcross-device undo対象外。実機未確認。 |
 | 設定backup / restore | 実装済み | `.taskchute/backups`系へ設定と関連ファイルを保存。 |
 | index再構築 | 実装済み | `Taskchute/_system/index.json`をMarkdownから再構築。 |
 | 整合性診断 | 実装済み | folder、ID、frontmatter、duplicate、runtime等を検査。 |
 | one-click repair | 実装済み | backupとreportを作り、安全と判断した項目だけ修復。 |
 | error log管理 | 実装済み | Taskchute由来logの保存・cleanup・診断表示。 |
-| 自動テスト | 一部実装 | `tests/`にv0.6.59からv0.6.66のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation、Undo / Redo focused testsがある。汎用test runnerと広範な自動回帰は未実装。 |
+| 自動テスト | 一部実装 | `tests/`にv0.6.59からv0.6.67のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation、Undo / Redo lifecycle focused testsがある。汎用test runnerと広範な自動回帰は未実装。 |
 
 ## Bridge
 
@@ -115,7 +115,7 @@
 | trusted cursor persistence | 実装済み・実機未試験 | inbound Ack cursorだけに限定した保存経路で最新data.jsonへmonotonic mergeする。 |
 | cursor-only reconciliation | 一部実装 | server Ack済みeventをMarkdownへ再適用せずcursorへ反映する。現行client記録またはlegacy cache / diagnostic証跡を使う。cold cacheでの任意server照会はAPI未実装。 |
 | TaskMoved v4 | 実装済み | `target_order_entry_ids` / `source_order_entry_ids`を正とする。v0.6.63でbasic / section handoff / cross-section / empty-source / date move、v0.6.65でsame-task multi-entry D&Dが三端末PASS。現行versionでの全組合せ回帰は未完了。 |
-| TaskMoved Undo / Redo Bridge | 実装済み・実機未試験 | D&D履歴にexact before / after stateを保持し、復元前後のMarkdown検証後に`task-undo-confirmed-markdown-v4` / `task-redo-confirmed-markdown-v4`をenqueueする。未送信exact inverseはnet-zero、in-flight / sent forwardには後続eventを使う。 |
+| TaskMoved Undo / Redo Bridge | 実装済み・実機未試験 | D&D専用Undo batchへoperation / batch identityを付け、exact task / entryとbefore / after fingerprintを検証後だけsemantic付き履歴としてcommitする。復元前後のMarkdown検証後に`task-undo-confirmed-markdown-v4` / `task-redo-confirmed-markdown-v4`をenqueueする。v0.6.66実機はsemanticless actionでFAIL、v0.6.67再試験待ち。 |
 | lifecycle classifier | 実装済み | normal / routine_occurrence / identity_conflict。 |
 | mobile resume drain | 実装済み・実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。 |
 | オフライン復帰 | 一部実装 | network error分類と再試行はある。長時間実機試験は要確認。 |

@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: 未公開v0.6.66候補。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを追加する。v0.6.66はsynthetic PASS、実機`NOT_VERIFIED`である。公開済みv0.6.64 / v0.6.65 assetsは変更しない。
+調査基準: 未公開v0.6.67候補。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護する。v0.6.67はsynthetic PASS、実機`NOT_VERIFIED`である。公開済みv0.6.66以前のassetsは変更しない。
 
 ## 1. 概要
 
@@ -174,7 +174,9 @@ explicit insert-belowと「下にコピー」は`insertTaskAfterKey()`へ`insert
 
 同一sectionのtask-row D&Dは、操作前Markdownからsource entry orderを保存し、移動後Markdownを書き込み、再読込したtarget entry orderとの一致を確認してからD&D専用TaskMoved v4を1件enqueueする。UIのdrop handlerは`moveTaskByDrag()`へ集約され、no-op orderは保存・enqueue前に除外する。
 
-v0.6.66では`moveTaskByDrag()`がforward enqueue成功後にbefore / afterのexact section・entry/task orderをpending Undo batchへ付与する。`undoLastTaskchuteAction()` / `redoLastTaskchuteAction()`は復元前source stateを検証し、`restoreTaskchuteActionSnapshot()`でlocal snapshotを戻した後、`syncRestoredTaskMovedUndoRedo()`がtarget stateを再読込検証して通常の`enqueueBridgeTaskMoved()`へ渡す。意味論を持たない履歴は従来のlocal restoreだけを行う。Inbound TaskMoved writeは`skipTaskchuteUndo`で履歴化しない。
+v0.6.67では`moveTaskByDrag()`が最初のD&D file write前にoperation ID / batch ID付きの専用Undo batchを作る。`captureTaskchuteUndoFileBefore()`とD&D内plugin-data captureは同じoperation IDだけを受け入れる。`scheduleCommitTaskchuteUndoBatch()`と通常`commitPendingTaskchuteUndoBatch()`は専用batchを確定せず、forward enqueue成功後にexact task / entry、before / after state、fingerprintを検証したD&D経路だけがforce commitする。失敗時は該当batchだけをfinallyで無効化する。
+
+`undoLastTaskchuteAction()` / `redoLastTaskchuteAction()`はoperation確定中の実行を停止し、確定済みsemantic actionだけを復元前source state検証へ進める。`restoreTaskchuteActionSnapshot()`でlocal snapshotを戻した後、`syncRestoredTaskMovedUndoRedo()`がtarget stateを再読込検証して通常の`enqueueBridgeTaskMoved()`へ渡す。意味論を持たない通常履歴は従来のlocal restoreだけを行う。Inbound TaskMoved writeは`skipTaskchuteUndo`で履歴化しない。
 
 Undo snapshot内のplugin dataはplugin-data save queue内でcurrent Bridge namespaceとorder diagnosticsを再mergeしてから適用し、outbox / cursor / logical clock / Ack・retry・Auto Flush状態を過去へ戻さない。`appendBridgeTaskMovedCoalescedEvent()`はactive flush snapshot eventをcoalesce候補から除外する。active外の未送信forwardと、task / entry / from-to / entry-task orderが完全な逆関係にある候補1件だけはnet-zeroとして両方を`superseded`にする。非exact・複数候補・active / sent / failed / retried forwardは変更せず、inverseを別eventとして保持する。復元後検証またはenqueue失敗時はcounterpart snapshotでlocal stateとhistory stackをrollbackし、rollback不能時は未同期状態を明示する。
 
