@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: main統合済み・未配布のv0.6.68候補。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護したまま、TaskBoard shortcut ownershipをcapture-phase gatewayへ集約する。v0.6.68はIntegratedでsynthetic PASSだが、実機`NOT_VERIFIED`で、Prereleased / Verified / Releasedではない。公開済みv0.6.67以前のassetsは変更しない。
+調査基準: main統合済み・BRAT試験配布済みのv0.6.68。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護したまま、TaskBoard shortcut ownershipをcapture-phase gatewayへ集約する。v0.6.68はIntegratedかつPrereleased / Test-distributedでsynthetic PASSだが、実機`NOT_VERIFIED`で、Verified / Releasedではない。公開済みv0.6.68以前のassetsは変更しない。
 
 ## 1. 概要
 

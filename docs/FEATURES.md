@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧は未配布v0.6.68候補の現行feature inventoryである。配布済みv0.6.67のcross-section D&D Ctrl+Zは、TaskBoard button focusをgeneric editable guardが先に除外し、Obsidian local Undoへpass-throughしてinverse TaskMovedを生成できずFAILした。v0.6.68はTaskBoard非テキストshortcutを単一routing gatewayで所有する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
+この一覧はBRAT試験配布済みv0.6.68の現行feature inventoryである。配布済みv0.6.67のcross-section D&D Ctrl+Zは、TaskBoard button focusをgeneric editable guardが先に除外し、Obsidian local Undoへpass-throughしてinverse TaskMovedを生成できずFAILした。v0.6.68はTaskBoard非テキストshortcutを単一routing gatewayで所有する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
 
 ## ステータス定義
 

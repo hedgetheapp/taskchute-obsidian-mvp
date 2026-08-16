@@ -2,12 +2,12 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.68 integrated candidate（main統合済み、未配布、実機`NOT_VERIFIED`）
-- 配布済みcheckpoint: immutable `v0.6.67` BRAT Prerelease、tag target `c296123e66a34d0b9abd6e6f26125871e9eca1eb`
-- v0.6.68候補はTaskBoard非テキストCtrl+Z / Ctrl+Y / Ctrl+Shift+Zをcapture-phase gatewayへrouteする。synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
+- 対象実装: v0.6.68 BRAT Prerelease（main統合・試験配布済み、実機`NOT_VERIFIED`）
+- 配布済みcheckpoint: immutable `v0.6.68` BRAT Prerelease、tag target `2c33fdaaf5f990d0045120502094934eb195bb20`
+- v0.6.68はTaskBoard非テキストCtrl+Z / Ctrl+Y / Ctrl+Shift+Zをcapture-phase gatewayへrouteする。synthetic PASSはdevice PASSへ昇格しない。
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
-- dev / remote / mobile列と`Status`列は、いずれもv0.6.68候補についての判定を示す。
+- dev / remote / mobile列と`Status`列は、いずれもv0.6.68についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
 - Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
@@ -143,7 +143,7 @@ v0.6.66はPrereleased / Test-distributedだがVerifiedではない。公開済�
 
 v0.6.67はPrereleased / Test-distributedだが、このtargeted testはFAILであり、Verified / Releasedではない。公開済みtag / Release / assetsは変更しない。
 
-## v0.6.68 Candidate Synthetic Evidence
+## v0.6.68 Prerelease Synthetic Evidence
 
 | Test case | Synthetic result | Device status |
 |---|---|---|

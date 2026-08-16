@@ -5,11 +5,11 @@
 - 調査日: 2026-08-16
 - manifest version: `0.6.68`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.68 Ctrl+Z Bridge Undo routing integrated candidate
-- release tag: `v0.6.67`（BRAT実機試験用Prerelease。tag target `c296123e66a34d0b9abd6e6f26125871e9eca1eb`。公開済みtag / Release / assetsは固定）
+- canonical docs checkpoint: v0.6.68 Ctrl+Z Bridge Undo routing BRAT Prerelease
+- release tag: `v0.6.68`（BRAT実機試験用Prerelease。tag target `2c33fdaaf5f990d0045120502094934eb195bb20`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.67はBRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はFAILした。main統合済み・未配布のv0.6.68候補はTaskBoardの非テキストCtrl+Z / Ctrl+Y / Ctrl+Shift+Zをcapture-phaseの単一gatewayへ通し、editor/input/modalではnative Undo / Redoを維持する。synthetic PASSだけで、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、Prereleased / Verified / Releasedとはしない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.67はBRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はFAILした。main統合済みのv0.6.68はimmutable BRAT Prereleaseとして試験配布され、TaskBoardの非テキストCtrl+Z / Ctrl+Y / Ctrl+Shift+Zをcapture-phaseの単一gatewayへ通し、editor/input/modalではnative Undo / Redoを維持する。synthetic PASSだけで、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedとはしない。
 
 ## 文書運用
 
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.68 integrated candidate |
+| State | v0.6.68 BRAT Prerelease |
 |---|---|
 | Integrated | Yes |
-| Prereleased / Test-distributed | No |
+| Prereleased / Test-distributed | Yes |
 | Verified | No |
 | Released | No |
 
