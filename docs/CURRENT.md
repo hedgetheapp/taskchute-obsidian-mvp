@@ -52,6 +52,8 @@ v0.6.63実機試験では、午後sectionのA `T-0625 / E-20260815-0043`、B `T-
 
 v0.6.63のTMV4-CROSS-SECTION-01もPASSした。generic add formで午後へ作成したT-0628 / E-20260816-0001はdev physical rowへ`section=午後 section_id=afternoon`を保存し、午後→午前D&D後は`### 午前`直下で`section=午前 section_id=morning`になった。D1 seq 2298のTaskMoved v4はfrom=`afternoon`、to=`morning`でremote / mobile applied、三端末UIは午前で一致した。TASK-ADD-SECTION-META-01はdev physical evidenceのみPASSであり、remote / mobileのphysical row metadataは未確認のためoverall `NOT_VERIFIED`を維持する。v0.6.63全体もVerifiedへ昇格しない。
 
+TMV4-EMPTY-SOURCE-01もcurrent PASSとなった。T-0629 / E-20260816-0002を夜（`night`）から午後（`afternoon`）へD&Dし、sourceの夜sectionを空にした。dev / remoteは夜task count=0、fixtureは午後で`section=午後 section_id=afternoon`、mobileもfixtureは午後で夜に存在しない。D1 seq 2301のTaskMoved v4は`source_order_entry_ids=[]`、source entry count=0、target order=`[E-20260816-0002]`でremote / mobile appliedだった。日付移動と同一task_id複数entryは未確認のためTaskMoved複合行とv0.6.63全体は`NOT_VERIFIED`を維持する。
+
 ## 実装済み
 
 ### ローカルTaskChute機能
@@ -97,9 +99,9 @@ v0.6.63のTMV4-CROSS-SECTION-01もPASSした。generic add formで午後へ作�
 - v0.6.58 inbound Ack / cursor recoveryの実mobile回帰。
 - generic add formのdev row metadata保存はT-0628で確認済み。remote / mobileのphysical row metadataは未確認。
 - v0.6.61 explicit insert-below物理順とTC-RENAME-SECTION-TOP / SEQUENCEをv0.6.63で回帰する。
-- TaskMoved v4の日付移動、同一task_id複数entry、TMV4-EMPTY-SOURCE-01のv0.6.63実Vault回帰。section移動はTMV4-CROSS-SECTION-01でcurrent PASS済み。
+- TaskMoved v4の日付移動と同一task_id複数entryのv0.6.63実Vault回帰。section移動とempty-sourceはcurrent PASS済み。
 - v0.6.48からv0.6.56をまとめた三端末full regression。
-- TaskMoved v4の日付移動、同一task_id複数entry、coalesce、空source sectionの組合せ試験。
+- TaskMoved v4の日付移動、同一task_id複数entry、coalesceの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
 - Routine定義同期とRoutine occurrenceの三端末同時起動・オフライン復帰試験。
 - TaskCommentAdded、Section、Category / Area / Clientのv0.6.56上での回帰。
