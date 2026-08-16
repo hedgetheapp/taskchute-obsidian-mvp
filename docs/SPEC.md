@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は未公開の`v0.6.64`候補を基準とする。公開済みv0.6.63の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は未公開の`v0.6.65`候補を基準とする。公開済みv0.6.64の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -73,6 +73,9 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - PC / mobileのD&D、上下移動、section移動、日付移動を提供する。
 - Markdownの物理sectionと行順がboard positionの正である。
 - TaskMoved v4は`target_order_entry_ids`と必要時`source_order_entry_ids`を使用する。
+- TaskMoved v4のgeneric send-preflightはpayload entry orderとcurrent physical orderのstrict equalityを維持する。
+- interrupt lifecycleでTaskMovedの後にexact matchingするsendableな`creation_source=interrupt-continuation` TaskCreatedが1件だけ存在する場合、send-preflightはcurrent target orderからそのcontinuation entryだけを一時除外したprojected orderをTaskMoved発生時点のorderとしてstrict比較する。payload order自体は書き換えない。
+- projectionは`taskmoved_payload_source=task-start-section-move-confirmed-markdown-v3`のinterrupt start section moveに限定する。TaskCreatedの後続logical clock、同一date / target section、`continuation_after_entry_id == TaskMoved.entry_id`、exact anchor / continuation entry/task identity、物理隣接、送信可能statusをすべて満たす場合だけ許可する。候補なし・重複・不一致・他の余分なrowがある場合はgeneric strict比較へ戻り、不一致なら送信しない。
 - v4ではentry orderが正で、task_id配列は診断・旧互換用である。
 - v4 entry配列が不正な場合はv3へ黙って降格せず未Ack停止する。
 - v3以前はtask_id順を使用するが、同じsectionにduplicate task_idがある場合は安全停止する。
@@ -224,5 +227,5 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - comment編集・削除の端末間同期。
 - project_id全面移行の最終形。
 - section label正規化の最終規則。
-- v0.6.64候補をVerified / Releasedとみなす条件。interrupt continuation最終配置、Routine continuation、TaskMoved v4同一task_id複数entryを含むcurrent実Vault / 実mobile証跡が未完了である。
+- v0.6.65候補をVerified / Releasedとみなす条件。interrupt lifecycle TaskMoved projection、Routine continuation、TaskMoved v4同一task_id複数entryを含むcurrent実Vault / 実mobile証跡が未完了である。
 - Widget、Watch、MCP/API、外部calendarの仕様。

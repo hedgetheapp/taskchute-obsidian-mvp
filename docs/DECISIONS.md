@@ -220,6 +220,12 @@
 - 根拠: `closeRunningTaskForInterrupt()`、`finalizeInterruptContinuationAfterStartPlacement()`、`buildInterruptContinuationPlacement()`、`inspectInterruptContinuationPlacement()`、v0.6.63 T-0635 / T-0636 failure evidence。
 - 理由: continuationを開始前のinterrupt task直後へ先に作ると、その後のtask-start section moveがinterrupt taskだけを移動し、continuationが旧sectionへ残る。TaskCreated後に補正TaskMovedを追加するより、最終配置を正として1回だけ作成する方が中間不整合と二重eventを避けられるため。
 
+## D-037: interrupt lifecycleのTaskMoved send-preflightはexact continuationだけを投影する
+
+- 判断: generic TaskMoved v4のexact-order検証は維持する。`taskmoved_payload_source=task-start-section-move-confirmed-markdown-v3`であるTaskMovedについて、より後のlogical clockに、同一date / target section、exact anchor / continuation entry / task identity、物理隣接、送信可能statusを満たすinterrupt-continuation TaskCreatedが1件だけある場合に限り、current orderからそのcontinuation entryだけを一時除外したprojected orderをpayload orderとstrict比較する。TaskMoved payloadは変更しない。
+- 根拠: `projectBridgeTaskMovedTargetOrderForInterruptContinuation()`、`validateBridgeOutboxTaskMovedEvent()`、v0.6.64 T-0638 / T-0639 failure evidence。
+- 理由: TaskMovedはreceiverにcontinuationが存在しないintermediate stateを先に届ける必要がある。payloadへ未来entryを足すとv4 identity contractを破り、current Markdownをそのまま比較すると正しいintermediate eventをstaleとして拒否するため。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

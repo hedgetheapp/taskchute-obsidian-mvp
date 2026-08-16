@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current implementation candidate: `v0.6.64` (not yet committed, tagged, or distributed for BRAT testing).
-- v0.6.64 finalizes interrupt continuations only after the interrupting task's task-start section move is confirmed. The continuation is saved directly after the final interrupt entry with matching row section metadata, then re-read and verified before TaskCreated enqueue. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until the candidate is distributed and current evidence is recorded.
+- Current implementation candidate: `v0.6.65` (not yet committed, tagged, or distributed for BRAT testing).
+- v0.6.65 keeps generic TaskMoved v4 send-preflight strict while projecting out one exact, later, sendable interrupt-continuation TaskCreated entry only for `task-start-section-move-confirmed-markdown-v3` lifecycle moves. Synthetic regressions pass; real Vault verification remains `NOT_VERIFIED` until the candidate is distributed and current evidence is recorded.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 

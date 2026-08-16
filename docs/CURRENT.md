@@ -3,14 +3,14 @@
 ## 調査基準
 
 - 調査日: 2026-08-16
-- manifest version: `0.6.64`
+- manifest version: `0.6.65`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.64 implementation candidate based on main `36528adaad467176c20f51f7e485d61a8f1e0071`
-- release tag: `v0.6.63`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
-- v0.6.64 candidate base: main `36528adaad467176c20f51f7e485d61a8f1e0071`
+- canonical docs checkpoint: v0.6.65 implementation candidate based on main `4ac0c980e539bcf8b48694cdcc47d09d8e0191b2`
+- release tag: `v0.6.64`（BRAT実機試験用Prerelease。release commitはtag targetを参照）
+- v0.6.65 candidate base: main `4ac0c980e539bcf8b48694cdcc47d09d8e0191b2`
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.64はinterrupt continuation最終配置修正を含む未公開候補であり、Integrated、Prereleased、Verifiedのいずれでもない。公開済みv0.6.63はBRAT実機試験用Prereleaseのまま固定する。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.65は`task-start-section-move-confirmed-markdown-v3`に限定したinterrupt continuation後のTaskMoved v4 send-preflight projectionを含む未公開候補であり、Integrated、Prereleased、Verifiedのいずれでもない。公開済みv0.6.64はBRAT実機試験用Prereleaseのまま固定する。
 
 ## 文書運用
 
@@ -57,6 +57,8 @@ TMV4-EMPTY-SOURCE-01もcurrent PASSとなった。T-0629 / E-20260816-0002を夜
 TMV4-DATE-MOVE-01もcurrent PASSとなった。T-0630を2026-08-16 / E-20260816-0003から2026-08-17 / E-20260817-0001へ移動し、三端末でsource日から消失、destination日の午後に1件だけ存在することを確認した。task_idとtask noteは維持し、board occurrenceのentry_idだけをdestination date用identityへrekeyした。D1 seq 2303のTaskMoved v4はfrom/beforeに旧ID、to/afterとtop-levelに新IDを保持し、remote / mobile appliedだった。同一task_id複数entryのcurrent実機証跡は未完了のためTaskMoved複合行とv0.6.63全体は引き続き`NOT_VERIFIED`とする。
 
 v0.6.63のinterrupt実機試験では、original T-0635 / E-20260816-0008をinterrupt task T-0636 / E-20260816-0009で停止し、continuation T-0635 / E-20260816-0010を作成した。continuation TaskCreated seq 2325はinterrupt taskが開始前にいた午後を保持し、その後seq 2326でinterrupt taskだけが午前へ移動したため、三端末の最終状態でcontinuationだけ午後へ残った。v0.6.64候補は停止処理でcontinuation identityだけを予約し、interrupt taskの開始時section移動確定後にfinal physical entry直後へ行を作成する。保存後にexact entry、同section、隣接順、row metadataを再検証してからTaskCreatedをenqueueする。focused syntheticはPASSだが実Vaultは`NOT_VERIFIED`である。
+
+v0.6.64実機試験ではfinal placement自体は成功した。original T-0638 / E-20260816-0012、interrupt T-0639 / E-20260816-0013、continuation T-0638 / E-20260816-0014は最終的にafternoonでinterrupt直後・row metadata一致となり、`interrupt_continuation_final_placement_verified`も記録された。一方、logical clock 1021のTaskMovedはcontinuation作成前のtarget order `[E-0012,E-0013]`を保持し、後続1022 TaskCreatedがE-0014を物理追加した後のsend-preflightでcurrent order `[E-0012,E-0013,E-0014]`と不一致になりfailedとなった。TaskCreatedと1023 TaskStartedもpendingに残ったため、INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01は`FAIL`、TMV4-MULTI-ENTRY-01は`NOT_RUN`、v0.6.64全体は`NOT_VERIFIED`である。v0.6.65候補はexact後続continuationが1件だけ一致する場合に限りE-0014をcurrent orderから一時投影除外し、TaskMovedのintermediate orderをstrict検証する。
 
 ## 実装済み
 
@@ -107,7 +109,8 @@ v0.6.63のinterrupt実機試験では、original T-0635 / E-20260816-0008をinte
 - v0.6.48からv0.6.56をまとめた三端末full regression。
 - TaskMoved v4の同一task_id複数entryとcoalesceの組合せ試験。
 - normal / routine / interrupt continuationのlifecycle identity回帰。
-- v0.6.64 INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01の三端末回帰。section移動なし／あり、TaskStopped・TaskMoved・TaskCreated・TaskStarted順、Routine metadataを確認する。
+- v0.6.65 INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01の三端末回帰。TaskStopped・TaskMoved・TaskCreated・TaskStartedのD1到達順、projected preflight、最終配置、Routine metadataを確認する。
+- TMV4-MULTI-ENTRY-01はv0.6.64で未実施。v0.6.65配布後も独立fixtureで確認する。
 - Routine定義同期とRoutine occurrenceの三端末同時起動・オフライン復帰試験。
 - TaskCommentAdded、Section、Category / Area / Clientのv0.6.56上での回帰。
 - mobile長時間hidden、OS強制停止、通信断・圏外復帰。
@@ -135,12 +138,12 @@ v0.6.63のinterrupt実機試験では、original T-0635 / E-20260816-0008をinte
 
 ## 現在確認できる問題点
 
-- 現行統合文書はv0.6.64候補へ整合したが、旧詳細資料には過去versionの記述が残る。
+- 現行統合文書はv0.6.65候補へ整合したが、旧詳細資料には過去versionの記述が残る。
 - occurrence keyについて、古い仕様書の時刻入り形式と現行の日付のみ形式が併存する。
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。v0.6.64は未公開候補、v0.6.63は実機試験用Prereleaseであり、本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。v0.6.65は未公開候補、v0.6.64は実機試験用Prereleaseであり、本番可否は要確認。
 
 ## 将来候補・明示的対象外
 

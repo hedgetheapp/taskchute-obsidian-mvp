@@ -8,9 +8,34 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
-## v0.6.64 - Unreleased
+## v0.6.65 - Unreleased
 
 Type: Runtime candidate for review; not tagged or distributed
+
+### Changed
+
+- `taskmoved_payload_source=task-start-section-move-confirmed-markdown-v3`のinterrupt lifecycle TaskMoved v4 send-preflightに限定して、exact continuation order projectionを追加した。
+- TaskMovedより後のlogical clockにあるsendableなinterrupt-continuation TaskCreatedが、date、target section、anchor、entry/task identity、物理隣接をすべて満たし1件だけ一致する場合、current target orderからそのcontinuation entryだけを一時除外してpayload intermediate orderとstrict比較する。
+- TaskMoved payloadの`target_order_entry_ids`自体は変更せず、generic D&D / section move / date moveのstrict validationも維持する。
+- index rebuild後にもprojectionを再計算し、候補やcurrent physical orderが変化した場合は送信をblockする。
+- reproducer、不一致、重複、clock逆転、event順、generic / inbound / Routine不変を検証するfocused synthetic testを追加した。
+- `manifest.json`を`0.6.65`へ更新した。
+
+### Verification
+
+- INTERRUPT-TMV4-PREFLIGHT-01から10 focused synthetic: PASS
+- INTERRUPT-CONTINUATION-01から10 regression: PASS
+- existing TMV4、rename handoff、insert-below focused tests: PASS
+- 実Vault / 実mobile: `NOT_VERIFIED`
+- TMV4-MULTI-ENTRY-01: v0.6.64 `NOT_RUN`、v0.6.65 `NOT_VERIFIED`
+
+Release notes: [`docs/release/v0.6.65.md`](docs/release/v0.6.65.md)
+
+---
+
+## v0.6.64 - 2026-08-16
+
+Type: Runtime BRAT Prerelease for device testing
 
 ### Changed
 
@@ -31,6 +56,12 @@ Type: Runtime candidate for review; not tagged or distributed
 - existing TMV4、rename handoff、insert-below focused tests: PASS
 - 実Vault / 実mobile: `NOT_VERIFIED`
 - TMV4-MULTI-ENTRY-01: `NOT_VERIFIED`
+
+### Post-prerelease device evidence
+
+- INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01: `FAIL`。original T-0638 / E-20260816-0012、interrupt T-0639 / E-20260816-0013、continuation T-0638 / E-20260816-0014。local final placementとmetadata検証は成功したが、TaskMoved logical clock 1021のintermediate target order `[E-0012,E-0013]`が、後続TaskCreatedによるcurrent order `[E-0012,E-0013,E-0014]`とsend-preflightで不一致になりfailed。TaskCreated 1022とTaskStarted 1023もpendingに残った。
+- TMV4-MULTI-ENTRY-01: `NOT_RUN`。
+- v0.6.64 overall: `NOT_VERIFIED`。
 
 ### v0.6.63 failure evidence
 

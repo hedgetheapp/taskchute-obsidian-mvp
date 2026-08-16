@@ -6514,6 +6514,101 @@ function buildBridgeTaskMovedV4ReorderDraft(input = {}) {
   };
 }
 
+function projectBridgeTaskMovedTargetOrderForInterruptContinuation(moveEvent, currentOrderInfo = {}, outboxEvents = [], options = {}) {
+  const payload = moveEvent && moveEvent.payload && typeof moveEvent.payload === "object" ? moveEvent.payload : {};
+  const to = payload.to && typeof payload.to === "object" ? payload.to : {};
+  const normalizeDate = typeof options.normalizeDate === "function"
+    ? value => String(options.normalizeDate(value) || "").trim()
+    : value => String(value || "").trim();
+  const normalizeSection = typeof options.normalizeSection === "function"
+    ? value => String(options.normalizeSection(value) || "").trim()
+    : value => String(value || "").trim();
+  const maxRetryCount = Math.max(1, Math.floor(Number(options.maxRetryCount || 5)));
+  const currentEntryIds = (Array.isArray(currentOrderInfo.entryIds) ? currentOrderInfo.entryIds : [])
+    .map(value => String(value || "").trim());
+  const currentTaskIds = (Array.isArray(currentOrderInfo.taskIds) ? currentOrderInfo.taskIds : [])
+    .map(value => String(value || "").trim());
+  const result = {
+    applied: false,
+    reason_code: "interrupt_continuation_projection_not_applicable",
+    decision: "generic_strict_validation",
+    task_moved_event_id: String(moveEvent && moveEvent.event_id || "").trim(),
+    continuation_taskcreated_event_id: "",
+    anchor_entry_id: "",
+    current_entry_ids: currentEntryIds.slice(),
+    projected_entry_ids: currentEntryIds.slice(),
+    actual_current_target_count: currentEntryIds.length,
+    projected_target_count: currentEntryIds.length,
+    matching_continuation_count: 0,
+    continuation_entry_id: ""
+  };
+  if (String(moveEvent && moveEvent.event_type || "") !== "TaskMoved" || Number(payload.move_payload_version || 0) < 4) return result;
+  if (String(payload.taskmoved_payload_source || "").trim() !== "task-start-section-move-confirmed-markdown-v3") {
+    result.reason_code = "interrupt_continuation_projection_source_not_allowed";
+    return result;
+  }
+  if (currentEntryIds.some(value => !value) || new Set(currentEntryIds).size !== currentEntryIds.length
+    || currentTaskIds.length !== currentEntryIds.length) {
+    result.reason_code = "interrupt_continuation_projection_current_order_invalid";
+    return result;
+  }
+  const moveClock = Math.max(0, Number(moveEvent && moveEvent.logical_clock || 0));
+  const moveEntryId = String(payload.entry_id || to.entry_id || "").trim();
+  const moveTaskId = String(payload.task_id || "").trim();
+  const moveDateRaw = String(to.date || payload.date || "").trim();
+  const moveSectionRaw = String(to.section_id || to.section || payload.section_id || payload.section || "").trim();
+  const moveDate = normalizeDate(moveDateRaw);
+  const moveSectionId = normalizeSection(moveSectionRaw);
+  result.anchor_entry_id = moveEntryId;
+  if (!moveClock || !moveEntryId || !moveTaskId || !moveDateRaw || !moveSectionRaw || !moveDate || !moveSectionId) {
+    result.reason_code = "interrupt_continuation_projection_move_identity_missing";
+    return result;
+  }
+  const moveEntryIndex = currentEntryIds.indexOf(moveEntryId);
+  if (moveEntryIndex < 0 || currentTaskIds[moveEntryIndex] !== moveTaskId) {
+    result.reason_code = "interrupt_continuation_projection_move_identity_mismatch";
+    return result;
+  }
+  const candidates = (Array.isArray(outboxEvents) ? outboxEvents : []).filter(candidate => {
+    if (String(candidate && candidate.event_type || "") !== "TaskCreated") return false;
+    const candidatePayload = candidate && candidate.payload && typeof candidate.payload === "object" ? candidate.payload : {};
+    if (String(candidatePayload.creation_source || "").trim() !== "interrupt-continuation") return false;
+    const status = String(candidate && candidate.status || "").trim();
+    const sendable = status === "pending"
+      || (status === "failed" && Math.max(0, Number(candidate && candidate.retry_count || 0)) < maxRetryCount);
+    if (!sendable || Number(candidate && candidate.logical_clock || 0) <= moveClock) return false;
+    const candidateDateRaw = String(candidatePayload.date || "").trim();
+    const candidateSectionRaw = String(candidatePayload.section_id || candidatePayload.section || candidatePayload.section_label || "").trim();
+    if (!candidateDateRaw || normalizeDate(candidateDateRaw) !== moveDate) return false;
+    if (!candidateSectionRaw || normalizeSection(candidateSectionRaw) !== moveSectionId) return false;
+    if (String(candidatePayload.continuation_after_entry_id || "").trim() !== moveEntryId) return false;
+    const continuationEntryId = String(candidatePayload.entry_id || "").trim();
+    const continuationTaskId = String(candidatePayload.task_id || "").trim();
+    if (!continuationEntryId || !continuationTaskId) return false;
+    const continuationIndex = currentEntryIds.indexOf(continuationEntryId);
+    if (continuationIndex < 0 || currentEntryIds.lastIndexOf(continuationEntryId) !== continuationIndex) return false;
+    if (currentTaskIds[continuationIndex] !== continuationTaskId) return false;
+    return continuationIndex === moveEntryIndex + 1;
+  });
+  result.matching_continuation_count = candidates.length;
+  if (candidates.length !== 1) {
+    result.reason_code = candidates.length > 1
+      ? "interrupt_continuation_projection_ambiguous"
+      : "interrupt_continuation_projection_no_exact_match";
+    return result;
+  }
+  const continuationPayload = candidates[0].payload && typeof candidates[0].payload === "object" ? candidates[0].payload : {};
+  const continuationEntryId = String(continuationPayload.entry_id || "").trim();
+  result.applied = true;
+  result.reason_code = "interrupt_continuation_projection_applied";
+  result.decision = "interrupt_continuation_projection_used";
+  result.continuation_taskcreated_event_id = String(candidates[0].event_id || "").trim();
+  result.continuation_entry_id = continuationEntryId;
+  result.projected_entry_ids = currentEntryIds.filter(value => value !== continuationEntryId);
+  result.projected_target_count = result.projected_entry_ids.length;
+  return result;
+}
+
 function mergeTaskOrderWithPreferredSubset(baseOrder, preferredOrder) {
   const base = (Array.isArray(baseOrder) ? baseOrder : []).map(id => String(id || "").trim()).filter(Boolean);
   const baseSet = new Set(base);
@@ -18960,6 +19055,23 @@ class TaskchutePlugin extends obsidian.Plugin {
     );
   }
 
+  getBridgeTaskMovedInterruptContinuationProjection(event, targetInfo) {
+    const normalizeProjectionSection = value => {
+      const section = getSectionByNameOrId(this.settings, String(value || "").trim());
+      return String(section && section.id || "").trim();
+    };
+    return projectBridgeTaskMovedTargetOrderForInterruptContinuation(
+      event,
+      targetInfo,
+      Array.isArray(this.settings && this.settings.bridgeOutboxEvents) ? this.settings.bridgeOutboxEvents : [],
+      {
+        normalizeDate: value => this.normalizeDate(String(value || "").trim()),
+        normalizeSection: normalizeProjectionSection,
+        maxRetryCount: normalizeBridgeOutboxLimit(this.settings && this.settings.bridgeOutboxMaxRetryCount, 5, 100)
+      }
+    );
+  }
+
   async validateBridgeOutboxTaskMovedEvent(event, stage = "drain-before-send") {
     if (String(event && event.event_type || "") !== "TaskMoved") return { ok: true };
     const pairedDelete = this.findBridgePairedTaskDeletedAfterEvent(event);
@@ -18991,13 +19103,45 @@ class TaskchutePlugin extends obsidian.Plugin {
     const from = payload.from && typeof payload.from === "object" ? payload.from : {};
     const to = payload.to && typeof payload.to === "object" ? payload.to : {};
     const isV4 = Number(payload.move_payload_version || 0) >= 4;
+    let targetOrderProjection = null;
     if (isV4) {
       const targetEntries = Array.isArray(payload.target_order_entry_ids) ? payload.target_order_entry_ids.map(value => String(value || "").trim()) : [];
       const targetInfo = await this.getBridgeSectionOrderInfo(to.date || payload.date, to.section_id || to.section);
+      targetOrderProjection = this.getBridgeTaskMovedInterruptContinuationProjection(event, targetInfo);
+      const currentTargetEntriesForComparison = targetOrderProjection.applied
+        ? targetOrderProjection.projected_entry_ids
+        : targetInfo.entryIds;
       if (!targetEntries.length || targetEntries.some(value => !value)
         || new Set(targetEntries).size !== targetEntries.length
-        || JSON.stringify(targetInfo.entryIds) !== JSON.stringify(targetEntries)) {
-        return { ok: false, reason: "TaskMoved v4 target_order_entry_idsの送信前検証に失敗しました。" };
+        || targetInfo.missingEntryIdCount || targetInfo.duplicateEntryIds.length
+        || JSON.stringify(currentTargetEntriesForComparison) !== JSON.stringify(targetEntries)) {
+        await this.recordBridgeTaskMovedSectionDiagnostic({
+          recorded_at: nowIso(),
+          stage,
+          event_id: String(event && event.event_id || "").trim(),
+          task_id: String(payload.task_id || "").trim(),
+          entry_id: String(payload.entry_id || "").trim(),
+          decision: "blocked",
+          reason_code: "taskmoved_v4_target_order_preflight_failed",
+          interrupt_continuation_projection_used: !!targetOrderProjection.applied,
+          interrupt_continuation_projection_reason: targetOrderProjection.reason_code,
+          continuation_taskcreated_event_id: targetOrderProjection.continuation_taskcreated_event_id,
+          interrupt_continuation_anchor_entry_id: targetOrderProjection.anchor_entry_id,
+          interrupt_continuation_entry_id: targetOrderProjection.continuation_entry_id,
+          actual_current_target_count: targetOrderProjection.actual_current_target_count,
+          projected_target_count: targetOrderProjection.projected_target_count,
+          current_target_order_entry_ids: targetInfo.entryIds.slice(),
+          projected_target_order_entry_ids: currentTargetEntriesForComparison.slice()
+        });
+        return {
+          ok: false,
+          reason: "TaskMoved v4 target_order_entry_idsの送信前検証に失敗しました。",
+          reason_code: "taskmoved_v4_target_order_preflight_failed",
+          interrupt_continuation_projection_applied: !!targetOrderProjection.applied,
+          interrupt_continuation_projection_reason: targetOrderProjection.reason_code,
+          current_target_order_entry_ids: targetInfo.entryIds.slice(),
+          projected_target_order_entry_ids: currentTargetEntriesForComparison.slice()
+        };
       }
       const sameLocation = String(from.date || "") === String(to.date || "")
         && String(from.section_id || from.section || "") === String(to.section_id || to.section || "");
@@ -19019,8 +19163,49 @@ class TaskchutePlugin extends obsidian.Plugin {
       payload.entry_id,
       to.date || payload.date,
       to.section_id || to.section,
-      { stage, index: rebuiltIndex, expectedTargetOrder: payload.target_order_task_ids, expectedTargetEntryOrder: payload.target_order_entry_ids }
+      {
+        stage,
+        index: rebuiltIndex,
+        expectedTargetOrder: targetOrderProjection && targetOrderProjection.applied ? [] : payload.target_order_task_ids,
+        expectedTargetEntryOrder: targetOrderProjection && targetOrderProjection.applied ? [] : payload.target_order_entry_ids
+      }
     );
+    if (diagnostic.ok && targetOrderProjection && targetOrderProjection.applied) {
+      const finalTargetInfo = await this.getBridgeSectionOrderInfo(to.date || payload.date, to.section_id || to.section);
+      const finalProjection = this.getBridgeTaskMovedInterruptContinuationProjection(event, finalTargetInfo);
+      const expectedTargetEntries = Array.isArray(payload.target_order_entry_ids)
+        ? payload.target_order_entry_ids.map(value => String(value || "").trim())
+        : [];
+      const projectionVerified = finalProjection.applied
+        && finalProjection.continuation_entry_id === targetOrderProjection.continuation_entry_id
+        && !finalTargetInfo.missingEntryIdCount
+        && !finalTargetInfo.duplicateEntryIds.length
+        && JSON.stringify(finalProjection.projected_entry_ids) === JSON.stringify(expectedTargetEntries);
+      diagnostic.interrupt_continuation_projection_applied = !!finalProjection.applied;
+      diagnostic.interrupt_continuation_projection_used = !!finalProjection.applied;
+      diagnostic.interrupt_continuation_projection_reason = finalProjection.reason_code;
+      diagnostic.task_moved_event_id = finalProjection.task_moved_event_id;
+      diagnostic.continuation_taskcreated_event_id = finalProjection.continuation_taskcreated_event_id
+        || targetOrderProjection.continuation_taskcreated_event_id;
+      diagnostic.initial_continuation_taskcreated_event_id = targetOrderProjection.continuation_taskcreated_event_id;
+      diagnostic.interrupt_continuation_anchor_entry_id = finalProjection.anchor_entry_id;
+      diagnostic.interrupt_continuation_entry_id = finalProjection.continuation_entry_id
+        || targetOrderProjection.continuation_entry_id;
+      diagnostic.actual_current_target_count = finalProjection.actual_current_target_count;
+      diagnostic.projected_target_count = finalProjection.projected_target_count;
+      diagnostic.interrupt_continuation_projection_decision = finalProjection.decision;
+      diagnostic.current_target_order_entry_ids = finalTargetInfo.entryIds.slice();
+      diagnostic.projected_target_order_entry_ids = finalProjection.projected_entry_ids.slice();
+      diagnostic.expected_target_order_entry_ids = expectedTargetEntries.slice();
+      diagnostic.target_order_projection_verified = projectionVerified;
+      if (!projectionVerified) {
+        diagnostic.ok = false;
+        diagnostic.final_guard_result = "blocked";
+        diagnostic.decision = "blocked";
+        diagnostic.reason_code = "interrupt_continuation_projection_revalidation_failed";
+        diagnostic.reason = "TaskMoved送信直前のinterrupt continuation order projection再検証に失敗しました。";
+      }
+    }
     await this.recordBridgeTaskMovedSectionDiagnostic(diagnostic);
     if (!diagnostic.ok) {
       const newerAfterInspection = findNewer();

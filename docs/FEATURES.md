@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.64候補の現行feature inventoryである。v0.6.64はinterrupt continuationをinterrupting taskの開始処理完了後の物理配置へ確定してから作成・Bridge handoffする未公開候補である。
+この一覧はv0.6.65候補の現行feature inventoryである。v0.6.65は`task-start-section-move-confirmed-markdown-v3`のinterrupt lifecycle中間TaskMoved v4に限り、後続のexact continuation TaskCreatedだけを除外したprojected orderで送信前検証する未公開候補である。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.64で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.65で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
