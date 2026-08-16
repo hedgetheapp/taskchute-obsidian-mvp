@@ -10,7 +10,7 @@ Historical verification recorded below is evidence for that release only. It is 
 
 ## v0.6.69 - 2026-08-16
 
-Type: Runtime candidate, not yet test-distributed
+Type: Runtime BRAT Prerelease for device testing
 
 ### Changed
 
@@ -26,7 +26,7 @@ Type: Runtime candidate, not yet test-distributed
 - `dnd-semantic-undo-handoff-v0669.js`: actual cross-section / same-section D&D、Undo / Redo inverse、capture / attach / fingerprint / commit failure barrier、duplicate rejection: PASS
 - v0.6.68 routing、v0.6.67 semantic lifecycle、v0.6.66 Undo / Redo、TMV4、interrupt continuation、rename、insert-below focused tests: PASS
 - v0.6.69 real Vault / remote / mobile: `NOT_VERIFIED`
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
 Release notes: [`docs/release/v0.6.69.md`](docs/release/v0.6.69.md)
 

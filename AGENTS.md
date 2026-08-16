@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation: `v0.6.69` (Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No). Current immutable test distribution remains `v0.6.68` BRAT Prerelease (tag target `2c33fdaaf5f990d0045120502094934eb195bb20`).
+- Current implementation and immutable test distribution: `v0.6.69` BRAT Prerelease (tag target `d49ad9d217e21e6412f86abdee86cf9787191507`). v0.6.69 is Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No.
 - v0.6.68 real-device `UNDO-BRIDGE-CROSS-SECTION-01` proved shortcut routing worked but the top Undo action still lacked TaskMoved semantics, so Ctrl+Z restored only dev Markdown. v0.6.69 requires the exact semantic action to be committed at history top; otherwise it removes the exact unsafe generic snapshot and installs a blocking history marker. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.

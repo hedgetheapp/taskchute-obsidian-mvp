@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はmain統合対象v0.6.69の現行feature inventoryである。配布済みv0.6.68ではTaskBoard shortcut routingは動作したが、D&D top Undo actionがsemanticlessとなりinverse TaskMovedを生成できずFAILした。v0.6.69はsemantic commitのhistory-top invariantを追加し、成立しない操作ではlocal-only Undoを明示blockする。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
+この一覧はBRAT試験配布済みv0.6.69の現行feature inventoryである。配布済みv0.6.68ではTaskBoard shortcut routingは動作したが、D&D top Undo actionがsemanticlessとなりinverse TaskMovedを生成できずFAILした。v0.6.69はsemantic commitのhistory-top invariantを追加し、成立しない操作ではlocal-only Undoを明示blockする。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
 
 ## ステータス定義
 

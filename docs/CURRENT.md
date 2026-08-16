@@ -5,11 +5,11 @@
 - 調査日: 2026-08-16
 - manifest version: `0.6.69`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.69 D&D semantic Undo handoff candidate
-- release tag: `v0.6.68`（BRAT実機試験用Prerelease。tag target `2c33fdaaf5f990d0045120502094934eb195bb20`。公開済みtag / Release / assetsは固定）
+- canonical docs checkpoint: v0.6.69 D&D semantic Undo handoff BRAT Prerelease
+- release tag: `v0.6.69`（BRAT実機試験用Prerelease。tag target `d49ad9d217e21e6412f86abdee86cf9787191507`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.68はimmutable BRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はFAILした。v0.6.69はD&D後にexact semantic actionがUndo履歴topへcommitされたことを検証し、証明できない場合はlocal-only Undoをblockする実装候補である。synthetic PASSだけで、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedとはしない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.68はimmutable BRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はFAILした。v0.6.69はD&D後にexact semantic actionがUndo履歴topへcommitされたことを検証し、証明できない場合はlocal-only Undoをblockするimmutable BRAT Prereleaseである。synthetic PASSだけで、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedとはしない。
 
 ## 文書運用
 
@@ -23,7 +23,7 @@
 | State | v0.6.69 |
 |---|---|
 | Integrated | Yes |
-| Prereleased / Test-distributed | No |
+| Prereleased / Test-distributed | Yes |
 | Verified | No |
 | Released | No |
 

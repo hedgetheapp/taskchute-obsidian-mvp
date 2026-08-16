@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様はmain統合対象の`v0.6.69`を基準とする。v0.6.69はIntegratedだが未配布・実機`NOT_VERIFIED`で、Verified / Releasedではない。現在のimmutable test distributionはv0.6.68である。公開済みv0.6.68以前の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様はmain統合・BRAT試験配布済みの`v0.6.69`を基準とする。v0.6.69はIntegratedかつPrereleased / Test-distributedだが、実機`NOT_VERIFIED`で、Verified / Releasedではない。公開済みv0.6.69以前の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
