@@ -13080,6 +13080,20 @@ class TaskchutePlugin extends obsidian.Plugin {
       final_guard_result: String(detail.final_guard_result || "").trim(),
       before_order_entry_ids: Array.isArray(detail.before_order_entry_ids) ? detail.before_order_entry_ids.slice() : [],
       after_order_entry_ids: Array.isArray(detail.after_order_entry_ids) ? detail.after_order_entry_ids.slice() : [],
+      ui_handler: String(detail.ui_handler || "").trim(),
+      route_name: String(detail.route_name || "").trim(),
+      source_key: String(detail.source_key || "").trim(),
+      target_key: String(detail.target_key || "").trim(),
+      target_section_id: String(detail.target_section_id || "").trim(),
+      drop_position: String(detail.drop_position || "").trim(),
+      selected_task_id: String(detail.selected_task_id || "").trim(),
+      multi_selected_count: Math.max(0, Math.floor(Number(detail.multi_selected_count || 0))),
+      route_classification: String(detail.route_classification || "").trim(),
+      dispatched_method_name: String(detail.dispatched_method_name || "").trim(),
+      operation_lifecycle_attempted: !!detail.operation_lifecycle_attempted,
+      operation_id: String(detail.operation_id || "").trim(),
+      final_route_result: detail.final_route_result == null ? null : !!detail.final_route_result,
+      failure_reason: String(detail.failure_reason || "").trim(),
       enqueue_attempted: !!detail.enqueue_attempted,
       enqueue_result: detail.enqueue_result == null ? null : !!detail.enqueue_result,
       enqueue_skipped_reason: String(detail.enqueue_skipped_reason || "").trim(),
@@ -37881,6 +37895,85 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
   }
 
+  async finalizeTaskMovedUndoSemanticHandoff(options = {}) {
+    const taskMovedUndoOperationId = String(options.taskMovedUndoOperationId || "").trim();
+    const taskId = String(options.task_id || "").trim();
+    const entryId = String(options.entry_id || "").trim();
+    const semanticResult = buildTaskMovedUndoBridgeSemantic({
+      task_id: taskId,
+      entry_id: entryId,
+      date: String(options.date || "").trim(),
+      before: options.before || {},
+      after: options.after || {},
+      original_event_id: String(options.original_event_id || "").trim(),
+      original_payload_source: String(options.original_payload_source || "").trim()
+    });
+    this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_semantic_built", {
+      operation_id: taskMovedUndoOperationId,
+      batch_id: this.activeTaskMovedUndoOperation && this.activeTaskMovedUndoOperation.batch_id,
+      task_id: taskId,
+      entry_id: entryId,
+      lifecycle_state: this.activeTaskMovedUndoOperation && this.activeTaskMovedUndoOperation.state,
+      reason_code: semanticResult.reason,
+      semantic_attached: false,
+      message: semanticResult.ok ? "TaskMoved Undo semanticを構築しました。" : "TaskMoved Undo semanticを構築できませんでした。"
+    });
+    const attachResult = semanticResult.ok
+      ? this.attachBridgeTaskMovedSemanticToPendingUndoBatch(semanticResult.semantic, taskMovedUndoOperationId)
+      : { ok: false, reason: semanticResult.reason || "semantic_build_failed" };
+    const committed = attachResult.ok && this.commitPendingTaskchuteUndoBatch({
+      taskMovedUndoOperationId,
+      forceTaskMovedSemanticCommit: true
+    });
+    const historyCheck = committed
+      ? inspectCommittedTaskMovedUndoHistory(this.undoStack, this.activeTaskMovedUndoOperation, semanticResult.semantic)
+      : { ok: false, reason: semanticResult.reason || attachResult.reason || "undo_batch_commit_blocked" };
+    if (committed) {
+      try {
+        await this.savePluginData({
+          deviceWriterOperation: "taskmoved-undo-semantic-lifecycle-committed",
+          skipTaskchuteUndo: true
+        });
+      } catch (e) {}
+    }
+    if (semanticResult.ok && attachResult.ok && committed && historyCheck.ok) {
+      return { ok: true, semantic: semanticResult.semantic, history_check: historyCheck };
+    }
+
+    const activeOperation = this.activeTaskMovedUndoOperation
+      && this.activeTaskMovedUndoOperation.operation_id === taskMovedUndoOperationId
+      ? Object.assign({}, this.activeTaskMovedUndoOperation)
+      : {
+        operation_id: taskMovedUndoOperationId,
+        task_id: taskId,
+        entry_id: entryId,
+        before_file_path: String(options.before_file_path || "").trim(),
+        before_file_content: String(options.before_file_content || "")
+      };
+    const failureReason = semanticResult.reason || attachResult.reason || historyCheck.reason || "undo_batch_commit_blocked";
+    const neutralized = this.neutralizeUnsafeTaskMovedUndoHistory(activeOperation, failureReason);
+    await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_undo_semantic_not_recorded", Object.assign({
+      task_id: taskId,
+      entry_id: entryId,
+      date: String(options.date || "").trim(),
+      section_id: String(options.section_id || "").trim(),
+      before_order_entry_ids: Array.isArray(options.before && options.before.entry_order_ids) ? options.before.entry_order_ids : [],
+      after_order_entry_ids: Array.isArray(options.after && options.after.entry_order_ids) ? options.after.entry_order_ids : [],
+      operation_id: taskMovedUndoOperationId,
+      operation_lifecycle_attempted: true,
+      enqueue_attempted: false,
+      enqueue_skipped_reason: failureReason,
+      failure_reason: failureReason,
+      message: `D&Dは同期済みですが、TaskMoved Undo/Redo意味論を履歴へ保存できませんでした。local-only Undoを停止しました（removed=${neutralized.removed}）。`
+    }, options.diagnostic || {}), { persist: true });
+    this.discardPendingTaskchuteUndoBatch({
+      taskMovedUndoOperationId,
+      reason: failureReason
+    });
+    new obsidian.Notice("移動は同期されましたが、安全なUndo履歴を作成できなかったため、この移動のUndoを無効にしました。");
+    return { ok: false, reason: failureReason, neutralized };
+  }
+
   async moveTaskByDrag(sourceKey, targetKey, position, view) {
     if (this.blockIfTaskchuteSyncBusy && this.blockIfTaskchuteSyncBusy("ドラッグ＆ドロップ")) return false;
     let taskMovedUndoOperationId = "";
@@ -38346,7 +38439,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         new obsidian.Notice("並び替えは保存されましたが、TaskMovedの同期準備に失敗しました。診断を確認してください。");
         return false;
       }
-      const semanticResult = buildTaskMovedUndoBridgeSemantic({
+      const semanticHandoff = await this.finalizeTaskMovedUndoSemanticHandoff({
+        taskMovedUndoOperationId,
         task_id: sourceBridgeTaskId,
         entry_id: sourceBridgeEntryId,
         date: moveDate,
@@ -38365,67 +38459,12 @@ class TaskchutePlugin extends obsidian.Plugin {
           task_order_ids: destinationAfterSaveInfo.taskIds
         },
         original_event_id: this.settings.bridgeLastTaskMovedEventId,
-        original_payload_source: isCrossSectionDragMove ? "confirmed-markdown-v2" : "task-drag-reorder-confirmed-markdown-v4"
+        original_payload_source: isCrossSectionDragMove ? "confirmed-markdown-v2" : "task-drag-reorder-confirmed-markdown-v4",
+        before_file_path: notePath,
+        before_file_content: md,
+        section_id: String(destinationSection && destinationSection.id || "").trim()
       });
-      this.recordTaskMovedUndoLifecycleDiagnostic("taskmoved_undo_semantic_built", {
-        operation_id: taskMovedUndoOperationId,
-        batch_id: this.activeTaskMovedUndoOperation && this.activeTaskMovedUndoOperation.batch_id,
-        task_id: sourceBridgeTaskId,
-        entry_id: sourceBridgeEntryId,
-        lifecycle_state: this.activeTaskMovedUndoOperation && this.activeTaskMovedUndoOperation.state,
-        reason_code: semanticResult.reason,
-        semantic_attached: false,
-        message: semanticResult.ok ? "TaskMoved Undo semanticを構築しました。" : "TaskMoved Undo semanticを構築できませんでした。"
-      });
-      const attachResult = semanticResult.ok
-        ? this.attachBridgeTaskMovedSemanticToPendingUndoBatch(semanticResult.semantic, taskMovedUndoOperationId)
-        : { ok: false, reason: semanticResult.reason || "semantic_build_failed" };
-      const committed = attachResult.ok && this.commitPendingTaskchuteUndoBatch({
-        taskMovedUndoOperationId,
-        forceTaskMovedSemanticCommit: true
-      });
-      const historyCheck = committed
-        ? inspectCommittedTaskMovedUndoHistory(this.undoStack, this.activeTaskMovedUndoOperation, semanticResult.semantic)
-        : { ok: false, reason: semanticResult.reason || attachResult.reason || "undo_batch_commit_blocked" };
-      if (committed) {
-        try {
-          await this.savePluginData({
-            deviceWriterOperation: "taskmoved-undo-semantic-lifecycle-committed",
-            skipTaskchuteUndo: true
-          });
-        } catch (e) {}
-      }
-      if (!semanticResult.ok || !attachResult.ok || !committed || !historyCheck.ok) {
-        const activeOperation = this.activeTaskMovedUndoOperation
-          && this.activeTaskMovedUndoOperation.operation_id === taskMovedUndoOperationId
-          ? Object.assign({}, this.activeTaskMovedUndoOperation)
-          : {
-            operation_id: taskMovedUndoOperationId,
-            task_id: sourceBridgeTaskId,
-            entry_id: sourceBridgeEntryId,
-            before_file_path: notePath,
-            before_file_content: md
-          };
-        const failureReason = semanticResult.reason || attachResult.reason || historyCheck.reason || "undo_batch_commit_blocked";
-        const neutralized = this.neutralizeUnsafeTaskMovedUndoHistory(activeOperation, failureReason);
-        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_undo_semantic_not_recorded", {
-          task_id: sourceBridgeTaskId,
-          entry_id: sourceBridgeEntryId,
-          date: moveDate,
-          section_id: String(destinationSection && destinationSection.id || "").trim(),
-          before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
-          after_order_entry_ids: destinationAfterSaveInfo.entryIds,
-          enqueue_attempted: false,
-          enqueue_skipped_reason: failureReason,
-          message: `D&Dは同期済みですが、TaskMoved Undo/Redo意味論を履歴へ保存できませんでした。local-only Undoを停止しました（removed=${neutralized.removed}）。`
-        }, { persist: true });
-        this.discardPendingTaskchuteUndoBatch({
-          taskMovedUndoOperationId,
-          reason: failureReason
-        });
-        new obsidian.Notice("移動は同期されましたが、安全なUndo履歴を作成できなかったため、この移動のUndoを無効にしました。");
-        return false;
-      }
+      if (!semanticHandoff.ok) return false;
       return true;
     } catch (e) {
       console.error("Taskchute moveTaskByDrag error", e);
@@ -38624,6 +38663,7 @@ class TaskchutePlugin extends obsidian.Plugin {
 
   async moveTaskToSectionByDrag(sourceKey, destinationSectionIdOrName, view, options = {}) {
     if (this.blockIfTaskchuteSyncBusy && this.blockIfTaskchuteSyncBusy("ドラッグ＆ドロップ")) return false;
+    let taskMovedUndoOperationId = "";
     try {
       sourceKey = String(sourceKey || "");
       if (!sourceKey) return false;
@@ -38635,7 +38675,19 @@ class TaskchutePlugin extends obsidian.Plugin {
         return await this.moveSelectedTaskGroupToSectionByDrag(sourceKey, destinationSectionIdOrName, view, options);
       }
 
-      const notePath = this.getTaskchutePath(view && view.selectedDate ? view.selectedDate : this.getActiveViewDate());
+      const canWrite = await this.ensureDeviceWriteGuard("ドラッグ＆ドロップ", {
+        deviceWriterOperation: "task-drag-section-move",
+        userOperationEntry: true
+      });
+      if (!canWrite) return false;
+      this.commitPendingTaskchuteUndoBatch();
+      if (this.pendingTaskchuteUndoBatch) {
+        new obsidian.Notice("別のUndo履歴を確定できないため、ドラッグ移動を開始できませんでした。");
+        return false;
+      }
+
+      const moveDate = view && view.selectedDate ? view.selectedDate : this.getActiveViewDate();
+      const notePath = this.getTaskchutePath(moveDate);
       let md = await readFileText(this.app, notePath);
       let lines = md.split(/\r?\n/);
 
@@ -38660,6 +38712,8 @@ class TaskchutePlugin extends obsidian.Plugin {
             items.push({
               index: i,
               id: taskKeyFromTaskLine(srcLines[i]),
+              entryId: String(entryIdFromTaskLine(srcLines[i]) || "").trim(),
+              taskId: String(taskIdFromTaskLine(srcLines[i]) || "").trim(),
               file: link ? link.file : "",
               title: link ? link.alias : "",
               section: currentSection,
@@ -38672,13 +38726,29 @@ class TaskchutePlugin extends obsidian.Plugin {
       };
 
       const items = collectTaskItems(lines);
-      const sourceItem = items.find(item => item.id === sourceKey);
+      const sourceCandidates = items.filter(item => item.entryId === sourceKey);
+      const sourceItem = sourceCandidates.length === 1 ? sourceCandidates[0] : null;
       if (!sourceItem) {
-        new obsidian.Notice("移動するタスクが見つかりません");
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_section_source_identity_blocked", {
+          source_key: sourceKey,
+          target_section_id: sec.id,
+          date: moveDate,
+          operation_lifecycle_attempted: false,
+          failure_reason: sourceCandidates.length ? "source_entry_id_ambiguous" : "source_entry_id_missing",
+          enqueue_skipped_reason: sourceCandidates.length ? "source_entry_id_ambiguous" : "source_entry_id_missing",
+          message: "section target D&Dのsource entry_idを一意に解決できませんでした。"
+        }, { persist: true });
+        new obsidian.Notice("移動するタスクをentry_idで一意に解決できません");
         return false;
       }
       if ((sourceItem.section || "") === sec.name) return false;
       const sourceTask = this.getTaskFromViewByKey(sourceKey, view);
+      const sourceBridgeTaskId = String(sourceTask && (sourceTask.taskId || sourceTask.task_id) || sourceItem.taskId || "").trim();
+      const sourceBridgeEntryId = String(sourceItem.entryId || "").trim();
+      if (!sourceBridgeTaskId || !sourceBridgeEntryId) return false;
+      const sourceSection = getSectionByNameOrId(this.settings, sourceItem.section);
+      if (!sourceSection) return false;
+      const sourceSectionBeforeInfo = getTaskSectionOrderInfoFromMarkdown(md, sourceItem.section);
       const sourceRuntimeProtected = (this.runtime.running && this.sessionMatchesKey(this.runtime.running, sourceItem.id))
         || (Array.isArray(this.runtime.paused) && this.runtime.paused.some(p => p && this.sessionMatchesKey(p, sourceItem.id)));
       if (isTaskTopProtectedForDefaultOrder(sourceTask) || !!sourceItem.checked || sourceRuntimeProtected) {
@@ -38691,6 +38761,30 @@ class TaskchutePlugin extends obsidian.Plugin {
         if (scope === "cancel") return false;
         routineEditScope = scope;
       }
+
+      const undoOperation = this.beginTaskMovedUndoOperation(sourceBridgeTaskId, sourceBridgeEntryId, {
+        beforeFilePath: notePath,
+        beforeFileContent: md
+      });
+      if (!undoOperation.ok) {
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_undo_operation_not_started", {
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          source_key: sourceKey,
+          target_section_id: sec.id,
+          route_classification: "single-section",
+          dispatched_method_name: "moveTaskToSectionByDrag",
+          operation_lifecycle_attempted: true,
+          enqueue_attempted: false,
+          enqueue_skipped_reason: undoOperation.reason,
+          failure_reason: undoOperation.reason,
+          message: "section target D&DのTaskMoved Undo lifecycleを開始できませんでした。"
+        }, { persist: true });
+        new obsidian.Notice("安全なUndo履歴を準備できないため、ドラッグ移動を停止しました。");
+        return false;
+      }
+      taskMovedUndoOperationId = undoOperation.operation_id;
 
       // セクションへドラッグしても開始予定は自動変更しない。
       const destinationStartPlan = sourceTask && sourceTask.startPlan != null ? String(sourceTask.startPlan || "") : (tcMetaValue(lines[sourceItem.index], "start_plan") || "");
@@ -38730,13 +38824,58 @@ class TaskchutePlugin extends obsidian.Plugin {
       };
       lines = insertLineIntoSection(lines, sec.name, movedLine);
       this.ensureSectionExpandedForIncomingTask(sec.id || sec.name);
-      if (this.isTaskchuteWriteAborted(await this.writeFileText(notePath, lines.join("\n")))) {
+      if (this.isTaskchuteWriteAborted(await this.writeFileText(notePath, lines.join("\n"), {
+        undoLabel: "タスク移動",
+        taskMovedUndoOperationId
+      }))) {
           await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
           return false;
         }
 
+      let confirmedMarkdown = await readFileText(this.app, notePath);
+      const confirmedOccurrences = parseTasks(confirmedMarkdown).filter(task =>
+        String(task && task.entryId || "").trim() === sourceBridgeEntryId
+      );
+      const confirmedOccurrence = confirmedOccurrences.length === 1 ? confirmedOccurrences[0] : null;
+      const confirmedSectionIdentity = confirmedOccurrence
+        ? resolveTaskLineSectionIdentityForPhysicalHeading(
+          confirmedOccurrence.line,
+          this.settings,
+          confirmedOccurrence.section,
+          { normalizeMissing: false }
+        )
+        : null;
+      const confirmedIdentityOk = !!confirmedOccurrence
+        && String(confirmedOccurrence.taskId || "").trim() === sourceBridgeTaskId
+        && !!confirmedSectionIdentity
+        && confirmedSectionIdentity.ok
+        && String(confirmedSectionIdentity.physical_section_id || "").trim() === String(sec.id || "").trim()
+        && String(confirmedSectionIdentity.resolved_section_id || "").trim() === String(sec.id || "").trim();
+      if (!confirmedIdentityOk) {
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_section_identity_verify_failed", {
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          source_key: sourceKey,
+          target_section_id: sec.id,
+          physical_section_id: String(confirmedSectionIdentity && confirmedSectionIdentity.physical_section_id || "").trim(),
+          resolved_section_id: String(confirmedSectionIdentity && confirmedSectionIdentity.resolved_section_id || "").trim(),
+          route_classification: "single-section",
+          dispatched_method_name: "moveTaskToSectionByDrag",
+          operation_lifecycle_attempted: true,
+          operation_id: taskMovedUndoOperationId,
+          failure_reason: confirmedSectionIdentity && confirmedSectionIdentity.reason_code || "saved_entry_identity_unresolved",
+          enqueue_skipped_reason: confirmedSectionIdentity && confirmedSectionIdentity.reason_code || "saved_entry_identity_unresolved",
+          message: "section target D&Dの保存後entry identity / sectionを検証できませんでした。"
+        }, { persist: true });
+        return false;
+      }
+
       if (routineEditScope !== "today") {
-        const metaOk = await this.updateTaskSectionMetadata(sourceItem.file, sec.name);
+        const metaOk = await this.updateTaskSectionMetadata(sourceItem.file, sec.name, undefined, {
+          undoLabel: "タスク移動",
+          taskMovedUndoOperationId
+        });
         if (metaOk === false) {
           await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
           return false;
@@ -38758,7 +38897,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
 
       this.runtime.selectedTaskId = sourceKey;
-      if (this.isTaskchuteWriteAborted(await this.savePluginData())) {
+      if (this.isTaskchuteWriteAborted(await this.savePluginData({
+        deviceWriterOperation: "task-drag-section-move-runtime-save",
+        taskMovedUndoOperationId
+      }))) {
         await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true });
         return false;
       }
@@ -38768,18 +38910,109 @@ class TaskchutePlugin extends obsidian.Plugin {
         await this.moveTaskRowToSectionInViews(sourceKey, sec.name, placement === "top" ? 1 : -1);
       }
       this.updateSelectionInViews();
-      try {
-        await this.enqueueBridgeTaskMoved(sourceTask, {
-          from: { date: view && view.selectedDate ? view.selectedDate : this.getActiveViewDate(), section: sourceItem.section, index: sourceItem.index },
-          to: { date: view && view.selectedDate ? view.selectedDate : this.getActiveViewDate(), section: sec.id || sec.name, index: placement === "top" ? 0 : lines.length },
-          moveType: "section-change"
-        });
-      } catch (e) {}
+      confirmedMarkdown = await readFileText(this.app, notePath);
+      const destinationAfterSaveInfo = getTaskSectionOrderInfoFromMarkdown(confirmedMarkdown, sec.name);
+      const destinationEntryIndex = destinationAfterSaveInfo.entryIds.indexOf(sourceBridgeEntryId);
+      if (destinationEntryIndex < 0) return false;
+      const bridgeTask = Object.assign({}, sourceTask || {}, {
+        taskId: sourceBridgeTaskId,
+        entryId: sourceBridgeEntryId,
+        taskKey: sourceBridgeEntryId,
+        sourceDate: moveDate,
+        date: moveDate,
+        section: sec.name,
+        sectionId: sec.id
+      });
+      await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_enqueue_attempted", {
+        task_id: sourceBridgeTaskId,
+        entry_id: sourceBridgeEntryId,
+        date: moveDate,
+        source_key: sourceKey,
+        target_section_id: sec.id,
+        source_physical_section_label: sourceItem.section,
+        destination_physical_section_label: sec.name,
+        before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+        after_order_entry_ids: destinationAfterSaveInfo.entryIds,
+        route_classification: "single-section",
+        dispatched_method_name: "moveTaskToSectionByDrag",
+        operation_lifecycle_attempted: true,
+        operation_id: taskMovedUndoOperationId,
+        enqueue_attempted: true,
+        message: "保存後検証済みのsection target D&D TaskMovedをenqueueします。"
+      });
+      const bridgeEnqueued = !!(await this.enqueueBridgeTaskMoved(bridgeTask, {
+        from: { date: moveDate, section: sourceSection.id || sourceItem.section, index: sourceItem.index },
+        to: { date: moveDate, section: sec.id || sec.name, index: destinationEntryIndex },
+        moveType: "section-change"
+      }));
+      await this.recordBridgeTaskDragMoveDiagnostic(bridgeEnqueued ? "drag_drop_enqueue_succeeded" : "drag_drop_enqueue_failed", {
+        task_id: sourceBridgeTaskId,
+        entry_id: sourceBridgeEntryId,
+        date: moveDate,
+        source_key: sourceKey,
+        target_section_id: sec.id,
+        route_classification: "single-section",
+        dispatched_method_name: "moveTaskToSectionByDrag",
+        operation_lifecycle_attempted: true,
+        operation_id: taskMovedUndoOperationId,
+        enqueue_attempted: true,
+        enqueue_result: bridgeEnqueued,
+        failure_reason: bridgeEnqueued ? "" : "enqueue_returned_false",
+        message: bridgeEnqueued ? "section target D&D TaskMovedをoutboxへ追加しました。" : "section target D&D TaskMovedをoutboxへ追加できませんでした。"
+      }, { persist: true });
+      if (!bridgeEnqueued) return false;
+
+      const semanticHandoff = await this.finalizeTaskMovedUndoSemanticHandoff({
+        taskMovedUndoOperationId,
+        task_id: sourceBridgeTaskId,
+        entry_id: sourceBridgeEntryId,
+        date: moveDate,
+        before: {
+          date: moveDate,
+          section_id: sourceSection.id,
+          section_label: sourceItem.section,
+          entry_order_ids: sourceSectionBeforeInfo.entryIds,
+          task_order_ids: sourceSectionBeforeInfo.taskIds
+        },
+        after: {
+          date: moveDate,
+          section_id: sec.id,
+          section_label: sec.name,
+          entry_order_ids: destinationAfterSaveInfo.entryIds,
+          task_order_ids: destinationAfterSaveInfo.taskIds
+        },
+        original_event_id: this.settings.bridgeLastTaskMovedEventId,
+        original_payload_source: "confirmed-markdown-v2",
+        before_file_path: notePath,
+        before_file_content: md,
+        section_id: sec.id,
+        diagnostic: {
+          source_key: sourceKey,
+          target_section_id: sec.id,
+          route_classification: "single-section",
+          dispatched_method_name: "moveTaskToSectionByDrag"
+        }
+      });
+      if (!semanticHandoff.ok) return false;
       return true;
     } catch (e) {
       console.error("Taskchute moveTaskToSectionByDrag error", e);
       new obsidian.Notice("セクションへのドラッグ移動に失敗: " + (e && e.message ? e.message : e));
       return false;
+    } finally {
+      if (taskMovedUndoOperationId
+        && this.pendingTaskchuteUndoBatch
+        && this.pendingTaskchuteUndoBatch.taskMovedUndoOperationId === taskMovedUndoOperationId) {
+        this.discardPendingTaskchuteUndoBatch({
+          taskMovedUndoOperationId,
+          reason: "operation_finally_without_semantic_commit"
+        });
+      }
+      if (this.activeTaskMovedUndoOperation
+        && this.activeTaskMovedUndoOperation.operation_id === taskMovedUndoOperationId) {
+        this.activeTaskMovedUndoOperation = null;
+      }
+      if (!this.activeTaskMovedUndoOperation) this.taskMovedUndoCaptureInProgress = false;
     }
   }
 
@@ -44912,6 +45145,7 @@ class TaskchuteView extends obsidian.ItemView {
     state.active = true;
     this.draggingTaskKey = state.key;
     this.plugin.selectTask(state.key);
+    this.recordTaskBoardDragStartObserved(state.key, "activateMobileTaskRowQuickDrag");
     try { state.row.draggable = false; } catch (e) {}
     try { if (state.row.setPointerCapture && state.pointerId !== undefined) state.row.setPointerCapture(state.pointerId); } catch (e) {}
 
@@ -45060,12 +45294,23 @@ class TaskchuteView extends obsidian.ItemView {
     this.endMobileTaskRowQuickDrag(state);
     if (targetKey && position) {
       this.plugin.selectTask(sourceKey);
-      await this.plugin.moveTaskByDrag(sourceKey, targetKey, position, this);
-      return;
+      return await this.dispatchTaskBoardTaskDrop({
+        sourceKey,
+        targetKey,
+        position,
+        uiHandler: "dropMobileTaskRowQuickDrag",
+        routeName: "mobile-quick-drag-row"
+      });
     }
     if (sectionIdOrName) {
       this.plugin.selectTask(sourceKey);
-      await this.plugin.moveTaskToSectionByDrag(sourceKey, sectionIdOrName, this, { placement: "bottom" });
+      return await this.dispatchTaskBoardTaskDrop({
+        sourceKey,
+        targetSectionId: sectionIdOrName,
+        placement: "bottom",
+        uiHandler: "dropMobileTaskRowQuickDrag",
+        routeName: "mobile-quick-drag-section"
+      });
     }
   }
 
@@ -45086,6 +45331,101 @@ class TaskchuteView extends obsidian.ItemView {
     this.clearTaskDropClasses();
     this.clearSectionDropClasses();
     if (state.cleanup) state.cleanup();
+  }
+
+  recordTaskBoardDragStartObserved(sourceKey, uiHandler = "task-row-dragstart") {
+    const key = String(sourceKey || "").trim();
+    if (!key || !this.plugin || !this.plugin.recordBridgeTaskDragMoveDiagnostic) return;
+    const sourceTask = this.plugin.getTaskFromViewByKey(key, this);
+    const selected = Array.isArray(this.plugin.runtime && this.plugin.runtime.multiSelectedTaskIds)
+      ? this.plugin.runtime.multiSelectedTaskIds.filter(Boolean)
+      : [];
+    void this.plugin.recordBridgeTaskDragMoveDiagnostic("taskboard_dragstart_observed", {
+      ui_handler: uiHandler,
+      route_name: "taskboard-dragstart",
+      source_key: key,
+      selected_task_id: String(this.plugin.runtime && this.plugin.runtime.selectedTaskId || "").trim(),
+      multi_selected_count: selected.length,
+      task_id: String(sourceTask && (sourceTask.taskId || sourceTask.task_id) || "").trim(),
+      entry_id: String(sourceTask && (sourceTask.entryId || sourceTask.entry_id) || key).trim(),
+      operation_lifecycle_attempted: false,
+      message: "TaskBoard task dragstartを観測しました。"
+    }, { persist: true });
+  }
+
+  async dispatchTaskBoardTaskDrop(route = {}) {
+    const sourceKey = String(route.sourceKey || "").trim();
+    const targetKey = String(route.targetKey || "").trim();
+    const targetSectionId = String(route.targetSectionId || "").trim();
+    const position = route.position === "after" ? "after" : "before";
+    const uiHandler = String(route.uiHandler || "taskboard-drop").trim();
+    const routeName = String(route.routeName || "taskboard-drop-dispatch").trim();
+    const selected = Array.isArray(this.plugin.runtime && this.plugin.runtime.multiSelectedTaskIds)
+      ? this.plugin.runtime.multiSelectedTaskIds.filter(Boolean)
+      : [];
+    const isGroup = selected.length > 1 && selected.includes(sourceKey);
+    const targetKind = targetKey ? "row" : (targetSectionId ? "section" : "unresolved");
+    const routeClassification = `${isGroup ? "group" : "single"}-${targetKind}`;
+    const dispatchedMethodName = targetKind === "row" ? "moveTaskByDrag" : (targetKind === "section" ? "moveTaskToSectionByDrag" : "");
+    const operationLifecycleAttempted = !isGroup && (targetKind === "row" || targetKind === "section");
+    const sourceTask = this.plugin.getTaskFromViewByKey(sourceKey, this);
+    const sourceTaskId = String(sourceTask && (sourceTask.taskId || sourceTask.task_id) || "").trim();
+    const sourceEntryId = String(sourceTask && (sourceTask.entryId || sourceTask.entry_id) || sourceKey).trim();
+    const diagnosticBase = {
+      ui_handler: uiHandler,
+      route_name: routeName,
+      source_key: sourceKey,
+      target_key: targetKey,
+      target_section_id: targetSectionId,
+      drop_position: targetKind === "row" ? position : String(route.placement || "bottom"),
+      selected_task_id: String(this.plugin.runtime && this.plugin.runtime.selectedTaskId || "").trim(),
+      multi_selected_count: selected.length,
+      task_id: sourceTaskId,
+      entry_id: sourceEntryId,
+      route_classification: routeClassification,
+      dispatched_method_name: dispatchedMethodName,
+      operation_lifecycle_attempted: operationLifecycleAttempted
+    };
+    await this.plugin.recordBridgeTaskDragMoveDiagnostic("taskboard_drop_observed", Object.assign({}, diagnosticBase, {
+      message: "TaskBoard drop callbackを観測しました。"
+    }), { persist: true });
+    await this.plugin.recordBridgeTaskDragMoveDiagnostic("taskboard_drop_route_resolved", Object.assign({}, diagnosticBase, {
+      failure_reason: targetKind === "unresolved" ? "drop_target_unresolved" : "",
+      message: targetKind === "unresolved" ? "TaskBoard drop routeを解決できませんでした。" : "TaskBoard drop routeを解決しました。"
+    }));
+    if (!sourceKey || targetKind === "unresolved") {
+      await this.plugin.recordBridgeTaskDragMoveDiagnostic("taskboard_drop_lifecycle_dispatch_completed", Object.assign({}, diagnosticBase, {
+        final_route_result: false,
+        failure_reason: !sourceKey ? "source_key_missing" : "drop_target_unresolved",
+        message: "TaskBoard dropをdispatchできませんでした。"
+      }), { persist: true });
+      return false;
+    }
+    await this.plugin.recordBridgeTaskDragMoveDiagnostic("taskboard_drop_lifecycle_dispatch_started", Object.assign({}, diagnosticBase, {
+      message: operationLifecycleAttempted ? "single-task D&D lifecycle gatewayへdispatchします。" : "group D&D helperへdispatchします。"
+    }));
+    let result = false;
+    let failureReason = "";
+    try {
+      result = targetKind === "row"
+        ? !!(await this.plugin.moveTaskByDrag(sourceKey, targetKey, position, this))
+        : !!(await this.plugin.moveTaskToSectionByDrag(sourceKey, targetSectionId, this, { placement: route.placement || "bottom" }));
+    } catch (e) {
+      result = false;
+      failureReason = "dispatch_exception";
+    }
+    const lifecycleDiagnostic = (Array.isArray(this.plugin.settings && this.plugin.settings.bridgeTaskDragMoveDiagnostics)
+      ? this.plugin.settings.bridgeTaskDragMoveDiagnostics
+      : []).slice().reverse().find(item => item
+        && item.phase === "taskmoved_undo_batch_created"
+        && (!sourceEntryId || String(item.entry_id || "").trim() === sourceEntryId));
+    await this.plugin.recordBridgeTaskDragMoveDiagnostic("taskboard_drop_lifecycle_dispatch_completed", Object.assign({}, diagnosticBase, {
+      operation_id: String(lifecycleDiagnostic && lifecycleDiagnostic.operation_id || "").trim(),
+      final_route_result: result,
+      failure_reason: result ? "" : (failureReason || "dispatch_returned_false"),
+      message: result ? "TaskBoard D&D routeを完了しました。" : "TaskBoard D&D routeは通常成功として完了しませんでした。"
+    }), { persist: true });
+    return result;
   }
 
   setupSectionDropTarget(sectionEl, sec, targetEl) {
@@ -45182,11 +45522,22 @@ class TaskchuteView extends obsidian.ItemView {
     if (resolved.type === "row" && resolved.key) {
       const movingKeys = this.getMovingTaskKeysForDrag(sourceKey);
       if (resolved.key === sourceKey || movingKeys.has(resolved.key)) return;
-      await this.plugin.moveTaskByDrag(sourceKey, resolved.key, resolved.position || "after", this);
-      return;
+      return await this.dispatchTaskBoardTaskDrop({
+        sourceKey,
+        targetKey: resolved.key,
+        position: resolved.position || "after",
+        uiHandler: "dropTaskBoardDrag",
+        routeName: "board-resolver-row"
+      });
     }
     if (resolved.type === "section" && resolved.sectionIdOrName) {
-      await this.plugin.moveTaskToSectionByDrag(sourceKey, resolved.sectionIdOrName, this, { placement: resolved.placement || "bottom" });
+      return await this.dispatchTaskBoardTaskDrop({
+        sourceKey,
+        targetSectionId: resolved.sectionIdOrName,
+        placement: resolved.placement || "bottom",
+        uiHandler: "dropTaskBoardDrag",
+        routeName: "board-resolver-section"
+      });
     }
   }
 
@@ -45372,6 +45723,7 @@ class TaskchuteView extends obsidian.ItemView {
       return;
     }
     this.draggingTaskKey = key;
+    this.recordTaskBoardDragStartObserved(key, "startTaskRowDrag");
     this.startTaskDragAutoScroll(evt);
     row.addClass("is-dragging-task");
     const isMobileDrag = !!(this.isMobile && this.isMobile());
@@ -45476,7 +45828,13 @@ class TaskchuteView extends obsidian.ItemView {
     const position = resolved && resolved.position ? resolved.position : this.getTaskDropPositionFromPoint(evt, dropRow);
     this.clearTaskDropClasses();
     this.plugin.selectTask(sourceKey);
-    await this.plugin.moveTaskByDrag(sourceKey, targetKey, position, this);
+    return await this.dispatchTaskBoardTaskDrop({
+      sourceKey,
+      targetKey,
+      position,
+      uiHandler: "dropTaskRowDrag",
+      routeName: "native-row-target"
+    });
   }
 
   endTaskRowDrag(row) {
@@ -45556,8 +45914,13 @@ class TaskchuteView extends obsidian.ItemView {
       this.clearTaskDropClasses();
       this.clearSectionDropClasses();
       this.plugin.selectTask(sourceKey);
-      await this.plugin.moveTaskByDrag(sourceKey, resolved.key, resolved.position || "after", this);
-      return;
+      return await this.dispatchTaskBoardTaskDrop({
+        sourceKey,
+        targetKey: resolved.key,
+        position: resolved.position || "after",
+        uiHandler: "dropTaskToSection",
+        routeName: "section-body-nearest-row"
+      });
     }
     if (evt.target && body.contains && !body.contains(evt.target)) return;
 
@@ -45568,7 +45931,13 @@ class TaskchuteView extends obsidian.ItemView {
     this.clearSectionDropClasses();
     this.plugin.selectTask(sourceKey);
     // 空セクションだけを受け付けるため、挿入位置は常にそのセクションの本文末尾。
-    await this.plugin.moveTaskToSectionByDrag(sourceKey, sec.id || sec.name, this, { placement: "bottom" });
+    return await this.dispatchTaskBoardTaskDrop({
+      sourceKey,
+      targetSectionId: sec.id || sec.name,
+      placement: "bottom",
+      uiHandler: "dropTaskToSection",
+      routeName: "empty-section-body"
+    });
   }
 
   clearSectionDropClasses(exceptEl = null) {
@@ -56269,4 +56638,5 @@ class TaskchuteSettingTab extends obsidian.PluginSettingTab {
 // Obsidian currently loads this plugin through manifest.json -> main.js.
 // ============================================================================
 
+TaskchutePlugin.TaskchuteView = TaskchuteView;
 module.exports = TaskchutePlugin;

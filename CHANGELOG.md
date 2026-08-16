@@ -8,6 +8,30 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.70 - 2026-08-16
+
+Type: Integrated runtime candidate, not yet test-distributed
+
+### Changed
+
+- TaskBoard row / section-container / empty-section / mobile quick dropを共通`dispatchTaskBoardTaskDrop()` gatewayへ接続し、mutation前からrouteを診断する。
+- legacy section-target D&D helperへoperation-scoped TaskMoved Undo lifecycleを追加し、最初のwrite前にbatchを開始する。
+- row / section helperのsemantic build、attachment、exact commit、history-top検証、failure barrierを共通finalizerへ集約した。
+- route diagnosticsへhandler、source / target、selection、classification、dispatch method、operation、result、failure reasonを追加した。
+- `manifest.json`を`0.6.70`へ更新した。
+
+### Verification
+
+- actual `dropTaskBoardDrag()` row / section target、entry-like selection、single enqueue、failure barrier: synthetic PASS
+- v0.6.69 direct handoff、v0.6.68 shortcut routing、v0.6.67 lifecycle: PASS
+- TMV4、interrupt continuation、rename、insert-below focused regressions: PASS
+- v0.6.70 real Vault / remote / mobile: `NOT_VERIFIED`
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.70.md`](docs/release/v0.6.70.md)
+
+---
+
 ## v0.6.69 - 2026-08-16
 
 Type: Runtime BRAT Prerelease for device testing
@@ -26,6 +50,7 @@ Type: Runtime BRAT Prerelease for device testing
 - `dnd-semantic-undo-handoff-v0669.js`: actual cross-section / same-section D&D、Undo / Redo inverse、capture / attach / fingerprint / commit failure barrier、duplicate rejection: PASS
 - v0.6.68 routing、v0.6.67 semantic lifecycle、v0.6.66 Undo / Redo、TMV4、interrupt continuation、rename、insert-below focused tests: PASS
 - v0.6.69 real Vault / remote / mobile: `NOT_VERIFIED`
+- post-prerelease `UNDO-BRIDGE-CROSS-SECTION-01`: `FAIL`。fixture `undo-v069-cross-normal`、observed entry E-20260816-0028。D&D直後・Ctrl+Z前にactive operation / pending batchがnull、top generic snapshotはoperation / batch / fingerprint / semanticなし、lifecycle / drag diagnosticsも空。Ctrl+Zは実行していない。
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
 Release notes: [`docs/release/v0.6.69.md`](docs/release/v0.6.69.md)

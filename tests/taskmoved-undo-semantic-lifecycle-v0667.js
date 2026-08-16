@@ -204,14 +204,16 @@ const wrongMultiOperation = createOperation({ task_id: "T-SAME", entry_id: "E-1"
 assert.strictEqual(context.validate(sameSection.semantic, wrongMultiOperation).reason, "entry_identity_mismatch");
 
 const dragMethod = extractMethod("  async moveTaskByDrag(", "\n  async moveSelectedTaskGroupToSectionByDrag(");
+const semanticFinalizer = extractMethod("  async finalizeTaskMovedUndoSemanticHandoff(", "\n  async moveTaskByDrag(");
 assert(/beginTaskMovedUndoOperation\(sourceBridgeTaskId,\s*sourceBridgeEntryId,\s*\{/.test(dragMethod));
 assert(dragMethod.includes("taskMovedUndoOperationId"));
-assert(dragMethod.includes("forceTaskMovedSemanticCommit: true"));
+assert(dragMethod.includes("finalizeTaskMovedUndoSemanticHandoff"));
+assert(semanticFinalizer.includes("forceTaskMovedSemanticCommit: true"));
 assert(dragMethod.includes("operation_finally_without_semantic_commit"));
 assert(dragMethod.indexOf("beginTaskMovedUndoOperation") < dragMethod.indexOf("writeFileText(notePath, movedMarkdown"), "operation identity must exist before the first D&D write");
-assert(dragMethod.indexOf("if (!bridgeEnqueued)") < dragMethod.indexOf("attachBridgeTaskMovedSemanticToPendingUndoBatch"), "semantic is attached only after forward enqueue");
-assert.strictEqual((dragMethod.match(/attachBridgeTaskMovedSemanticToPendingUndoBatch\(/g) || []).length, 1);
-assert.strictEqual((dragMethod.match(/forceTaskMovedSemanticCommit: true/g) || []).length, 1);
+assert(dragMethod.indexOf("if (!bridgeEnqueued)") < dragMethod.indexOf("finalizeTaskMovedUndoSemanticHandoff"), "semantic handoff runs only after forward enqueue");
+assert.strictEqual((semanticFinalizer.match(/attachBridgeTaskMovedSemanticToPendingUndoBatch\(/g) || []).length, 1);
+assert.strictEqual((semanticFinalizer.match(/forceTaskMovedSemanticCommit: true/g) || []).length, 1);
 
 const scheduleMethod = extractMethod("  scheduleCommitTaskchuteUndoBatch()", "\n  discardPendingTaskchuteUndoBatch(");
 assert(scheduleMethod.includes("batch.taskMovedUndoSemanticRequired"));

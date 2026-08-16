@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: main統合・BRAT試験配布済みのv0.6.69。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護し、TaskBoard shortcut ownershipをcapture-phase gatewayへ集約する。v0.6.69はIntegratedかつPrereleased / Test-distributed、synthetic PASS、実機`NOT_VERIFIED`で、Verified / Releasedではない。公開済みv0.6.69以前のassetsは変更しない。
+調査基準: main統合済み・未配布のv0.6.70。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護する。TaskBoardのrow / section-container DOM dropは共通route gatewayへ集約し、shortcut ownershipはcapture-phase gatewayが扱う。v0.6.70はIntegrated、synthetic PASS、実機`NOT_VERIFIED`で、Prereleased / Verified / Releasedではない。公開済みv0.6.69以前のassetsは変更しない。
 
 ## 1. 概要
 
@@ -27,7 +27,7 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。約55,309行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.66`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.70`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
@@ -40,6 +40,7 @@ TaskchutePlugin + ItemViews (main.js)
 | `tests/interrupt-continuation-taskmoved-preflight-v0665.js` | 後続continuationによるTaskMoved v4 send-preflight order projectionとstrict fallbackを検証するfocused synthetic test。 |
 | `tests/undo-redo-taskmoved-bridge-v0666.js` | same-date D&D Undo / Redoのsemantic movement、multi-entry、outbox race、negative guardを検証するfocused synthetic test。 |
 | `tests/dnd-semantic-undo-handoff-v0669.js` | 実際の`moveTaskByDrag()`からhistory commit、shortcut gateway、Undo / Redo inverse enqueueまでを通し、handoff失敗barrierも検証するfocused integration test。 |
+| `tests/taskboard-dnd-route-integration-v0670.js` | 実際のTaskBoard `dropTaskBoardDrag()` callbackからrow / section targetをdispatchし、semantic lifecycle、exact entry selection、single enqueue、failure barrierを検証するroute integration test。 |
 
 `src/`、`package.json`、bundler設定、汎用test runnerは存在しない。`tests/`にはv0.6.59以降のfocused standalone testだけがある。
 
@@ -173,7 +174,9 @@ UI / command
 
 explicit insert-belowと「下にコピー」は`insertTaskAfterKey()`へ`insertPlacement=explicit-below`を渡す。これにより通常targetをprotected集合へ自動追加せず、物理Markdownをtarget直下へ保存してから同じanchorでvisual rowを追加する。実際のcompleted / running / paused keyは既存protected集合とstatus判定に残る。default top insertionはこのoptionを使わない。Inboundの明示interrupt continuationも、exact `continuation_after_entry_id`を保存前検証した後に限り同じoptionでanchor直下へ保存する。source側continuationは専用builderがexact final interrupt entry直後へ直接挿入する。
 
-同一sectionのtask-row D&Dは、操作前Markdownからsource entry orderを保存し、移動後Markdownを書き込み、再読込したtarget entry orderとの一致を確認してからD&D専用TaskMoved v4を1件enqueueする。UIのdrop handlerは`moveTaskByDrag()`へ集約され、no-op orderは保存・enqueue前に除外する。
+同一sectionのtask-row D&Dは、操作前Markdownからsource entry orderを保存し、移動後Markdownを書き込み、再読込したtarget entry orderとの一致を確認してからD&D専用TaskMoved v4を1件enqueueする。no-op orderは保存・enqueue前に除外する。
+
+v0.6.70ではrendered TaskBoardの`dropTaskBoardDrag()`、`dropTaskRowDrag()`、`dropTaskToSection()`、mobile quick dragが`TaskchuteView.dispatchTaskBoardTaskDrop()`へsource / target / position / selection modeを渡す。gatewayはroute診断を永続化し、row targetを`moveTaskByDrag()`、section-container / empty-section targetを`moveTaskToSectionByDrag()`へdispatchする。両single-task helperは最初の永続変更前に`beginTaskMovedUndoOperation()`を呼び、forward TaskMoved後に`finalizeTaskMovedUndoSemanticHandoff()`を共有する。group helperは別routeとして明示分類される。
 
 v0.6.67では`moveTaskByDrag()`が最初のD&D file write前にoperation ID / batch ID付きの専用Undo batchを作る。`captureTaskchuteUndoFileBefore()`とD&D内plugin-data captureは同じoperation IDだけを受け入れる。`scheduleCommitTaskchuteUndoBatch()`と通常`commitPendingTaskchuteUndoBatch()`は専用batchを確定せず、forward enqueue成功後にexact task / entry、before / after state、fingerprintを検証したD&D経路だけがforce commitする。失敗時は該当batchだけをfinallyで無効化する。
 

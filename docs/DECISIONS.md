@@ -255,6 +255,13 @@
 - 理由: v0.6.68ではshortcut routingはTaskChute-ownedだったが、top actionがsemanticlessのままdevだけを復元し、inverse TaskMovedを生成しなかった。失敗stageを観測できない状態で通常成功を返すこと自体がunsafeだったため。
 - 根拠: v0.6.68 T-0651 / E-20260816-0027、D1 seq 2396 / event `3a69bd85-bdc3-4858-8ddc-35245b1beb17`、`inspectCommittedTaskMovedUndoHistory()`、`neutralizeUnsafeTaskMovedUndoHistory()`、`tests/dnd-semantic-undo-handoff-v0669.js`。
 
+## D-042: TaskBoard D&DのUI routeを共通gatewayで所有する
+
+- 判断: rendered TaskBoardのrow drop、section-container / empty-section drop、mobile quick dragは、source / target / position / selection modeを`dispatchTaskBoardTaskDrop()`で分類・診断してから既存mutation helperへdispatchする。single-task same-date routeはhelperの違いにかかわらず、最初の永続変更前にoperation-scoped lifecycleを開始し、forward TaskMoved後に共通semantic finalizerを通る。
+- 判断: section-target helperを単純にrow helperへ置換せず、各helperの物理配置規則は維持する。group D&Dは現行の別helperを明示分類し、今回のsingle-task semantic contractの保証対象へ推測で含めない。
+- 理由: v0.6.69実機ではD&D直後・Ctrl+Z前にoperation / batch / semantic / lifecycle diagnosticが全て存在しなかった。source traceでrow targetは`moveTaskByDrag()`へ入る一方、section targetはlegacy `moveTaskToSectionByDrag()`がMarkdownとTaskMovedを更新しながらsemantic lifecycleを開始しないことを確認したため。
+- 根拠: `TaskchuteView.dispatchTaskBoardTaskDrop()`、`moveTaskByDrag()`、`moveTaskToSectionByDrag()`、`finalizeTaskMovedUndoSemanticHandoff()`、`tests/taskboard-dnd-route-integration-v0670.js`、v0.6.69 entry E-20260816-0028 device evidence。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

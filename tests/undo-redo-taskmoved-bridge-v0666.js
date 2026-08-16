@@ -191,8 +191,10 @@ const redoMethod = extractMethod("  async redoLastTaskchuteAction(", "\n  getDel
 assert(redoMethod.indexOf("inspectTaskMovedUndoRedoPhysicalState") < redoMethod.indexOf("restoreTaskchuteActionSnapshot"), "redo source state must be verified before restore");
 
 const dragMethod = extractMethod("  async moveTaskByDrag(", "\n  async moveSelectedTaskGroupToSectionByDrag(");
-assert(dragMethod.includes("attachBridgeTaskMovedSemanticToPendingUndoBatch"));
-assert(dragMethod.indexOf("if (!bridgeEnqueued)") < dragMethod.indexOf("attachBridgeTaskMovedSemanticToPendingUndoBatch"), "history semantic must be attached only after forward enqueue succeeds");
+const semanticFinalizer = extractMethod("  async finalizeTaskMovedUndoSemanticHandoff(", "\n  async moveTaskByDrag(");
+assert(dragMethod.includes("finalizeTaskMovedUndoSemanticHandoff"));
+assert(semanticFinalizer.includes("attachBridgeTaskMovedSemanticToPendingUndoBatch"));
+assert(dragMethod.indexOf("if (!bridgeEnqueued)") < dragMethod.indexOf("finalizeTaskMovedUndoSemanticHandoff"), "history semantic must be attached only after forward enqueue succeeds");
 
 const appendMethod = extractMethod("  async appendBridgeTaskMovedCoalescedEvent(", "\n  async coalescePendingBridgeTaskMovedOutboxBeforeDrain(");
 assert(appendMethod.includes("hasActiveSameKey"));

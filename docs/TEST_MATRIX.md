@@ -2,12 +2,12 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.69 BRAT Prerelease（main統合・試験配布済み、実機`NOT_VERIFIED`）
+- 対象実装: v0.6.70（main統合済み・未配布、実機`NOT_VERIFIED`）
 - 配布済みcheckpoint: immutable `v0.6.69` BRAT Prerelease、tag target `d49ad9d217e21e6412f86abdee86cf9787191507`
-- v0.6.69はD&D semantic actionのhistory-top commit invariantを追加する。synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
+- v0.6.70は実TaskBoard row / section drop callbackを共通gatewayへ接続し、section-target helperにもoperation-scoped semantic lifecycleを適用する。synthetic PASSはdevice PASSへ昇格しない。
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
-- dev / remote / mobile列と`Status`列は、いずれもv0.6.69についての判定を示す。
+- dev / remote / mobile列と`Status`列は、いずれもv0.6.70についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
 - Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
@@ -173,7 +173,25 @@ v0.6.68はPrereleased / Test-distributedだが、このtargeted testはFAILで�
 | DND-SEMANTIC-HANDOFF-05: generic duplicate rejection / diagnostics preservation | `PASS` | `NOT_VERIFIED` |
 | v0.6.68 routing / v0.6.67 lifecycle / v0.6.66 Undo-Redo / TMV4 / interrupt / rename / insert-below | `PASS` | `NOT_VERIFIED` |
 
-## Current v0.6.69 Matrix
+## v0.6.69 Device Evidence
+
+| Test case | Result | Evidence |
+|---|---|---|
+| UNDO-BRIDGE-CROSS-SECTION-01 | `FAIL` | fixture=`undo-v069-cross-normal`、observed entry=`E-20260816-0028`（task_idは現存証跡から確定できないため記載しない）。single selectionで`selectedTaskId=E-20260816-0028`、`multiSelectedTaskIds=[]`、count=0。D&D直後・Ctrl+Z前にactive operation=null、pending batch=null、top=`taskchute-snapshot`、operation ID / batch ID / fingerprintは空、semantic=false、lifecycle / drag diagnosticsは空だった。失敗前提を検出したためCtrl+Zは意図的に実行せず、D1 sequenceも現存証跡から推測しない。 |
+
+v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立していない。v0.6.69はimmutable Prereleased / Test-distributedのまま、Verified / Releasedではない。
+
+## v0.6.70 Candidate Synthetic Evidence
+
+| Test case | Synthetic result | Device status |
+|---|---|---|
+| TASKBOARD-DND-ROUTE-01: actual section callback semantic lifecycle | `PASS` | `NOT_VERIFIED` |
+| TASKBOARD-DND-ROUTE-02: actual row callback semantic lifecycle | `PASS` | `NOT_VERIFIED` |
+| TASKBOARD-DND-ROUTE-03: entry-like selected state / exactly one enqueue | `PASS` | `NOT_VERIFIED` |
+| TASKBOARD-DND-ROUTE-04: UI callback failure barrier | `PASS` | `NOT_VERIFIED` |
+| v0.6.69 direct D&D / v0.6.68 routing / v0.6.67 lifecycle / v0.6.66 Undo-Redo / TMV4 / interrupt / rename / insert-below | `PASS` | `NOT_VERIFIED` |
+
+## Current v0.6.70 Matrix
 
 | Area | Test case | dev | remote | mobile | Last verified version | Status | Evidence / Notes |
 |---|---|---|---|---|---|---|---|
@@ -199,7 +217,7 @@ v0.6.68はPrereleased / Test-distributedだが、このtargeted testはFAILで�
 | TaskMoved v4 | TMV4-EMPTY-SOURCE-01: source sectionが空になる移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 | `NOT_VERIFIED` | v0.6.63で三端末PASS。v0.6.68のcurrent実機回帰は未実施。 |
 | TaskMoved v4 | TMV4-DATE-MOVE-01: 日付移動とdestination entry rekey | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 | `NOT_VERIFIED` | v0.6.63で三端末PASS。v0.6.68のcurrent実機回帰は未実施。 |
 | TaskMoved v4 | TMV4-MULTI-ENTRY-01: 同一task_id・異なるentry_id | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.65 | `NOT_VERIFIED` | v0.6.65ではT-0641のoriginal E-20260816-0016を維持し、continuation E-20260816-0018だけを移動して三端末PASS。v0.6.68のcurrent実機回帰は未実施。 |
-| TaskMoved Undo / Redo | UNDO-BRIDGE-CROSS-SECTION-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.68 FAIL | `NOT_VERIFIED` | v0.6.68ではT-0651 / E-20260816-0027のforward seq 2396がapplied。routingはTaskChute-ownedだったがtop action semantic=falseでinverse 0件。v0.6.69 history-top invariantはsynthetic PASS、実機再試験待ち。 |
+| TaskMoved Undo / Redo | UNDO-BRIDGE-CROSS-SECTION-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.69 FAIL | `NOT_VERIFIED` | v0.6.69ではentry E-20260816-0028のD&D直後・Ctrl+Z前にoperation / batch / semantic / diagnosticsが全て欠落。v0.6.70 UI route gatewayはsynthetic PASS、実機再試験待ち。 |
 | TaskMoved Undo / Redo | REDO-BRIDGE-CROSS-SECTION-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.66 synthetic PASS。Undo後のredo forward eventと三端末night収束を要確認。 |
 | TaskMoved Undo / Redo | UNDO / REDO-BRIDGE-SAME-SECTION-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | entry order authority、exactly one event、no-op 0 eventをsynthetic確認。実機未実施。 |
 | TaskMoved Undo / Redo | UNDO-BRIDGE-MULTI-ENTRY-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | duplicate task_id / distinct entry_idのsynthetic PASS。実機未実施。 |
@@ -225,7 +243,7 @@ v0.6.68はPrereleased / Test-distributedだが、このtargeted testはFAILで�
 | offline recovery | 通信断中の操作、復帰後drain、重複なし | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | retry実装はある。長時間・圏外・OS停止を含む実機保証なし。 |
 | mobile hidden / resume drain | hidden中fetch/apply/Ackなし、visible後再開 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3でPASS記録あり。v0.6.56での長時間hidden / resume回帰は未記録。 |
 
-v0.6.65のtargeted interrupt-continuation scopeはdevice evidenceでPASSしたが、v0.6.68 Undo Bridgeはsemanticless top actionでFAILした。v0.6.69のsemantic handoff invariantはsynthetic PASSのみである。通常interruptのresume / completion、TaskMoved複合全体、Ack / cursor、offline、safe rekeyなど未実施の行が残るため、plugin full matrixは`NOT_VERIFIED`を維持する。
+v0.6.65のtargeted interrupt-continuation scopeはdevice evidenceでPASSしたが、v0.6.69 Undo Bridgeは実UI routeでsemantic lifecycle自体が始まらずFAILした。v0.6.70 route integrationはsynthetic PASSのみである。通常interruptのresume / completion、TaskMoved複合全体、Ack / cursor、offline、safe rekeyなど未実施の行が残るため、plugin full matrixは`NOT_VERIFIED`を維持する。
 
 ## Historical Evidence
 

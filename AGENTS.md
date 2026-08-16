@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current implementation and immutable test distribution: `v0.6.69` BRAT Prerelease (tag target `d49ad9d217e21e6412f86abdee86cf9787191507`). v0.6.69 is Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No.
-- v0.6.68 real-device `UNDO-BRIDGE-CROSS-SECTION-01` proved shortcut routing worked but the top Undo action still lacked TaskMoved semantics, so Ctrl+Z restored only dev Markdown. v0.6.69 requires the exact semantic action to be committed at history top; otherwise it removes the exact unsafe generic snapshot and installs a blocking history marker. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
+- Current implementation: `v0.6.70` (Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No). Current immutable test distribution remains `v0.6.69` BRAT Prerelease at tag target `d49ad9d217e21e6412f86abdee86cf9787191507`.
+- v0.6.69 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed before Ctrl+Z: the actual TaskBoard D&D route left no active operation, pending batch, semantic action, or lifecycle diagnostic. v0.6.70 routes row and section-container drops through one UI dispatch gateway and applies the same operation-scoped semantic contract to the legacy section-target helper. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 
