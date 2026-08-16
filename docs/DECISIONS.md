@@ -208,6 +208,12 @@
 - 根拠: `collectTaskBoardPhysicalOccurrences()`、`resolveTaskDragPhysicalContext()`、`moveTaskByDrag()`、`addTask()`。
 - 理由: row metadata欠落後のreloadではruntime sectionも空になり得る。物理Markdownに一意なentryと見出しが残っているのにview stateをhandoffすると、正当なD&Dを`physical_section_unresolved`で停止できるため。明示row conflictの補正禁止と一般guardはD-033のまま維持する。
 
+## D-035: 日付移動ではboard occurrence identityをdestination dateへrekeyする
+
+- 判断: `task_id`とtask noteは維持する一方、日付移動後のboard occurrenceにはdestination date用の新`entry_id`を割り当て得る。TaskMoved date-changeはfrom / beforeに旧ID、to / afterとtop-levelに新IDを持たせ、各dateのentry orderは物理Markdownを正とする。
+- 根拠: `bulkMoveTasksToDate()`、`enqueueBridgeTaskMoved()`、`applyBridgeInboundTaskMovedEvent()`、`inspectBridgeTaskMovedDateChangeVaultState()`、v0.6.63 TMV4-DATE-MOVE-01。
+- 理由: `entry_id`はdate note上のboard occurrence / placement identityであり、destination dateへ移った配置はsource dateの旧identityに固定しない。受信側は旧IDでsourceを特定し、新IDでdestinationを検証する必要がある。このdate-move rekeyはRoutine occurrence collisionを扱うD-013のsafe rekeyとは別の通常TaskMoved semanticsである。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

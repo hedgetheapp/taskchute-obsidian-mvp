@@ -31,7 +31,7 @@ Type: Runtime BRAT Prerelease for device testing
 - existing TMV4 synthetic / no-op / duplicate prevention: PASS
 - v0.6.60 rename handoff regression: PASS
 - v0.6.61 insert-below order regression: PASS
-- v0.6.63 release全体の実Vault / 実mobile Verified判定: `NOT_VERIFIED`。TMV4-BASIC-01、TMV4-SECTION-HANDOFF-01、TMV4-CROSS-SECTION-01、TMV4-EMPTY-SOURCE-01だけcurrent device evidenceで`PASS`。
+- v0.6.63 release全体の実Vault / 実mobile Verified判定: `NOT_VERIFIED`。TMV4-BASIC-01、TMV4-SECTION-HANDOFF-01、TMV4-CROSS-SECTION-01、TMV4-EMPTY-SOURCE-01、TMV4-DATE-MOVE-01だけcurrent device evidenceで`PASS`。
 
 ### v0.6.62 device evidence
 
@@ -44,6 +44,7 @@ Type: Runtime BRAT Prerelease for device testing
 - TMV4-SECTION-HANDOFF-01: `PASS`。B rowのsection metadataだけを欠落させてreload後にD&Dし、`section=午後 section_id=afternoon`へ自動補完。dev物理Markdownと三端末UIはB/C/A。D1 seq 2285 / event `7aa1ac1a-d13d-4b74-a691-252502c7e4a3`はremote / mobile applied。
 - TMV4-CROSS-SECTION-01: `PASS`。T-0628 / E-20260816-0001を午後→午前へD&Dし、dev物理rowは`section=午前 section_id=morning`、三端末UIは午前。D1 seq 2298 / event `6ce13f31-c1bd-418b-bb85-46aa0d6a7036`はfrom=`afternoon`、to=`morning`でremote / mobile applied。
 - TMV4-EMPTY-SOURCE-01: `PASS`。T-0629 / E-20260816-0002を夜（`night`）→午後（`afternoon`）へD&Dし、dev / remoteの夜task countは0。D1 seq 2301 / event `c346e9aa-d15f-451f-a375-cebcc774e8f1`は`source_order_entry_ids=[]`、remote / mobile applied。
+- TMV4-DATE-MOVE-01: `PASS`。T-0630を2026-08-16 / E-20260816-0003から2026-08-17 / E-20260817-0001へ移動。task_idとtask noteを維持し、board entryをdestination date用identityへrekeyした。D1 seq 2303 / event `bf7d8eaf-7d1f-45df-8f1a-4a6d2c53fb77`はfrom/before=旧ID、to/after/top-level=新IDでremote / mobile applied。
 - TASK-ADD-SECTION-META-01: dev partial evidence。T-0628 / E-20260816-0001をgeneric add formから午後へ作成し、dev physical rowの`section=午後 section_id=afternoon`を確認。remote / mobile physical metadata未確認のためoverall `NOT_VERIFIED`。
 - このdocs-only追記は公開済みv0.6.63 tag / Release / assetsを変更せず、他の`NOT_VERIFIED`を昇格しない。
 

@@ -77,6 +77,10 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - v4 entry配列が不正な場合はv3へ黙って降格せず未Ack停止する。
 - v3以前はtask_id順を使用するが、同じsectionにduplicate task_idがある場合は安全停止する。
 - source sectionが移動後に空になる場合、v4の空`source_order_entry_ids`を許可する。
+- 日付移動はtask definition identityの`task_id`を維持し、destination date note上のboard occurrenceには新しい`entry_id`を割り当て得る。sourceとdestinationの`entry_id`が同一である必要はない。
+- TaskMoved date-change payloadは`from` / `before`にsource側の旧`entry_id`、`to` / `after`とtop-level `entry_id`にdestination側の新`entry_id`を保持する。
+- date-changeの`source_order_entry_ids`と`target_order_entry_ids`は、それぞれsource / destination date noteを保存後に再読込した物理identityを正とする。
+- inbound date-changeは旧`entry_id`でsource occurrenceを解決し、destination行を新`entry_id`へ書き換える。Ack前にsource旧entryの消失、destination新entryの存在、task_id、section/orderを再検証する。旧entryだけを移動後の固定主キーとして扱わない。
 - 同一sectionのtask-row D&Dは、移動前のentry/task順と保存後Markdownのentry/task順を明示的に取得する。順序が変わった場合だけ、保存後検証成功後に`task-drag-reorder-confirmed-markdown-v4`のTaskMovedを1件enqueueする。
 - 同一section D&D payloadは移動前の`source_order_entry_ids` / `source_order_task_ids`と移動後の`target_order_entry_ids` / `target_order_task_ids`を保持する。orderが同じno-opではTaskMovedを生成しない。
 - D&Dのsourceとrow drop targetはcurrent Markdownからexact `entry_id`で一意解決し、それぞれの物理見出しをsource/destination sectionの正とする。reload後のruntime task `section` / `sectionId`が空でも、この物理contextが一致すればsame-section D&Dを続行する。

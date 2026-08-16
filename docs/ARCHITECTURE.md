@@ -175,6 +175,8 @@ same-section D&Dでは、moved rowのraw `section` / `section_id`を物理見出
 
 v0.6.63では、D&D開始時にも`resolveTaskDragPhysicalContext()`がcurrent Markdownからsource/target `entry_id`を一意解決し、各行の物理見出しを取得する。same-section判定とrow metadata補完はこのcontextを使い、view/runtime taskの空sectionをhandoffしない。画面add formが通る`addTask()`も行作成時にsection metadataを保存する。
 
+日付移動は`bulkMoveTasksToDate()`がsource date noteから旧entryを除去し、destination date noteで`nextUniqueEntryId()`を使って新entryを採番する。`enqueueBridgeTaskMoved()`には旧identityを`from` / `before`、新identityを`to` / `after`およびtop-level `entry_id`として渡し、source / target orderも各date noteの保存後Markdownから構築する。inboundは`applyBridgeInboundTaskMovedEvent()`が旧entryでsourceを解決し、destination行を新entryへ書き換え、`inspectBridgeTaskMovedDateChangeVaultState()`で旧entry消失、新entry存在、両dateのentry orderとtarget sectionを再読込検証してからAckへ進む。task note link targetと`task_id`は変更しない。
+
 TaskCreated送信時はoutboxからHTTP用snapshotを作り、そのevent ID集合をflush終了までruntimeで保持する。create直後renameは同一identityのTaskCreatedがこの集合に含まれなければoutboxへmergeし、含まれる場合またはTaskCreated不在ならTaskUpdatedをappendする。flush完了mutationは新規TaskUpdatedを保持したまま送信済みTaskCreatedだけを除去する。
 
 ### Inbound Bridge
