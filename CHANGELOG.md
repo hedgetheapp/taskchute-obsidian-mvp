@@ -25,7 +25,8 @@ Type: Runtime BRAT Prerelease for device testing
 - actual `dropTaskBoardDrag()` row / section target、entry-like selection、single enqueue、failure barrier: synthetic PASS
 - v0.6.69 direct handoff、v0.6.68 shortcut routing、v0.6.67 lifecycle: PASS
 - TMV4、interrupt continuation、rename、insert-below focused regressions: PASS
-- v0.6.70 real Vault / remote / mobile: `NOT_VERIFIED`
+- targeted BRAT device PASS: section target T-0653 / E-20260816-0029（forward / Undo / Redo seq 2404〜2406）、row target T-0654 / E-20260816-0030（seq 2409〜2411）、empty night target T-0655 / E-20260816-0031（seq 2414〜2416）。各chainはremote / mobile applied、exact semantic history topとdev / remote physical・mobile UI収束を確認。
+- v0.6.70 plugin全体 / full matrix: `NOT_VERIFIED`
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
 Release notes: [`docs/release/v0.6.70.md`](docs/release/v0.6.70.md)

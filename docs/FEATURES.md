@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はBRAT試験配布済みv0.6.70の現行feature inventoryである。配布済みv0.6.69では実TaskBoard D&D直後にoperation / batch / semantic / diagnosticが作られないroute bypassが確認された。v0.6.70はrow / section-container dropを共通gatewayからdispatchし、single-task same-date routeへ同一semantic lifecycleを要求する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
+この一覧はBRAT試験配布済みv0.6.70の現行feature inventoryである。配布済みv0.6.69では実TaskBoard D&D直後にoperation / batch / semantic / diagnosticが作られないroute bypassが確認された。v0.6.70はrow / section-container dropを共通gatewayからdispatchし、single-task same-date routeへ同一semantic lifecycleを要求する。section-target、row-target、empty-section-targetのtargeted実機試験はPASSし、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 
@@ -92,7 +92,7 @@
 | 機能 | 状態 | 概要・根拠 |
 |---|---|---|
 | Board履歴 | 実装済み | `.taskchute/board-history/{date}`へsnapshot、preview・restore・delete。 |
-| 操作Undo / Redo | 一部実装 | local snapshot restoreに加え、same-date cross-section / same-sectionの単一task D&DだけをTaskMoved v4としてBridge同期する。operation-scoped semantic batchとcapture-phase shortcut gatewayを維持し、v0.6.70では実UI row / section drop gatewayからexact semantic actionがhistory topにあることまで検証する。成立しない同期済みD&Dはunsafe generic snapshotを除去してlocal-only Undoをblockする。create/delete、lifecycle、Routine定義、date moveはcross-device undo対象外。実機未確認。 |
+| 操作Undo / Redo | 一部実装 | local snapshot restoreに加え、same-date cross-section / same-sectionの単一task D&DだけをTaskMoved v4としてBridge同期する。operation-scoped semantic batchとcapture-phase shortcut gatewayを維持し、v0.6.70では実UI row / section drop gatewayからexact semantic actionがhistory topにあることまで検証する。成立しない同期済みD&Dはunsafe generic snapshotを除去してlocal-only Undoをblockする。section / row / empty-section targetのcross-section Undo / Redoは実機PASS。create/delete、lifecycle、Routine定義、date moveはcross-device undo対象外。 |
 | 設定backup / restore | 実装済み | `.taskchute/backups`系へ設定と関連ファイルを保存。 |
 | index再構築 | 実装済み | `Taskchute/_system/index.json`をMarkdownから再構築。 |
 | 整合性診断 | 実装済み | folder、ID、frontmatter、duplicate、runtime等を検査。 |
@@ -115,7 +115,7 @@
 | trusted cursor persistence | 実装済み・実機未試験 | inbound Ack cursorだけに限定した保存経路で最新data.jsonへmonotonic mergeする。 |
 | cursor-only reconciliation | 一部実装 | server Ack済みeventをMarkdownへ再適用せずcursorへ反映する。現行client記録またはlegacy cache / diagnostic証跡を使う。cold cacheでの任意server照会はAPI未実装。 |
 | TaskMoved v4 | 実装済み | `target_order_entry_ids` / `source_order_entry_ids`を正とする。v0.6.63でbasic / section handoff / cross-section / empty-source / date move、v0.6.65でsame-task multi-entry D&Dが三端末PASS。現行versionでの全組合せ回帰は未完了。 |
-| TaskMoved Undo / Redo Bridge | 実装済み・実機未試験 | D&D専用Undo batchへoperation / batch identityを付け、exact task / entryとbefore / after fingerprintを検証後だけsemantic付き履歴としてcommitする。commit後はexact semantic actionがhistory topに1件だけあることも検証する。復元前後のMarkdown検証後に`task-undo-confirmed-markdown-v4` / `task-redo-confirmed-markdown-v4`をenqueueする。v0.6.69実UI routeはlifecycle未開始でFAILし、v0.6.70でrow / section routeを共通gatewayへ統合した。実機再試験待ち。 |
+| TaskMoved Undo / Redo Bridge | 実装済み・対象route実機PASS | D&D専用Undo batchへoperation / batch identityを付け、exact task / entryとbefore / after fingerprintを検証後だけsemantic付き履歴としてcommitする。commit後はexact semantic actionがhistory topに1件だけあることも検証する。復元前後のMarkdown検証後に`task-undo-confirmed-markdown-v4` / `task-redo-confirmed-markdown-v4`をenqueueする。v0.6.70でsection / row / empty-section targetのforward・Undo・Redoと三端末収束を確認した。未試験範囲はTEST_MATRIXを正とする。 |
 | lifecycle classifier | 実装済み | normal / routine_occurrence / identity_conflict。 |
 | mobile resume drain | 実装済み・実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。 |
 | オフライン復帰 | 一部実装 | network error分類と再試行はある。長時間実機試験は要確認。 |

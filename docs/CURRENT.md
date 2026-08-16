@@ -9,7 +9,7 @@
 - release tag: `v0.6.70`（現在のimmutable BRAT実機試験用Prerelease。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.69はimmutable BRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はD&D直後・Ctrl+Z前にsemantic lifecycleが存在せずFAILした。v0.6.70は実際のTaskBoard row / section drop callbackを共通dispatch gatewayへ集約し、section-target helperにもoperation-scoped semantic contractを適用する。synthetic PASSだけで、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedとはしない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.69はimmutable BRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はD&D直後・Ctrl+Z前にsemantic lifecycleが存在せずFAILした。v0.6.70は実際のTaskBoard row / section drop callbackを共通dispatch gatewayへ集約し、section-target helperにもoperation-scoped semantic contractを適用する。section / row / empty-section targetのtargeted実機試験はPASSした。plugin全体 / full matrixは`NOT_VERIFIED`で、Verified / Releasedとはしない。
 
 ## 文書運用
 
@@ -78,7 +78,9 @@ v0.6.68実機試験ではrouting自体は成功したが、UNDO-BRIDGE-CROSS-SEC
 
 v0.6.69実機試験でもUNDO-BRIDGE-CROSS-SECTION-01はFAILした。fixture `undo-v069-cross-normal`のobserved entryはE-20260816-0028で、single selectionだった。D&D直後・Ctrl+Z前にactive operation / pending batchはnull、top actionはoperation ID / batch ID / fingerprint / semanticを持たないgeneric snapshotで、lifecycle / drag diagnosticsも空だった。Ctrl+Zは失敗前提検出後に意図的に実行していない。source traceではrow targetが`moveTaskByDrag()`へ入る一方、section-container / empty-section targetがlegacy `moveTaskToSectionByDrag()`へ入り、Markdownとforward TaskMovedを更新しながらoperation-scoped lifecycleを開始しないbypassを確認した。
 
-v0.6.70はTaskBoardのrow / section / mobile quick dropを`dispatchTaskBoardTaskDrop()`へ集約し、routeをmutation前に診断する。section-target helperも最初のwrite前にoperationを開始し、forward TaskMoved後はrow helperと同じ`finalizeTaskMovedUndoSemanticHandoff()`でsemantic actionとhistory topを検証する。実際の`dropTaskBoardDrag()` callbackを通すrow / section testとfailure barrier testはPASSした。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`のimmutable BRAT Prereleaseとして試験配布済みだが、実Vault / remote / mobileは`NOT_VERIFIED`である。
+v0.6.70はTaskBoardのrow / section / mobile quick dropを`dispatchTaskBoardTaskDrop()`へ集約し、routeをmutation前に診断する。section-target helperも最初のwrite前にoperationを開始し、forward TaskMoved後はrow helperと同じ`finalizeTaskMovedUndoSemanticHandoff()`でsemantic actionとhistory topを検証する。実際の`dropTaskBoardDrag()` callbackを通すrow / section testとfailure barrier testはPASSした。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`のimmutable BRAT Prereleaseとして試験配布済みで、後述のtargeted 3 routeには実Vault / remote / mobile PASS証跡があるが、plugin全体 / full matrixは`NOT_VERIFIED`である。
+
+v0.6.70実機試験では、section / empty-section routeのT-0653 / E-20260816-0029、row routeのT-0654 / E-20260816-0030、empty night routeのT-0655 / E-20260816-0031がtargeted PASSとなった。3件ともCtrl+Z前にexact semantic action、operation ID、batch ID、fingerprint、history topを確認し、forward / Undo / Redo TaskMovedがD1 seq 2404〜2406、2409〜2411、2414〜2416としてremote / mobile appliedになった。Undo / Redo後はdev / remote physical sectionとmobile UIが収束した。これによりv0.6.69 failureは試験した3 routeについて解消したが、plugin全体 / full matrixは`NOT_VERIFIED`、Delivery StateはVerified=Noのままとする。
 
 同fixtureを使ったTMV4-MULTI-ENTRY-01もPASSした。control T-0643 / E-20260816-0019を加え、同一task_id T-0641のoriginalを維持したままcontinuation E-20260816-0018だけをcontrol直下へD&Dした。D1 seq 2364 / event `23081df0-5c86-4e56-aa7b-86a7e1bf4bb4`のTaskMoved v4はduplicate task IDを保ったentry orderを使用し、remote / mobile applied、三端末が同一順へ収束した。
 
@@ -165,7 +167,7 @@ Routine occurrence interrupt continuationもPASSした。T-0644のoriginal E-202
 - Routine変更時の生成済み行の扱いも、古い「更新しない」と現行の「保護対象以外を再整合」が併存する。
 - 巨大な単一`main.js`に全責務が集中し、影響範囲の静的把握が難しい。ただし配布物を単一`main.js`とすること自体は現行の明示方針。
 - 実装済み機能の大半に自動テストがなく、実Vault試験への依存が高い。
-- 本番導入は既存文書上で保留のまま。v0.6.70は実機試験用BRAT Prereleaseで、synthetic route testだけがPASS、plugin全体は`NOT_VERIFIED`のため本番可否は要確認。
+- 本番導入は既存文書上で保留のまま。v0.6.70は実機試験用BRAT Prereleaseで、synthetic route testとtargeted 3 routeの実機試験はPASSしたが、plugin全体は`NOT_VERIFIED`のため本番可否は要確認。
 
 ## 将来候補・明示的対象外
 
