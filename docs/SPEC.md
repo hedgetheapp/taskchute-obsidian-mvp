@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は公開済み`v0.6.65` BRAT Prereleaseを基準とする。公開済みv0.6.64 / v0.6.65の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は未公開`v0.6.66`候補を基準とする。公開済みv0.6.64 / v0.6.65の配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -89,6 +89,12 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - D&Dのsourceとrow drop targetはcurrent Markdownからexact `entry_id`で一意解決し、それぞれの物理見出しをsource/destination sectionの正とする。reload後のruntime task `section` / `sectionId`が空でも、この物理contextが一致すればsame-section D&Dを続行する。
 - same-section D&Dのmoved rowに`section_id`がない場合、物理見出しを正として`section` / `section_id`を補完し、保存後に同じ`entry_id`を再読込して`task_id`、物理section、row section identityを検証する。
 - row metadataの明示`section_id`が`__no_section__`または別sectionで物理見出しと矛盾する場合は正規化せず、一般`markdown_section_mismatch` guardでTaskMoved enqueueをblockする。row `section_id`が物理sectionと一致する場合に限り、欠落・古いsection labelを正規化する。`__no_section__`をwildcardとして扱わない。
+- same-dateの単一task D&D履歴は、exact `task_id + entry_id`、before / after section、entry/task orderを保持する。Ctrl+Z / Ctrl+Y / Ctrl+Shift+Zは復元前にcurrent source stateを、復元後にtarget stateをMarkdownから検証し、成功時だけ逆向きまたは再実行のTaskMoved v4をenqueueする。
+- same-section Undo / Redoは`source_order_entry_ids`を正とし、duplicate task IDがあってもentry identityを維持する。cross-sectionも保存後のphysical headingとrow metadata一致を必須とする。
+- exact forwardが未送信かつactive flush snapshot外と証明できる場合だけforward / inverseをnet-zeroとしてsend対象外にできる。active flush中・送信済み・状態不明ならforwardを変更せず、より後のlogical clockでinverseを追加する。
+- net-zeroは`task_id + entry_id`、from / to、entry order、task orderが完全な逆関係で、候補が1件だけの場合に限る。非exact・複数候補・欠落fieldでは既存eventをcoalesceせず、Undo / Redo eventを後続追加する。
+- 保存後検証またはTaskMoved enqueueが失敗した場合は、可能な限り直前snapshotへrollbackして履歴stackも操作前へ戻す。rollback自体が失敗した場合は成功表示せず、local変更とBridge未同期を明示する。
+- arbitrary snapshot diffによるBridge event生成は行わない。TaskCreated / Deleted、lifecycle、Routine definition、日付移動rekeyのUndo / Redo同期はv0.6.66対象外で`NOT_VERIFIED`である。
 
 ## 7. 実行lifecycle
 
@@ -218,6 +224,7 @@ clientが使用するendpointは`/events`、`/events/pending`、`/events/{id}/ap
 - plugin settings、runtime、outbox、cursor、diagnosticsはObsidian plugin `data.json`へ保存する。
 - 端末固有UI状態とdevice IDの一部は`localStorage`へ保存する。
 - `.taskchute/board-history/{date}`へ変更前snapshotを保存する。
+- セッション内Undo / RedoはVault fileとplugin data snapshotを使う。TaskMoved意味論を持つsnapshot復元ではplugin-data save queue内でcurrent Bridge namespaceとTaskCreated / TaskMoved order diagnosticsを再mergeし、outbox、cursor、logical clock、Ack / retry / Auto Flush状態を古いsnapshotで巻き戻さない。通常UI設定などBridge外の状態はsnapshot復元対象のままとする。
 - `.taskchute/routine-history/{YYYY-MM}.json`へRoutine occurrence statusを保存する。
 - `Taskchute/_system/index.json`は再構築可能cacheであり正本ではない。
 

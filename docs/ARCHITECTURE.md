@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: 公開済みv0.6.65 BRAT Prerelease。interrupt continuation追加後も、その直前にenqueueされたTaskMoved v4のintermediate target orderを安全に送信前検証する。v0.6.65のtargeted device regressionはPASS、plugin full matrixは`NOT_VERIFIED`であり、公開済みv0.6.64 / v0.6.65 assetsは変更しない。
+調査基準: 未公開v0.6.66候補。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを追加する。v0.6.66はsynthetic PASS、実機`NOT_VERIFIED`である。公開済みv0.6.64 / v0.6.65 assetsは変更しない。
 
 ## 1. 概要
 
@@ -25,9 +25,9 @@ TaskchutePlugin + ItemViews (main.js)
 
 | Path | 役割 |
 |---|---|
-| `main.js` | 全application logic。約53,147行。CommonJSで`TaskchutePlugin`をexport。 |
+| `main.js` | 全application logic。約55,309行。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.65`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.66`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
@@ -38,6 +38,7 @@ TaskchutePlugin + ItemViews (main.js)
 | `tests/tmv4-physical-context-v0663.js` | reload後runtime section空、exact physical headings、missing meta補完、strict conflict、no-op、generic add metadataを検証するfocused synthetic test。 |
 | `tests/interrupt-continuation-placement-v0664.js` | interrupt taskの最終section、continuation隣接順、entry identity、metadata mismatch block、lifecycle handoff構造を検証するfocused synthetic test。 |
 | `tests/interrupt-continuation-taskmoved-preflight-v0665.js` | 後続continuationによるTaskMoved v4 send-preflight order projectionとstrict fallbackを検証するfocused synthetic test。 |
+| `tests/undo-redo-taskmoved-bridge-v0666.js` | same-date D&D Undo / Redoのsemantic movement、multi-entry、outbox race、negative guardを検証するfocused synthetic test。 |
 
 `src/`、`package.json`、bundler設定、汎用test runnerは存在しない。`tests/`にはv0.6.59以降のfocused standalone testだけがある。
 
@@ -172,6 +173,10 @@ UI / command
 explicit insert-belowと「下にコピー」は`insertTaskAfterKey()`へ`insertPlacement=explicit-below`を渡す。これにより通常targetをprotected集合へ自動追加せず、物理Markdownをtarget直下へ保存してから同じanchorでvisual rowを追加する。実際のcompleted / running / paused keyは既存protected集合とstatus判定に残る。default top insertionはこのoptionを使わない。Inboundの明示interrupt continuationも、exact `continuation_after_entry_id`を保存前検証した後に限り同じoptionでanchor直下へ保存する。source側continuationは専用builderがexact final interrupt entry直後へ直接挿入する。
 
 同一sectionのtask-row D&Dは、操作前Markdownからsource entry orderを保存し、移動後Markdownを書き込み、再読込したtarget entry orderとの一致を確認してからD&D専用TaskMoved v4を1件enqueueする。UIのdrop handlerは`moveTaskByDrag()`へ集約され、no-op orderは保存・enqueue前に除外する。
+
+v0.6.66では`moveTaskByDrag()`がforward enqueue成功後にbefore / afterのexact section・entry/task orderをpending Undo batchへ付与する。`undoLastTaskchuteAction()` / `redoLastTaskchuteAction()`は復元前source stateを検証し、`restoreTaskchuteActionSnapshot()`でlocal snapshotを戻した後、`syncRestoredTaskMovedUndoRedo()`がtarget stateを再読込検証して通常の`enqueueBridgeTaskMoved()`へ渡す。意味論を持たない履歴は従来のlocal restoreだけを行う。Inbound TaskMoved writeは`skipTaskchuteUndo`で履歴化しない。
+
+Undo snapshot内のplugin dataはplugin-data save queue内でcurrent Bridge namespaceとorder diagnosticsを再mergeしてから適用し、outbox / cursor / logical clock / Ack・retry・Auto Flush状態を過去へ戻さない。`appendBridgeTaskMovedCoalescedEvent()`はactive flush snapshot eventをcoalesce候補から除外する。active外の未送信forwardと、task / entry / from-to / entry-task orderが完全な逆関係にある候補1件だけはnet-zeroとして両方を`superseded`にする。非exact・複数候補・active / sent / failed / retried forwardは変更せず、inverseを別eventとして保持する。復元後検証またはenqueue失敗時はcounterpart snapshotでlocal stateとhistory stackをrollbackし、rollback不能時は未同期状態を明示する。
 
 same-section D&Dでは、moved rowのraw `section` / `section_id`を物理見出しと比較する。`section_id`欠落は物理見出しから補完し、IDが物理sectionを確定している場合に限って欠落・古いlabelも正規化して同じMarkdown保存へ含める。UI refresh後のMarkdownから対象`entry_id`を一意再解決し、`task_id`、physical section、row section IDが揃った後だけ既存`enqueueBridgeTaskMoved()`へ渡す。明示section IDの不一致は補正せず一般guardへ到達する前にも停止する。
 

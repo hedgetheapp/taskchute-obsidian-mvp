@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current test distribution: `v0.6.65` BRAT Prerelease (`Prereleased / Test-distributed`, not a stable Released build).
-- v0.6.65 keeps generic TaskMoved v4 send-preflight strict while projecting out one exact, later, sendable interrupt-continuation TaskCreated entry only for `task-start-section-move-confirmed-markdown-v3` lifecycle moves. Current dev / remote / mobile evidence passes interrupt final placement, same-task multi-entry D&D, and Routine occurrence interrupt continuation. The full plugin matrix remains `NOT_VERIFIED`.
+- Current implementation candidate: `v0.6.66` (not committed, tagged, or distributed). Current test distribution remains immutable `v0.6.65` BRAT Prerelease.
+- v0.6.66 adds semantic TaskMoved v4 Bridge handoff for same-date D&D undo / redo. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`. v0.6.65 targeted interrupt-continuation PASS evidence remains valid, while `UNDO-BRIDGE-CROSS-SECTION-01` is recorded as a separate v0.6.65 FAIL.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 

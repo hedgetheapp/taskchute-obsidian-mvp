@@ -8,6 +8,32 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.66 - 2026-08-16
+
+Type: Runtime candidate for BRAT device testing (not yet published)
+
+### Changed
+
+- same-date D&D履歴へexact `task_id + entry_id`、before / after section、entry/task orderを意味論metadataとして保存する。
+- Ctrl+Z / Ctrl+Y / Ctrl+Shift+Zのsnapshot復元前後に物理Markdownを再読込し、exact identity、section、row metadata、entry/task orderを検証してから逆向きまたは再実行のTaskMoved v4をenqueueする。
+- 未送信のexact forward / inverse pairだけをnet-zeroとしてsend対象外にし、active flush snapshot中のforwardはsupersedeせず後続inverseを保持する。
+- Undo snapshot復元時にcurrent Bridge / outbox / cursor keysを維持し、古いplugin data snapshotによる送信状態の巻き戻しを防ぐ。
+- commit前reviewで、非exactな同一entry moveまでUndo / Redo coalesce候補になり得る問題を修正した。net-zeroはtask / entry / from-to / entry-task orderの完全一致かつ候補1件に限定し、それ以外の既存eventを保持する。
+- commit前reviewで、復元後のTaskMoved enqueue失敗時にlocal snapshotだけが確定する問題を修正した。counterpart snapshotとhistory stackをrollbackし、plugin-data restoreはsave queue内で最新Bridge stateをmergeする。
+- arbitrary snapshot diff、TaskCreated / Deleted、lifecycle、Routine definition、date-move rekeyの逆操作は対象外とした。
+- `manifest.json`を`0.6.66`へ更新した。
+
+### Verification
+
+- Undo / Redo cross-section、same-section、same-task multi-entry、AUTO-FLUSH-RACE、snapshot Bridge-state、logical-clock、rollback、negative guards focused synthetic: PASS
+- existing TMV4、interrupt continuation、rename handoff、insert-below focused tests: PASS
+- v0.6.66 real Vault / remote / mobile: `NOT_VERIFIED`
+- v0.6.65 `UNDO-BRIDGE-CROSS-SECTION-01`: `FAIL`。T-0647 / E-20260816-0024のforward D1 seq 2383はremote / mobile appliedだが、Ctrl+Z後にreverse TaskMovedがなくdevだけafternoonへ戻りremote / mobileはnightに残った。
+
+Release notes: [`docs/release/v0.6.66.md`](docs/release/v0.6.66.md)
+
+---
+
 ## v0.6.65 - 2026-08-16
 
 Type: Runtime BRAT Prerelease for device testing

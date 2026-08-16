@@ -226,6 +226,14 @@
 - 根拠: `projectBridgeTaskMovedTargetOrderForInterruptContinuation()`、`validateBridgeOutboxTaskMovedEvent()`、v0.6.64 T-0638 / T-0639 failure evidence。
 - 理由: TaskMovedはreceiverにcontinuationが存在しないintermediate stateを先に届ける必要がある。payloadへ未来entryを足すとv4 identity contractを破り、current Markdownをそのまま比較すると正しいintermediate eventをstaleとして拒否するため。
 
+## D-038: cross-device Undo / Redoは明示TaskMoved意味論に限定する
+
+- 判断: same-dateの単一task D&Dだけ、履歴へexact before / after section・entry/task orderを保存し、snapshot復元前後のMarkdown検証成功後に既存TaskMoved v4でUndo / Redoを同期する。arbitrary snapshot diffからeventを推定しない。
+- 判断: 未送信かつactive flush snapshot外で、task / entry / from-to / entry-task orderが完全な逆関係にある候補1件だけをnet-zeroとしてsend対象外にする。非exact・複数候補・active / sent / failed / retried forwardは変更せず、inverseを後続eventとしてenqueueする。
+- 判断: Undo snapshotはplugin-data save queue内でcurrent Bridge namespaceを再mergeし、outbox / cursor / logical clock / Ack・retry・Auto Flush stateを巻き戻さない。復元後のBridge handoff失敗時はcounterpart snapshotでlocal stateとhistory stackを操作前へrollbackし、意味論を履歴へ付与できないD&Dはlocal-only Undo履歴を残さない。
+- 理由: local snapshot restoreとcross-device event semanticsを分離し、identity誤推定、in-flight event消失、ping-pongを避けながら既存TaskMoved v4 strict guardを再利用するため。
+- 根拠: `buildTaskMovedUndoBridgeSemantic()`、`syncRestoredTaskMovedUndoRedo()`、`appendBridgeTaskMovedCoalescedEvent()`、v0.6.65 UNDO-BRIDGE-CROSS-SECTION-01 failure evidence。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

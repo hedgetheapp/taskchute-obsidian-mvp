@@ -6514,6 +6514,193 @@ function buildBridgeTaskMovedV4ReorderDraft(input = {}) {
   };
 }
 
+function buildTaskMovedUndoBridgeSemantic(input = {}) {
+  const normalizeState = (value = {}) => {
+    const entryIds = (Array.isArray(value.entry_order_ids) ? value.entry_order_ids : value.entryOrderIds || [])
+      .map(item => String(item || "").trim());
+    const taskIds = (Array.isArray(value.task_order_ids) ? value.task_order_ids : value.taskOrderIds || [])
+      .map(item => String(item || "").trim());
+    const entryId = String(input.entry_id || input.entryId || "").trim();
+    return {
+      date: String(value.date || input.date || "").trim(),
+      section_id: String(value.section_id || value.sectionId || "").trim(),
+      section_label: String(value.section_label || value.sectionLabel || "").trim(),
+      entry_order_ids: entryIds,
+      task_order_ids: taskIds,
+      index: entryIds.indexOf(entryId)
+    };
+  };
+  const taskId = String(input.task_id || input.taskId || "").trim();
+  const entryId = String(input.entry_id || input.entryId || "").trim();
+  const before = normalizeState(input.before || {});
+  const after = normalizeState(input.after || {});
+  const stateValid = state => !!state.date
+    && !!state.section_id
+    && state.entry_order_ids.length === state.task_order_ids.length
+    && state.entry_order_ids.length > 0
+    && state.entry_order_ids.every(Boolean)
+    && new Set(state.entry_order_ids).size === state.entry_order_ids.length
+    && state.index >= 0;
+  if (!taskId || !entryId) return { ok: false, reason: "task_identity_missing", semantic: null };
+  if (!stateValid(before) || !stateValid(after)) return { ok: false, reason: "physical_order_invalid", semantic: null };
+  if (before.date !== after.date) return { ok: false, reason: "date_move_not_supported", semantic: null };
+  const changed = before.section_id !== after.section_id
+    || JSON.stringify(before.entry_order_ids) !== JSON.stringify(after.entry_order_ids);
+  if (!changed) return { ok: false, reason: "no_order_change", semantic: null };
+  return {
+    ok: true,
+    reason: "",
+    semantic: {
+      version: 1,
+      kind: "task-moved-v4",
+      task_id: taskId,
+      entry_id: entryId,
+      before,
+      after,
+      original_event_id: String(input.original_event_id || input.originalEventId || "").trim(),
+      original_payload_source: String(input.original_payload_source || input.originalPayloadSource || "").trim(),
+      restore_state: "before"
+    }
+  };
+}
+
+function getTaskMovedUndoBridgeRestorePlan(semantic, restoreState = "before") {
+  const value = semantic && typeof semantic === "object" ? semantic : {};
+  const targetKey = restoreState === "after" ? "after" : "before";
+  const sourceKey = targetKey === "before" ? "after" : "before";
+  if (value.kind !== "task-moved-v4" || !value[sourceKey] || !value[targetKey]) {
+    return { ok: false, reason: "semantic_missing", source: null, target: null };
+  }
+  return {
+    ok: true,
+    reason: "",
+    task_id: String(value.task_id || "").trim(),
+    entry_id: String(value.entry_id || "").trim(),
+    source: value[sourceKey],
+    target: value[targetKey],
+    restore_state: targetKey
+  };
+}
+
+function buildTaskMovedUndoBridgeMovement(plan, operation = "undo") {
+  if (!plan || !plan.ok || !plan.source || !plan.target || !plan.task_id || !plan.entry_id) {
+    return { ok: false, reason: "restore_plan_invalid", movement: null };
+  }
+  const sameDate = String(plan.source.date || "") === String(plan.target.date || "");
+  if (!sameDate) return { ok: false, reason: "date_move_not_supported", movement: null };
+  const sameSection = String(plan.source.section_id || "") === String(plan.target.section_id || "");
+  const phase = operation === "redo" ? "redo" : "undo";
+  return {
+    ok: true,
+    reason: "",
+    movement: {
+      from: { date: plan.source.date, section: plan.source.section_id, entry_id: plan.entry_id, index: plan.source.index },
+      to: { date: plan.target.date, section: plan.target.section_id, entry_id: plan.entry_id, index: plan.target.index },
+      ...(sameSection ? { sourceOrderEntryIds: plan.source.entry_order_ids, sourceOrderTaskIds: plan.source.task_order_ids } : {}),
+      beforeOrder: plan.source.task_order_ids,
+      afterMoveOrder: plan.target.task_order_ids,
+      afterSaveOrder: plan.target.task_order_ids,
+      afterRebuildOrder: plan.target.task_order_ids,
+      payloadSource: `task-${phase}-confirmed-markdown-v4`,
+      moveType: sameSection ? "reorder" : "section-change"
+    }
+  };
+}
+
+function isExactPendingTaskMovedInverse(previousEvent, nextEvent) {
+  const previous = previousEvent && previousEvent.payload && typeof previousEvent.payload === "object" ? previousEvent.payload : {};
+  const next = nextEvent && nextEvent.payload && typeof nextEvent.payload === "object" ? nextEvent.payload : {};
+  if (String(previousEvent && previousEvent.event_type || "") !== "TaskMoved"
+    || String(nextEvent && nextEvent.event_type || "") !== "TaskMoved"
+    || Number(previous.move_payload_version || 0) < 4
+    || Number(next.move_payload_version || 0) < 4) return false;
+  const previousTaskId = String(previous.task_id || "").trim();
+  const nextTaskId = String(next.task_id || "").trim();
+  const previousEntryId = String(previous.entry_id || "").trim();
+  const nextEntryId = String(next.entry_id || "").trim();
+  if (!previousTaskId || previousTaskId !== nextTaskId || !previousEntryId || previousEntryId !== nextEntryId) return false;
+  const previousFrom = previous.from && typeof previous.from === "object" ? previous.from : {};
+  const previousTo = previous.to && typeof previous.to === "object" ? previous.to : {};
+  const nextFrom = next.from && typeof next.from === "object" ? next.from : {};
+  const nextTo = next.to && typeof next.to === "object" ? next.to : {};
+  const pointKey = point => [
+    String(point.date || "").trim(),
+    String(point.section_id || point.section || "").trim(),
+    String(point.entry_id || "").trim()
+  ].join("\u0000");
+  const pointComplete = point => !!String(point.date || "").trim()
+    && !!String(point.section_id || point.section || "").trim()
+    && !!String(point.entry_id || "").trim();
+  if (![previousFrom, previousTo, nextFrom, nextTo].every(pointComplete)
+    || pointKey(previousFrom) !== pointKey(nextTo)
+    || pointKey(previousTo) !== pointKey(nextFrom)) return false;
+  const orderFields = ["source_order_entry_ids", "target_order_entry_ids", "source_order_task_ids", "target_order_task_ids"];
+  if (!orderFields.every(field => Array.isArray(previous[field]) && Array.isArray(next[field]))) return false;
+  const normalizedOrder = (payload, field) => payload[field].map(value => String(value || "").trim());
+  const previousSourceEntries = normalizedOrder(previous, "source_order_entry_ids");
+  const previousTargetEntries = normalizedOrder(previous, "target_order_entry_ids");
+  const nextSourceEntries = normalizedOrder(next, "source_order_entry_ids");
+  const nextTargetEntries = normalizedOrder(next, "target_order_entry_ids");
+  const previousSourceTasks = normalizedOrder(previous, "source_order_task_ids");
+  const previousTargetTasks = normalizedOrder(previous, "target_order_task_ids");
+  const nextSourceTasks = normalizedOrder(next, "source_order_task_ids");
+  const nextTargetTasks = normalizedOrder(next, "target_order_task_ids");
+  const sameSection = String(previousFrom.section_id || previousFrom.section || "").trim()
+    === String(previousTo.section_id || previousTo.section || "").trim();
+  if (sameSection) {
+    if (JSON.stringify(previousSourceEntries) !== JSON.stringify(nextTargetEntries)
+      || JSON.stringify(previousTargetEntries) !== JSON.stringify(nextSourceEntries)
+      || JSON.stringify(previousSourceTasks) !== JSON.stringify(nextTargetTasks)
+      || JSON.stringify(previousTargetTasks) !== JSON.stringify(nextSourceTasks)) return false;
+  } else {
+    const withoutMoved = (entryIds, taskIds) => {
+      if (entryIds.length !== taskIds.length) return null;
+      const index = entryIds.indexOf(previousEntryId);
+      if (index < 0 || entryIds.lastIndexOf(previousEntryId) !== index || taskIds[index] !== previousTaskId) return null;
+      return {
+        entryIds: entryIds.filter((value, itemIndex) => itemIndex !== index),
+        taskIds: taskIds.filter((value, itemIndex) => itemIndex !== index)
+      };
+    };
+    const previousTargetWithoutMoved = withoutMoved(previousTargetEntries, previousTargetTasks);
+    const nextTargetWithoutMoved = withoutMoved(nextTargetEntries, nextTargetTasks);
+    if (!previousTargetWithoutMoved || !nextTargetWithoutMoved
+      || previousSourceEntries.includes(previousEntryId)
+      || nextSourceEntries.includes(previousEntryId)
+      || JSON.stringify(previousSourceEntries) !== JSON.stringify(nextTargetWithoutMoved.entryIds)
+      || JSON.stringify(previousSourceTasks) !== JSON.stringify(nextTargetWithoutMoved.taskIds)
+      || JSON.stringify(previousTargetWithoutMoved.entryIds) !== JSON.stringify(nextSourceEntries)
+      || JSON.stringify(previousTargetWithoutMoved.taskIds) !== JSON.stringify(nextSourceTasks)) return false;
+  }
+  return true;
+}
+
+function mergeCurrentBridgeStateIntoTaskchuteUndoSnapshot(snapshot, current) {
+  const clone = value => {
+    const encoded = JSON.stringify(value);
+    return encoded === undefined ? value : JSON.parse(encoded);
+  };
+  const data = clone(snapshot && typeof snapshot === "object" ? snapshot : {}) || {};
+  const source = current && typeof current === "object" ? current : {};
+  const preserveExact = new Set(["taskCreatedOrderDiagnostics", "taskMovedOrderDiagnostics"]);
+  for (const key of Object.keys(source)) {
+    // The Bridge namespace is transport/sync state, not user-editable board state.
+    if (String(key).startsWith("bridge") || preserveExact.has(key)) data[key] = clone(source[key]);
+  }
+  return data;
+}
+
+function restoreTaskMovedUndoRedoStacksAfterRollback(undoStack, redoStack, action, counterpartAction, operation = "undo") {
+  if (!Array.isArray(undoStack) || !Array.isArray(redoStack) || !action || !counterpartAction) return false;
+  const phase = operation === "redo" ? "redo" : "undo";
+  const completedStack = phase === "undo" ? redoStack : undoStack;
+  const sourceStack = phase === "undo" ? undoStack : redoStack;
+  const index = completedStack.lastIndexOf(counterpartAction);
+  if (index >= 0) completedStack.splice(index, 1);
+  if (!sourceStack.includes(action)) sourceStack.push(action);
+  return true;
+}
+
 function projectBridgeTaskMovedTargetOrderForInterruptContinuation(moveEvent, currentOrderInfo = {}, outboxEvents = [], options = {}) {
   const payload = moveEvent && moveEvent.payload && typeof moveEvent.payload === "object" ? moveEvent.payload : {};
   const to = payload.to && typeof payload.to === "object" ? payload.to : {};
@@ -10997,12 +11184,14 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.undoStackLimit = 20;
       this.pendingTaskchuteUndoBatch = null;
       this.pendingTaskchuteUndoTimer = null;
+      this.taskMovedUndoCaptureInProgress = false;
       this.bridgeAutoFlushTimer = null;
       this.bridgeAutoFlushRunActive = false;
       this.bridgeAutoFlushRescheduleRequested = false;
       this.bridgeAutoFlushRescheduleReason = "";
       this.bridgeOutboxMutationQueue = Promise.resolve();
       this.bridgeOutboxFlushTargetEventIds = new Set();
+      this.bridgeOutboxFlushTargetTaskMovedKeys = new Set();
       this.bridgeTaskTitleCommitQueues = new Map();
       this.pluginDataSaveQueue = Promise.resolve();
       if (this.bridgeInboundAutoApplyDefaultMigrationPending) {
@@ -15101,13 +15290,14 @@ class TaskchutePlugin extends obsidian.Plugin {
         return;
       }
 
-      const isRedoShortcut = (evt.ctrlKey || evt.metaKey) && !evt.altKey && !evt.shiftKey && keyName === "y";
+      const isRedoShortcut = (evt.ctrlKey || evt.metaKey) && !evt.altKey
+        && ((!evt.shiftKey && keyName === "y") || (evt.shiftKey && keyName === "z"));
       if (isRedoShortcut) {
         if (!isTaskchuteRelatedScreen) return;
         evt.preventDefault();
         evt.stopPropagation();
         if (evt.stopImmediatePropagation) evt.stopImmediatePropagation();
-        this.showKeyDebug("Ctrl+Y やり直し");
+        this.showKeyDebug(evt.shiftKey ? "Ctrl+Shift+Z やり直し" : "Ctrl+Y やり直し");
         await this.redoLastTaskchuteAction();
         return;
       }
@@ -16165,13 +16355,66 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
       const key = this.getBridgeTaskMovedCoalesceKey(event);
       if (!key) return false;
+      const hasActiveSameKey = (this.bridgeOutboxFlushTargetTaskMovedKeys instanceof Set
+        && this.bridgeOutboxFlushTargetTaskMovedKeys.has(key))
+        || current.some(item => this.bridgeOutboxFlushTargetEventIds instanceof Set
+          && this.bridgeOutboxFlushTargetEventIds.has(String(item.event_id || "").trim())
+          && this.getBridgeTaskMovedCoalesceKey(item) === key);
+      const payloadSource = String(event && event.payload && event.payload.taskmoved_payload_source || "").trim();
+      const isUndoRedoEvent = /^task-(undo|redo)-confirmed-markdown-v4$/.test(payloadSource);
       const candidates = current
-        .filter(item => ["pending", "failed"].includes(item.status) && this.getBridgeTaskMovedCoalesceKey(item) === key)
+        .filter(item => ["pending", "failed"].includes(item.status)
+          && !hasActiveSameKey
+          && (!isUndoRedoEvent || (item.status === "pending"
+            && Math.max(0, Number(item.retry_count || 0)) === 0
+            && !String(item.last_error || "").trim()
+            && !String(item.sent_at || "").trim()))
+          && this.getBridgeTaskMovedCoalesceKey(item) === key)
         .sort((a, b) => Number(a.logical_clock || 0) - Number(b.logical_clock || 0));
-      await this.finalizeBridgeTaskMovedCoalescedPayload(event, candidates[0] || null);
-      event.payload.coalesced_event_count = candidates.length + 1;
+      if (candidates.length === 1 && isExactPendingTaskMovedInverse(candidates[0], event)) {
+        const previousEvents = this.settings.bridgeOutboxEvents;
+        const previousCoalesceCount = Number(this.settings.bridgeTaskMovedCoalesceCount || 0);
+        const previousSupersededCount = Number(this.settings.bridgeTaskMovedSupersededCount || 0);
+        const previousSummary = String(this.settings.bridgeTaskMovedLastFinalPayloadSummary || "");
+        const supersededAt = nowIso();
+        const previousEventId = String(candidates[0].event_id || "").trim();
+        event.status = "superseded";
+        event.last_error = "";
+        event.superseded_at = supersededAt;
+        event.superseded_by_event_id = previousEventId;
+        event.payload.coalesced_event_count = 2;
+        this.settings.bridgeOutboxEvents = current.map(item => item.event_id === previousEventId
+          ? Object.assign({}, item, {
+            status: "superseded",
+            last_error: "",
+            superseded_at: supersededAt,
+            superseded_by_event_id: event.event_id
+          })
+          : item).concat([event]);
+        this.settings.bridgeOutboxEnqueueCount = Math.max(0, Number(this.settings.bridgeOutboxEnqueueCount || 0)) + 1;
+        this.settings.bridgeTaskMovedCoalesceCount = previousCoalesceCount + 1;
+        this.settings.bridgeTaskMovedSupersededCount = previousSupersededCount + 2;
+        this.settings.bridgeTaskMovedLastFinalPayloadSummary = `${this.getBridgeTaskMovedFinalPayloadSummary(event)} / net_zero=true`;
+        this.recordBridgeOutboxClockAudit(event, "persisted-net-zero");
+        try {
+          const saved = await this.savePluginData({ deviceWriterOperation: String(options.deviceWriterOperation || "bridge-task-moved-net-zero") });
+          if (saved !== false) return true;
+        } catch (e) {}
+        this.settings.bridgeOutboxEvents = previousEvents;
+        this.settings.bridgeTaskMovedCoalesceCount = previousCoalesceCount;
+        this.settings.bridgeTaskMovedSupersededCount = previousSupersededCount;
+        this.settings.bridgeTaskMovedLastFinalPayloadSummary = previousSummary;
+        this.settings.bridgeOutboxDroppedCount = Math.max(0, Number(this.settings.bridgeOutboxDroppedCount || 0)) + 1;
+        this.recordBridgeOutboxClockAudit(event, "allocated-not-saved");
+        return false;
+      }
+      // Undo/Redo may cancel only one proven-unsent exact inverse. Any ambiguity keeps
+      // every existing event and appends the inverse with a later logical clock.
+      const coalesceCandidates = isUndoRedoEvent ? [] : candidates;
+      await this.finalizeBridgeTaskMovedCoalescedPayload(event, coalesceCandidates[0] || null);
+      event.payload.coalesced_event_count = coalesceCandidates.length + 1;
       const supersededAt = nowIso();
-      const next = current.map(item => candidates.some(candidate => candidate.event_id === item.event_id)
+      const next = current.map(item => coalesceCandidates.some(candidate => candidate.event_id === item.event_id)
         ? Object.assign({}, item, {
           status: "superseded",
           last_error: "",
@@ -16185,8 +16428,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       const previousSummary = String(this.settings.bridgeTaskMovedLastFinalPayloadSummary || "");
       this.settings.bridgeOutboxEvents = next;
       this.settings.bridgeOutboxEnqueueCount = Math.max(0, Number(this.settings.bridgeOutboxEnqueueCount || 0)) + 1;
-      this.settings.bridgeTaskMovedCoalesceCount = previousCoalesceCount + (candidates.length ? 1 : 0);
-      this.settings.bridgeTaskMovedSupersededCount = previousSupersededCount + candidates.length;
+      this.settings.bridgeTaskMovedCoalesceCount = previousCoalesceCount + (coalesceCandidates.length ? 1 : 0);
+      this.settings.bridgeTaskMovedSupersededCount = previousSupersededCount + coalesceCandidates.length;
       this.settings.bridgeTaskMovedLastFinalPayloadSummary = this.getBridgeTaskMovedFinalPayloadSummary(event);
       this.recordBridgeOutboxClockAudit(event, "persisted");
       try {
@@ -26967,7 +27210,11 @@ class TaskchutePlugin extends obsidian.Plugin {
       || (event.status === "failed" && Math.max(0, Number(event.retry_count || 0)) < maxRetryCount)
     ).slice(0, maxBatchSize);
     const flushTargetEventIds = new Set(targets.map(event => String(event && event.event_id || "").trim()).filter(Boolean));
+    const flushTargetTaskMovedKeys = new Set(targets
+      .map(event => this.getBridgeTaskMovedCoalesceKey(event))
+      .filter(Boolean));
     this.bridgeOutboxFlushTargetEventIds = flushTargetEventIds;
+    this.bridgeOutboxFlushTargetTaskMovedKeys = flushTargetTaskMovedKeys;
     let sentCount = 0;
     let failedCount = 0;
     let supersededCount = Math.max(0, Number(preDrainCoalesce && preDrainCoalesce.supersededCount || 0));
@@ -27413,6 +27660,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         });
       } finally {
         if (this.bridgeOutboxFlushTargetEventIds === flushTargetEventIds) this.bridgeOutboxFlushTargetEventIds = new Set();
+        if (this.bridgeOutboxFlushTargetTaskMovedKeys === flushTargetTaskMovedKeys) this.bridgeOutboxFlushTargetTaskMovedKeys = new Set();
       }
       if (this.bridgeAutoFlushRescheduleRequested && !this.bridgeAutoFlushRunActive) {
         this.finishBridgeAutoFlushRun("outbox-flush-finished");
@@ -28566,6 +28814,10 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (this.pendingTaskchuteUndoTimer) window.clearTimeout(this.pendingTaskchuteUndoTimer);
     this.pendingTaskchuteUndoTimer = window.setTimeout(() => {
       this.pendingTaskchuteUndoTimer = null;
+      if (this.taskMovedUndoCaptureInProgress) {
+        this.scheduleCommitTaskchuteUndoBatch();
+        return;
+      }
       this.commitPendingTaskchuteUndoBatch();
     }, 650);
   }
@@ -28590,10 +28842,18 @@ class TaskchutePlugin extends obsidian.Plugin {
       createdAt: batch.createdAt || nowIso(),
       files,
       pluginDataBefore: batch.pluginDataBefore || null,
+      bridgeTaskMovedSemantic: batch.bridgeTaskMovedSemantic || null,
       restoreFocusKey: batch.restoreFocusKey || batch.previousSelectedTaskId || "",
       previousSelectedTaskId: batch.previousSelectedTaskId || "",
       previousMultiSelectedTaskIds: Array.isArray(batch.previousMultiSelectedTaskIds) ? batch.previousMultiSelectedTaskIds.slice() : []
     });
+    return true;
+  }
+
+  attachBridgeTaskMovedSemanticToPendingUndoBatch(semantic) {
+    if (!semantic || semantic.kind !== "task-moved-v4" || !this.pendingTaskchuteUndoBatch) return false;
+    this.pendingTaskchuteUndoBatch.bridgeTaskMovedSemantic = JSON.parse(JSON.stringify(semantic));
+    this.scheduleCommitTaskchuteUndoBatch();
     return true;
   }
 
@@ -35137,12 +35397,18 @@ class TaskchutePlugin extends obsidian.Plugin {
     let pluginDataBefore = null;
     try { pluginDataBefore = this.clonePluginDataForUndo(); }
     catch (e) { pluginDataBefore = null; }
+    const semantic = action && action.bridgeTaskMovedSemantic && action.bridgeTaskMovedSemantic.kind === "task-moved-v4"
+      ? Object.assign({}, JSON.parse(JSON.stringify(action.bridgeTaskMovedSemantic)), {
+        restore_state: action.bridgeTaskMovedSemantic.restore_state === "after" ? "before" : "after"
+      })
+      : null;
     return {
       type: "taskchute-snapshot",
       label: String(label || (action && action.label) || "直前の操作"),
       createdAt: nowIso(),
       files,
       pluginDataBefore,
+      bridgeTaskMovedSemantic: semantic,
       restoreFocusKey: this.runtime && this.runtime.selectedTaskId ? this.runtime.selectedTaskId : "",
       previousSelectedTaskId: this.runtime && this.runtime.selectedTaskId ? this.runtime.selectedTaskId : "",
       previousMultiSelectedTaskIds: Array.isArray(this.runtime && this.runtime.multiSelectedTaskIds) ? this.runtime.multiSelectedTaskIds.slice() : []
@@ -35154,44 +35420,56 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (action.type === "delete-tasks") {
       for (const snap of action.taskNotes || []) {
         if (!snap || !snap.path) continue;
-        if (snap.existed) await this.writeFileText(snap.path, String(snap.content || ""), { skipBoardHistorySnapshot: true, skipTaskchuteUndo: true });
+        if (snap.existed) {
+          if (this.isTaskchuteWriteAborted(await this.writeFileText(snap.path, String(snap.content || ""), { skipBoardHistorySnapshot: true, skipTaskchuteUndo: true }))) return false;
+        }
         else await this.removeTaskchuteFileIfExists(snap.path);
       }
 
       for (const board of action.boards || []) {
         if (!board || !board.notePath) continue;
-        await this.writeFileText(board.notePath, String(board.markdown || ""), { skipBoardHistorySnapshot: true, skipTaskchuteUndo: true });
+        if (this.isTaskchuteWriteAborted(await this.writeFileText(board.notePath, String(board.markdown || ""), { skipBoardHistorySnapshot: true, skipTaskchuteUndo: true }))) return false;
       }
 
       for (const snap of action.routineHistoryFiles || []) {
         if (!snap || !snap.path) continue;
-        if (snap.existed) await this.writeFileText(snap.path, String(snap.content || ""), { skipBoardHistorySnapshot: true, skipTaskchuteUndo: true });
+        if (snap.existed) {
+          if (this.isTaskchuteWriteAborted(await this.writeFileText(snap.path, String(snap.content || ""), { skipBoardHistorySnapshot: true, skipTaskchuteUndo: true }))) return false;
+        }
         else await this.removeTaskchuteFileIfExists(snap.path);
       }
     } else if (action.type === "taskchute-snapshot") {
       for (const snap of action.files || []) {
         if (!snap || !snap.path) continue;
-        if (snap.existed) await this.writeFileText(snap.path, String(snap.content || ""), { skipBoardHistorySnapshot: true, skipTaskchuteUndo: true });
+        if (snap.existed) {
+          if (this.isTaskchuteWriteAborted(await this.writeFileText(snap.path, String(snap.content || ""), { skipBoardHistorySnapshot: true, skipTaskchuteUndo: true }))) return false;
+        }
         else await this.removeTaskchuteFileIfExists(snap.path);
       }
       if (action.pluginDataBefore) {
-        const data = JSON.parse(JSON.stringify(action.pluginDataBefore));
-        data.taskchuteDeviceSyncMeta = this.normalizeTaskchuteDeviceSyncMeta({
-          lastWriterDeviceId: this.getOrCreateTaskchuteDeviceId(),
-          lastWriterDeviceLabel: this.getTaskchuteDeviceLabel(),
-          lastWriterAt: nowIso(),
-          lastWriterOperation: "taskchute-undo-restore"
-        });
-        this._tcDeviceGuardAcknowledgedWriterId = data.taskchuteDeviceSyncMeta.lastWriterDeviceId;
-        this._tcDeviceReloadWriteAbortUntil = 0;
-        this._tcLastTaskchuteWriteActivityAt = Date.now();
-        this.clearWakeSyncGuard();
-        await this.saveData(data);
-        this.applyLoadedData(data || {});
-        this.lastSavedPluginDataSnapshot = this.clonePluginDataForUndo();
-        this.lastSavedRuntimeTaskStateSignature = this.runtimeTaskStateSignature(this.runtime);
-        this.lastInternalDataSaveAt = Date.now();
-        await this.updatePluginDataStatBaseline();
+        const persist = async () => {
+          const data = mergeCurrentBridgeStateIntoTaskchuteUndoSnapshot(action.pluginDataBefore, this.settings);
+          data.taskchuteDeviceSyncMeta = this.normalizeTaskchuteDeviceSyncMeta({
+            lastWriterDeviceId: this.getOrCreateTaskchuteDeviceId(),
+            lastWriterDeviceLabel: this.getTaskchuteDeviceLabel(),
+            lastWriterAt: nowIso(),
+            lastWriterOperation: "taskchute-undo-restore"
+          });
+          this._tcDeviceGuardAcknowledgedWriterId = data.taskchuteDeviceSyncMeta.lastWriterDeviceId;
+          this._tcDeviceReloadWriteAbortUntil = 0;
+          this._tcLastTaskchuteWriteActivityAt = Date.now();
+          this.clearWakeSyncGuard();
+          await this.saveData(data);
+          this.applyLoadedData(data || {});
+          this.lastSavedPluginDataSnapshot = this.clonePluginDataForUndo();
+          this.lastSavedRuntimeTaskStateSignature = this.runtimeTaskStateSignature(this.runtime);
+          this.lastInternalDataSaveAt = Date.now();
+          await this.updatePluginDataStatBaseline();
+          return true;
+        };
+        const pending = Promise.resolve(this.pluginDataSaveQueue).then(persist, persist);
+        this.pluginDataSaveQueue = pending.catch(() => {});
+        if ((await pending) !== true) return false;
       }
     } else {
       return false;
@@ -35205,6 +35483,147 @@ class TaskchutePlugin extends obsidian.Plugin {
       await this.savePluginData();
     }
     return true;
+  }
+
+  async rollbackTaskMovedUndoRedoAfterBridgeFailure(action, counterpartAction, operation = "undo") {
+    const phase = operation === "redo" ? "redo" : "undo";
+    let restored = false;
+    try { restored = await this.restoreTaskchuteActionSnapshot(counterpartAction); }
+    catch (e) { restored = false; }
+    if (restored) {
+      restored = restoreTaskMovedUndoRedoStacksAfterRollback(
+        this.undoStack,
+        this.redoStack,
+        action,
+        counterpartAction,
+        phase
+      );
+    }
+    try {
+      await this.recordBridgeTaskDragMoveDiagnostic(`taskmoved_${phase}_local_rollback_${restored ? "succeeded" : "failed"}`, {
+        task_id: action && action.bridgeTaskMovedSemantic && action.bridgeTaskMovedSemantic.task_id,
+        entry_id: action && action.bridgeTaskMovedSemantic && action.bridgeTaskMovedSemantic.entry_id,
+        enqueue_attempted: true,
+        enqueue_result: false,
+        final_guard_result: restored ? "rolled_back" : "rollback_failed",
+        message: restored
+          ? `TaskMoved ${phase}の同期準備失敗後、ローカルsnapshotと履歴stackを操作前へ戻しました。`
+          : `TaskMoved ${phase}の同期準備失敗後、ローカルsnapshotを操作前へ戻せませんでした。`
+      }, { persist: true });
+    } catch (e) {}
+    return restored;
+  }
+
+  async inspectTaskMovedUndoRedoPhysicalState(action, stateKey) {
+    const semantic = action && action.bridgeTaskMovedSemantic;
+    if (!semantic || semantic.kind !== "task-moved-v4") return { ok: true, supported: false, reason: "semantic_not_recorded" };
+    const state = semantic[stateKey];
+    const taskId = String(semantic.task_id || "").trim();
+    const entryId = String(semantic.entry_id || "").trim();
+    if (!state || !taskId || !entryId) return { ok: false, supported: true, reason: "semantic_invalid" };
+    const markdown = await readFileText(this.app, this.getTaskchutePath(state.date));
+    const occurrences = parseTasks(markdown).filter(task => String(task && task.entryId || "").trim() === entryId);
+    if (occurrences.length !== 1) return { ok: false, supported: true, reason: occurrences.length ? "entry_identity_ambiguous" : "entry_identity_missing" };
+    const task = occurrences[0];
+    if (String(task.taskId || "").trim() !== taskId) return { ok: false, supported: true, reason: "task_identity_mismatch" };
+    const identity = resolveTaskLineSectionIdentityForPhysicalHeading(task.line, this.settings, task.section, { normalizeMissing: false });
+    if (!identity.ok || String(identity.physical_section_id || "").trim() !== String(state.section_id || "").trim()
+      || String(identity.resolved_section_id || "").trim() !== String(state.section_id || "").trim()) {
+      return { ok: false, supported: true, reason: "section_identity_mismatch" };
+    }
+    const order = getTaskSectionOrderInfoFromMarkdown(markdown, state.section_label || task.section);
+    if (order.missingEntryIdCount || order.duplicateEntryIds.length
+      || JSON.stringify(order.entryIds) !== JSON.stringify(state.entry_order_ids)
+      || JSON.stringify(order.taskIds) !== JSON.stringify(state.task_order_ids)) {
+      return { ok: false, supported: true, reason: "physical_order_mismatch" };
+    }
+    return { ok: true, supported: true, reason: "", task, identity, order };
+  }
+
+  async syncRestoredTaskMovedUndoRedo(action, operation = "undo") {
+    const semantic = action && action.bridgeTaskMovedSemantic;
+    if (!semantic || semantic.kind !== "task-moved-v4") return { ok: true, supported: false, reason: "semantic_not_recorded" };
+    const plan = getTaskMovedUndoBridgeRestorePlan(semantic, semantic.restore_state);
+    const phasePrefix = operation === "redo" ? "redo" : "undo";
+    const fail = async (reason, detail = {}) => {
+      await this.recordBridgeTaskDragMoveDiagnostic(`taskmoved_${phasePrefix}_bridge_failed`, Object.assign({
+        task_id: plan.task_id || semantic.task_id,
+        entry_id: plan.entry_id || semantic.entry_id,
+        date: plan.target && plan.target.date || "",
+        section_id: plan.target && plan.target.section_id || "",
+        before_order_entry_ids: plan.source && plan.source.entry_order_ids || [],
+        after_order_entry_ids: plan.target && plan.target.entry_order_ids || [],
+        enqueue_attempted: !!detail.enqueue_attempted,
+        enqueue_result: false,
+        enqueue_skipped_reason: reason,
+        final_guard_result: "blocked",
+        message: detail.message || `TaskMoved ${phasePrefix}の保存後検証またはenqueueに失敗しました。`
+      }, detail), { persist: true });
+      return { ok: false, supported: true, reason };
+    };
+    if (!plan.ok || !plan.task_id || !plan.entry_id) return await fail(plan.reason || "semantic_invalid");
+    if (plan.source.date !== plan.target.date) return await fail("date_move_not_supported");
+    const notePath = this.getTaskchutePath(plan.target.date);
+    const markdown = await readFileText(this.app, notePath);
+    const occurrences = parseTasks(markdown).filter(task => String(task && task.entryId || "").trim() === plan.entry_id);
+    if (occurrences.length !== 1) return await fail(occurrences.length ? "entry_identity_ambiguous" : "entry_identity_missing");
+    const task = occurrences[0];
+    if (String(task.taskId || "").trim() !== plan.task_id) return await fail("task_identity_mismatch");
+    const identity = resolveTaskLineSectionIdentityForPhysicalHeading(task.line, this.settings, task.section, { normalizeMissing: false });
+    if (!identity.ok || String(identity.physical_section_id || "").trim() !== String(plan.target.section_id || "").trim()
+      || String(identity.resolved_section_id || "").trim() !== String(plan.target.section_id || "").trim()) {
+      return await fail("section_identity_mismatch", {
+        physical_section_id: String(identity && identity.physical_section_id || "").trim(),
+        resolved_section_id: String(identity && identity.resolved_section_id || "").trim(),
+        message: identity && identity.reason || "復元後row metadataとphysical headingが一致しません。"
+      });
+    }
+    const targetOrder = getTaskSectionOrderInfoFromMarkdown(markdown, plan.target.section_label || task.section);
+    if (targetOrder.missingEntryIdCount || targetOrder.duplicateEntryIds.length
+      || JSON.stringify(targetOrder.entryIds) !== JSON.stringify(plan.target.entry_order_ids)
+      || JSON.stringify(targetOrder.taskIds) !== JSON.stringify(plan.target.task_order_ids)) {
+      return await fail("target_order_verification_failed");
+    }
+    const bridgeTask = Object.assign({}, task, {
+      taskId: plan.task_id,
+      entryId: plan.entry_id,
+      taskKey: plan.entry_id,
+      sourceDate: plan.target.date,
+      date: plan.target.date,
+      section: plan.target.section_label || task.section,
+      sectionId: plan.target.section_id
+    });
+    await this.recordBridgeTaskDragMoveDiagnostic(`taskmoved_${phasePrefix}_bridge_enqueue_attempted`, {
+      task_id: plan.task_id,
+      entry_id: plan.entry_id,
+      date: plan.target.date,
+      section_id: plan.target.section_id,
+      physical_section_id: identity.physical_section_id,
+      resolved_section_id: identity.resolved_section_id,
+      before_order_entry_ids: plan.source.entry_order_ids,
+      after_order_entry_ids: plan.target.entry_order_ids,
+      enqueue_attempted: true,
+      message: `保存後検証済みのTaskMoved ${phasePrefix} v4をenqueueします。`
+    });
+    const movementResult = buildTaskMovedUndoBridgeMovement(plan, phasePrefix);
+    if (!movementResult.ok) return await fail(movementResult.reason || "movement_invalid");
+    const enqueued = await this.enqueueBridgeTaskMoved(bridgeTask, movementResult.movement);
+    if (!enqueued) return await fail("enqueue_returned_false", { enqueue_attempted: true });
+    await this.recordBridgeTaskDragMoveDiagnostic(`taskmoved_${phasePrefix}_bridge_enqueued`, {
+      task_id: plan.task_id,
+      entry_id: plan.entry_id,
+      date: plan.target.date,
+      section_id: plan.target.section_id,
+      physical_section_id: identity.physical_section_id,
+      resolved_section_id: identity.resolved_section_id,
+      before_order_entry_ids: plan.source.entry_order_ids,
+      after_order_entry_ids: plan.target.entry_order_ids,
+      enqueue_attempted: true,
+      enqueue_result: true,
+      final_guard_result: "allow",
+      message: `TaskMoved ${phasePrefix} v4をoutboxへ追加しました。`
+    }, { persist: true });
+    return { ok: true, supported: true, reason: "" };
   }
 
   async undoLastTaskchuteAction() {
@@ -35222,16 +35641,54 @@ class TaskchutePlugin extends obsidian.Plugin {
     const action = this.undoStack.pop();
     this.isRestoringTaskchuteUndo = true;
     try {
+      const semantic = action && action.bridgeTaskMovedSemantic;
+      const sourceStateKey = semantic && semantic.restore_state === "after" ? "before" : "after";
+      const preflight = await this.inspectTaskMovedUndoRedoPhysicalState(action, sourceStateKey);
+      if (!preflight.ok) {
+        this.undoStack.push(action);
+        await this.recordBridgeTaskDragMoveDiagnostic("taskmoved_undo_bridge_preflight_failed", {
+          task_id: semantic && semantic.task_id,
+          entry_id: semantic && semantic.entry_id,
+          date: semantic && semantic[sourceStateKey] && semantic[sourceStateKey].date,
+          section_id: semantic && semantic[sourceStateKey] && semantic[sourceStateKey].section_id,
+          enqueue_attempted: false,
+          enqueue_skipped_reason: preflight.reason,
+          final_guard_result: "blocked",
+          message: "現在の物理状態がTaskMoved Undo履歴のsource stateと一致しません。"
+        }, { persist: true });
+        new obsidian.Notice("現在の物理状態がUndo履歴と一致しないため、元に戻す処理を停止しました。");
+        return false;
+      }
       const redoAction = await this.createCurrentTaskchuteRedoUndoSnapshot(action, action.label || "直前の操作");
-      const restored = await this.restoreTaskchuteActionSnapshot(action);
+      let restored = false;
+      try { restored = await this.restoreTaskchuteActionSnapshot(action); }
+      catch (e) { restored = false; }
       if (!restored) {
-        new obsidian.Notice("この操作はまだ元に戻せません");
+        const rolledBack = semantic
+          ? await this.rollbackTaskMovedUndoRedoAfterBridgeFailure(action, redoAction, "undo")
+          : false;
+        if (!rolledBack && !this.undoStack.includes(action)) this.undoStack.push(action);
+        await this.refreshViews({ preserveScroll: false });
+        new obsidian.Notice(rolledBack
+          ? "Undoの復元処理が完了しなかったため、操作前の状態へ戻しました。"
+          : "Undoの復元処理が完了せず、安全なrollbackも確認できませんでした。診断を確認してください。");
         return false;
       }
       if (!Array.isArray(this.redoStack)) this.redoStack = [];
       this.redoStack.push(redoAction);
       const limit = Math.max(1, Number(this.undoStackLimit || 20));
       if (this.redoStack.length > limit) this.redoStack.splice(0, this.redoStack.length - limit);
+      let bridgeSync = null;
+      try { bridgeSync = await this.syncRestoredTaskMovedUndoRedo(action, "undo"); }
+      catch (e) { bridgeSync = { ok: false, supported: true, reason: "unexpected_sync_error" }; }
+      if (!bridgeSync.ok) {
+        const rolledBack = await this.rollbackTaskMovedUndoRedoAfterBridgeFailure(action, redoAction, "undo");
+        await this.refreshViews({ preserveScroll: false });
+        new obsidian.Notice(rolledBack
+          ? "TaskMovedの同期準備に失敗したため、Undoを取り消して元の状態へ戻しました。"
+          : "ローカルでは元に戻りましたが同期できず、元の状態へのrollbackにも失敗しました。診断を確認してください。");
+        return false;
+      }
       this.releaseBoardFocus("undo taskchute action");
       await this.refreshViews({ preserveScroll: false });
       if (this.runtime.selectedTaskId) this.selectTask(this.runtime.selectedTaskId);
@@ -35262,16 +35719,54 @@ class TaskchutePlugin extends obsidian.Plugin {
     const action = this.redoStack.pop();
     this.isRestoringTaskchuteUndo = true;
     try {
+      const semantic = action && action.bridgeTaskMovedSemantic;
+      const sourceStateKey = semantic && semantic.restore_state === "after" ? "before" : "after";
+      const preflight = await this.inspectTaskMovedUndoRedoPhysicalState(action, sourceStateKey);
+      if (!preflight.ok) {
+        this.redoStack.push(action);
+        await this.recordBridgeTaskDragMoveDiagnostic("taskmoved_redo_bridge_preflight_failed", {
+          task_id: semantic && semantic.task_id,
+          entry_id: semantic && semantic.entry_id,
+          date: semantic && semantic[sourceStateKey] && semantic[sourceStateKey].date,
+          section_id: semantic && semantic[sourceStateKey] && semantic[sourceStateKey].section_id,
+          enqueue_attempted: false,
+          enqueue_skipped_reason: preflight.reason,
+          final_guard_result: "blocked",
+          message: "現在の物理状態がTaskMoved Redo履歴のsource stateと一致しません。"
+        }, { persist: true });
+        new obsidian.Notice("現在の物理状態がRedo履歴と一致しないため、やり直し処理を停止しました。");
+        return false;
+      }
       const undoAction = await this.createCurrentTaskchuteRedoUndoSnapshot(action, action.label || "直前の操作");
-      const restored = await this.restoreTaskchuteActionSnapshot(action);
+      let restored = false;
+      try { restored = await this.restoreTaskchuteActionSnapshot(action); }
+      catch (e) { restored = false; }
       if (!restored) {
-        new obsidian.Notice("この操作はまだやり直せません");
+        const rolledBack = semantic
+          ? await this.rollbackTaskMovedUndoRedoAfterBridgeFailure(action, undoAction, "redo")
+          : false;
+        if (!rolledBack && !this.redoStack.includes(action)) this.redoStack.push(action);
+        await this.refreshViews({ preserveScroll: false });
+        new obsidian.Notice(rolledBack
+          ? "Redoの復元処理が完了しなかったため、操作前の状態へ戻しました。"
+          : "Redoの復元処理が完了せず、安全なrollbackも確認できませんでした。診断を確認してください。");
         return false;
       }
       if (!Array.isArray(this.undoStack)) this.undoStack = [];
       this.undoStack.push(undoAction);
       const limit = Math.max(1, Number(this.undoStackLimit || 20));
       if (this.undoStack.length > limit) this.undoStack.splice(0, this.undoStack.length - limit);
+      let bridgeSync = null;
+      try { bridgeSync = await this.syncRestoredTaskMovedUndoRedo(action, "redo"); }
+      catch (e) { bridgeSync = { ok: false, supported: true, reason: "unexpected_sync_error" }; }
+      if (!bridgeSync.ok) {
+        const rolledBack = await this.rollbackTaskMovedUndoRedoAfterBridgeFailure(action, undoAction, "redo");
+        await this.refreshViews({ preserveScroll: false });
+        new obsidian.Notice(rolledBack
+          ? "TaskMovedの同期準備に失敗したため、Redoを取り消して元の状態へ戻しました。"
+          : "ローカルではやり直しましたが同期できず、元の状態へのrollbackにも失敗しました。診断を確認してください。");
+        return false;
+      }
       this.releaseBoardFocus("redo taskchute action");
       await this.refreshViews({ preserveScroll: false });
       if (this.runtime.selectedTaskId) this.selectTask(this.runtime.selectedTaskId);
@@ -36660,6 +37155,9 @@ class TaskchutePlugin extends obsidian.Plugin {
         return await this.moveSelectedTaskGroupByDrag(sourceKey, targetKey, position, view);
       }
 
+      this.commitPendingTaskchuteUndoBatch();
+      this.taskMovedUndoCaptureInProgress = true;
+
       const notePath = this.getTaskchutePath(view && view.selectedDate ? view.selectedDate : this.getActiveViewDate());
       let md = await readFileText(this.app, notePath);
       let lines = md.split(/\r?\n/);
@@ -37078,11 +37576,52 @@ class TaskchutePlugin extends obsidian.Plugin {
         new obsidian.Notice("並び替えは保存されましたが、TaskMovedの同期準備に失敗しました。診断を確認してください。");
         return false;
       }
+      const semanticResult = buildTaskMovedUndoBridgeSemantic({
+        task_id: sourceBridgeTaskId,
+        entry_id: sourceBridgeEntryId,
+        date: moveDate,
+        before: {
+          date: moveDate,
+          section_id: String(sourcePhysicalSection && sourcePhysicalSection.id || "").trim(),
+          section_label: sourcePhysicalName,
+          entry_order_ids: sourceSectionBeforeInfo.entryIds,
+          task_order_ids: sourceSectionBeforeInfo.taskIds
+        },
+        after: {
+          date: moveDate,
+          section_id: String(destinationSection && destinationSection.id || "").trim(),
+          section_label: destinationName,
+          entry_order_ids: destinationAfterSaveInfo.entryIds,
+          task_order_ids: destinationAfterSaveInfo.taskIds
+        },
+        original_event_id: this.settings.bridgeLastTaskMovedEventId,
+        original_payload_source: isCrossSectionDragMove ? "confirmed-markdown-v2" : "task-drag-reorder-confirmed-markdown-v4"
+      });
+      if (!semanticResult.ok || !this.attachBridgeTaskMovedSemanticToPendingUndoBatch(semanticResult.semantic)) {
+        await this.recordBridgeTaskDragMoveDiagnostic("drag_drop_undo_semantic_not_recorded", {
+          task_id: sourceBridgeTaskId,
+          entry_id: sourceBridgeEntryId,
+          date: moveDate,
+          section_id: String(destinationSection && destinationSection.id || "").trim(),
+          before_order_entry_ids: sourceSectionBeforeInfo.entryIds,
+          after_order_entry_ids: destinationAfterSaveInfo.entryIds,
+          enqueue_attempted: false,
+          enqueue_skipped_reason: semanticResult.reason || "undo_batch_missing",
+          message: "D&Dは同期済みですが、TaskMoved Undo/Redo意味論を履歴へ保存できませんでした。"
+        }, { persist: true });
+        this.discardPendingTaskchuteUndoBatch();
+        new obsidian.Notice("移動は同期されましたが、安全なUndo履歴を作成できなかったため、この移動のUndoを無効にしました。");
+      } else {
+        this.commitPendingTaskchuteUndoBatch();
+      }
       return true;
     } catch (e) {
       console.error("Taskchute moveTaskByDrag error", e);
       new obsidian.Notice("ドラッグ移動に失敗: " + (e && e.message ? e.message : e));
       return false;
+    } finally {
+      this.taskMovedUndoCaptureInProgress = false;
+      if (this.pendingTaskchuteUndoBatch) this.scheduleCommitTaskchuteUndoBatch();
     }
   }
 

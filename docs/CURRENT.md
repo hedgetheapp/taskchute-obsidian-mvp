@@ -3,13 +3,13 @@
 ## 調査基準
 
 - 調査日: 2026-08-16
-- manifest version: `0.6.65`
+- manifest version: `0.6.66`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.65 post-prerelease device evidence based on main `a0ec81fb9bfa2f3597b49236834782bc28ff0b0d`
+- canonical docs checkpoint: uncommitted v0.6.66 candidate based on v0.6.65 post-prerelease docs commit `6557fe8b9790d34b239698553d5af0f790a57dbd`
 - release tag: `v0.6.65`（BRAT実機試験用Prerelease。tag target `a0ec81fb9bfa2f3597b49236834782bc28ff0b0d`）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.65は`task-start-section-move-confirmed-markdown-v3`に限定したinterrupt continuation後のTaskMoved v4 send-preflight projectionを含み、BRAT Prereleaseとして`Prereleased / Test-distributed`である。interrupt final placement、same-task multi-entry D&D、Routine occurrence interrupt continuationのtargeted scopeはcurrent device evidenceでPASSしたが、plugin全体 / full matrixは`NOT_VERIFIED`であり、stable Releasedとはしない。公開済みv0.6.64 / v0.6.65のtag・Release・assetsは固定する。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.66はsame-date D&DのTaskMoved-class Undo / RedoをBridgeへ意味論handoffする未公開候補で、synthetic PASS、実Vault / remote / mobileは`NOT_VERIFIED`である。現在の配布物はv0.6.65 BRAT Prereleaseのまま固定する。v0.6.65のinterrupt final placement、same-task multi-entry D&D、Routine occurrence continuationのtargeted PASSは維持する一方、Undo reverse TaskMoved欠落は別testとしてFAILである。plugin全体 / full matrixは`NOT_VERIFIED`であり、stable Releasedとはしない。
 
 ## 文書運用
 
@@ -60,6 +60,8 @@ v0.6.63のinterrupt実機試験では、original T-0635 / E-20260816-0008をinte
 v0.6.64実機試験ではfinal placement自体は成功した。original T-0638 / E-20260816-0012、interrupt T-0639 / E-20260816-0013、continuation T-0638 / E-20260816-0014は最終的にafternoonでinterrupt直後・row metadata一致となり、`interrupt_continuation_final_placement_verified`も記録された。一方、logical clock 1021のTaskMovedはcontinuation作成前のtarget order `[E-0012,E-0013]`を保持し、後続1022 TaskCreatedがE-0014を物理追加した後のsend-preflightでcurrent order `[E-0012,E-0013,E-0014]`と不一致になりfailedとなった。TaskCreatedと1023 TaskStartedもpendingに残ったため、INTERRUPT-CONTINUATION-FINAL-PLACEMENT-01は`FAIL`、TMV4-MULTI-ENTRY-01は`NOT_RUN`、v0.6.64全体は`NOT_VERIFIED`である。v0.6.65はexact後続continuationが1件だけ一致する場合に限りE-0014をcurrent orderから一時投影除外し、TaskMovedのintermediate orderをstrict検証する。
 
 v0.6.65実機試験ではINTERRUPT-CONTINUATION-FINAL-PLACEMENT-01がPASSした。original T-0641 / E-20260816-0016、interrupt T-0642 / E-20260816-0017、continuation T-0641 / E-20260816-0018はafternoonでこの順に隣接した。D1 seq 2358 TaskStopped、2359 TaskMoved、2360 TaskCreated continuation、2361 TaskStartedはremote / mobile appliedで、三端末の物理順と最終sectionが一致した。
+
+v0.6.65のUNDO-BRIDGE-CROSS-SECTION-01はFAILだった。T-0647 / E-20260816-0024をafternoonからnightへD&Dしたforward TaskMovedはD1 seq 2383 / event `ce3baf78-5d5e-4523-857d-116b16955226`としてremote / mobile appliedになったが、Ctrl+Zはdev snapshotだけをafternoonへ戻し、reverse TaskMovedを生成しなかった。remote / mobileはnightに残った。v0.6.66候補はD&D履歴へbefore / afterのexact entry orderとsectionを保存し、Undo / Redoの復元前後にMarkdownを検証して通常のTaskMoved v4をenqueueする。same-date cross-section / same-section D&Dだけが対象で、実機は未確認である。
 
 同fixtureを使ったTMV4-MULTI-ENTRY-01もPASSした。control T-0643 / E-20260816-0019を加え、同一task_id T-0641のoriginalを維持したままcontinuation E-20260816-0018だけをcontrol直下へD&Dした。D1 seq 2364 / event `23081df0-5c86-4e56-aa7b-86a7e1bf4bb4`のTaskMoved v4はduplicate task IDを保ったentry orderを使用し、remote / mobile applied、三端末が同一順へ収束した。
 
@@ -125,7 +127,7 @@ Routine occurrence interrupt continuationもPASSした。T-0644のoriginal E-202
 - `main.js:17348`に旧Routine duplicate guardが`if (false && ...)`として残る。到達不能だが削除されていない。
 - `TaskLinksModal` (`main.js:7579`) は定義以外の参照が見つからない。現在のリンクUIはpopover / menu経路を使用しているため、未使用候補。削除可否は要確認。
 - v6.6の旧詳細仕様・引継ぎ・回帰チェックリストはv0.6.16からv0.6.17時点の記述を含む。現行統合文書と併読する場合はHistorical資料として扱う。
-- 汎用自動テスト基盤は存在しない。`tests/`にはv0.6.59からv0.6.65のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation placement / preflightを対象とするfocused Node testがある。
+- 汎用自動テスト基盤は存在しない。`tests/`にはv0.6.59からv0.6.66のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation placement / preflight、same-date D&D Undo / Redoを対象とするfocused Node testがある。
 - `projectNoteMeta`は名前キー中心の互換層を残す。`project_id`中心への全面移行は未実装と既存docsに記載されている。
 
 ## TODO
