@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation candidate: `v0.6.68` (not tagged or distributed). Current immutable test distribution remains `v0.6.67` BRAT Prerelease. v0.6.68 Integrated / Prereleased / Verified / Released are all No until the normal workflow advances them.
+- Current implementation: `v0.6.68` (integrated into `main`, not tagged or distributed). Current immutable test distribution remains `v0.6.67` BRAT Prerelease. v0.6.68 is Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No.
 - v0.6.67 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed because TaskBoard Ctrl+Z could pass through the generic editable/button guard into Obsidian local Undo before the semantic TaskChute route owned it. v0.6.68 routes TaskBoard non-text Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z through one capture-phase gateway while editor/input contexts remain native. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.

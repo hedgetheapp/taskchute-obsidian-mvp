@@ -2,10 +2,10 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.68 candidate（未配布、実機`NOT_VERIFIED`）
+- 対象実装: v0.6.68 integrated candidate（main統合済み、未配布、実機`NOT_VERIFIED`）
 - 配布済みcheckpoint: immutable `v0.6.67` BRAT Prerelease、tag target `c296123e66a34d0b9abd6e6f26125871e9eca1eb`
 - v0.6.68候補はTaskBoard非テキストCtrl+Z / Ctrl+Y / Ctrl+Shift+Zをcapture-phase gatewayへrouteする。synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.68候補についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
