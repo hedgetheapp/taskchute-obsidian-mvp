@@ -5,11 +5,11 @@
 - 調査日: 2026-08-16
 - manifest version: `0.6.67`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.67 implementation candidate based on published v0.6.66 commit `304ba5ab85b1f508031d47f5eaac98d7b5745ca8`
-- release tag: `v0.6.66`（BRAT実機試験用Prerelease。公開済みtag / Release / assetsは固定）
+- canonical docs checkpoint: v0.6.67 post-prerelease delivery-state update
+- release tag: `v0.6.67`（BRAT実機試験用Prerelease。tag target `c296123e66a34d0b9abd6e6f26125871e9eca1eb`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.66はBRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はFAILした。v0.6.67候補はD&D Undo batchをoperation-scopedにし、exact semantic attachment前のcommitを禁止する。synthetic PASSだけであり、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、stable Releasedとはしない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.66はBRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はFAILした。v0.6.67はD&D Undo batchをoperation-scopedにし、exact semantic attachment前のcommitを禁止するBRAT Prereleaseとして試験配布済みである。synthetic PASSだけで、実Vault / remote / mobileは`NOT_VERIFIED`である。plugin全体 / full matrixも`NOT_VERIFIED`で、stable Releasedとはしない。
 
 ## 文書運用
 
@@ -19,6 +19,13 @@
 - 過去versionの詳細資料は[`archive/`](archive/README.md)へ保存し、現行仕様の根拠には使わない。
 
 ## Delivery state
+
+| State | v0.6.67 |
+|---|---|
+| Integrated | Yes |
+| Prereleased / Test-distributed | Yes |
+| Verified | No |
+| Released | No |
 
 - **Integrated**: main反映済み。実機確認未完了の場合がある。
 - **Prereleased / Test-distributed**: Integratedなcommitを新規tagとGitHub Prereleaseの固定assetsとして試験配布済み。実機確認未完了でもよい。
@@ -63,7 +70,7 @@ v0.6.65実機試験ではINTERRUPT-CONTINUATION-FINAL-PLACEMENT-01がPASSした�
 
 v0.6.65のUNDO-BRIDGE-CROSS-SECTION-01はFAILだった。T-0647 / E-20260816-0024をafternoonからnightへD&Dしたforward TaskMovedはD1 seq 2383 / event `ce3baf78-5d5e-4523-857d-116b16955226`としてremote / mobile appliedになったが、Ctrl+Zはdev snapshotだけをafternoonへ戻し、reverse TaskMovedを生成しなかった。remote / mobileはnightに残った。v0.6.66候補はD&D履歴へbefore / afterのexact entry orderとsectionを保存し、Undo / Redoの復元前後にMarkdownを検証して通常のTaskMoved v4をenqueueする。same-date cross-section / same-section D&Dだけが対象で、実機は未確認である。
 
-v0.6.66実機試験でもUNDO-BRIDGE-CROSS-SECTION-01はFAILした。T-0648 / E-20260816-0025のafternoon→morning forward TaskMovedはD1 seq 2386 / event `c2863685-ada9-4fb8-8090-7c0661e16741`としてremote / mobile appliedになったが、Ctrl+Z後はdevだけafternoonへ戻り、remote / mobileはmorningに残った。inverse TaskMoved、`task-undo-confirmed-markdown-v4`、`net_zero=true`はいずれも観測されず、Undo後のredoStack actionは`hasSemantic:false`だった。契約上の原因は、Ctrl+Zが消費したsnapshotに`bridgeTaskMovedSemantic`がなかったことである。コード上はv0.6.66のcapture guardが650ms timerだけを延期し、await中の通常commit / Undo開始をoperation identityで拒否していなかった。v0.6.67候補はD&D batchをoperation-scopedにし、semanticless commitを禁止する。
+v0.6.66実機試験でもUNDO-BRIDGE-CROSS-SECTION-01はFAILした。T-0648 / E-20260816-0025のafternoon→morning forward TaskMovedはD1 seq 2386 / event `c2863685-ada9-4fb8-8090-7c0661e16741`としてremote / mobile appliedになったが、Ctrl+Z後はdevだけafternoonへ戻り、remote / mobileはmorningに残った。inverse TaskMoved、`task-undo-confirmed-markdown-v4`、`net_zero=true`はいずれも観測されず、Undo後のredoStack actionは`hasSemantic:false`だった。契約上の原因は、Ctrl+Zが消費したsnapshotに`bridgeTaskMovedSemantic`がなかったことである。コード上はv0.6.66のcapture guardが650ms timerだけを延期し、await中の通常commit / Undo開始をoperation identityで拒否していなかった。v0.6.67はD&D batchをoperation-scopedにし、semanticless commitを禁止する。
 
 同fixtureを使ったTMV4-MULTI-ENTRY-01もPASSした。control T-0643 / E-20260816-0019を加え、同一task_id T-0641のoriginalを維持したままcontinuation E-20260816-0018だけをcontrol直下へD&Dした。D1 seq 2364 / event `23081df0-5c86-4e56-aa7b-86a7e1bf4bb4`のTaskMoved v4はduplicate task IDを保ったentry orderを使用し、remote / mobile applied、三端末が同一順へ収束した。
 

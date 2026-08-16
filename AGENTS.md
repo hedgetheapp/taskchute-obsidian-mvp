@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation candidate: `v0.6.67` (not yet tagged or distributed). Current test distribution remains immutable `v0.6.66` BRAT Prerelease.
+- Current implementation and immutable test distribution: `v0.6.67` BRAT Prerelease. Integrated: Yes. Prereleased / Test-distributed: Yes. Verified: No. Released: No.
 - v0.6.66 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed because Ctrl+Z consumed a semanticless snapshot while the forward D&D had already synchronized. v0.6.67 gives the D&D Undo batch an operation identity and permits commit only after exact TaskMoved semantic attachment. Synthetic tests pass; real Vault / remote / mobile evidence remains `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.

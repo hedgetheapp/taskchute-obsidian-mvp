@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: 未公開v0.6.67候補。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護する。v0.6.67はsynthetic PASS、実機`NOT_VERIFIED`である。公開済みv0.6.66以前のassetsは変更しない。
+調査基準: BRAT試験配布済みv0.6.67。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護する。v0.6.67はsynthetic PASS、実機`NOT_VERIFIED`で、Verified / Releasedではない。公開済みv0.6.67以前のassetsは変更しない。
 
 ## 1. 概要
 

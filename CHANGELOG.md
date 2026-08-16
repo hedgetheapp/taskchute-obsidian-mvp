@@ -10,7 +10,7 @@ Historical verification recorded below is evidence for that release only. It is 
 
 ## v0.6.67 - 2026-08-16
 
-Type: Runtime candidate for BRAT device testing (not yet published)
+Type: Runtime BRAT Prerelease for device testing
 
 ### Changed
 
@@ -28,6 +28,7 @@ Type: Runtime candidate for BRAT device testing (not yet published)
 - existing Undo / Redo TaskMoved、TMV4、interrupt continuation、rename handoff、insert-below focused tests: PASS
 - `node --check .\main.js`: PASS
 - v0.6.67 real Vault / remote / mobile: `NOT_VERIFIED`
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - v0.6.66 `UNDO-BRIDGE-CROSS-SECTION-01`: `FAIL`。T-0648 / E-20260816-0025のforward D1 seq 2386はremote / mobile appliedだが、Ctrl+Z後のinverseは0件で、消費された履歴は`hasSemantic:false`だった。
 
 Release notes: [`docs/release/v0.6.67.md`](docs/release/v0.6.67.md)

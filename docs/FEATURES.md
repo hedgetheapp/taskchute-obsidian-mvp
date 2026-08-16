@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.67候補の現行feature inventoryである。配布済みv0.6.66のcross-section D&D Ctrl+Zは、semanticless snapshotを消費してinverse TaskMovedを生成できずFAILした。v0.6.67はsame-date D&DのTaskMoved-class Undo / Redoをoperation-scoped semantic batchで保護する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
+この一覧はBRAT試験配布済みv0.6.67の現行feature inventoryである。配布済みv0.6.66のcross-section D&D Ctrl+Zは、semanticless snapshotを消費してinverse TaskMovedを生成できずFAILした。v0.6.67はsame-date D&DのTaskMoved-class Undo / Redoをoperation-scoped semantic batchで保護する。synthetic PASS、実機`NOT_VERIFIED`で、full matrixも`NOT_VERIFIED`である。
 
 ## ステータス定義
 
