@@ -10,7 +10,7 @@ Historical verification recorded below is evidence for that release only. It is 
 
 ## v0.6.71 - 2026-08-17
 
-Type: Integrated runtime candidate (not yet BRAT Prerelease)
+Type: Runtime BRAT Prerelease for device testing
 
 ### Changed
 
@@ -28,7 +28,9 @@ Type: Integrated runtime candidate (not yet BRAT Prerelease)
 - v0.6.70 `TMV4-DATE-MOVE-01` attempt: `BLOCKED`。baseline order divergenceをdate move操作前に検出したため、date-change TaskMovedのPASS/FAIL証跡ではない。
 - v0.6.71 real Vault / D1 optional-field round-trip / remote / mobile: `NOT_VERIFIED`
 - plugin full matrix: `NOT_VERIFIED`
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Published immutable BRAT Prerelease: annotated tag object `8f5624beed25754e56a4b012a429a1a4436a453d`, peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`, published 2026-08-17T14:15:10Z
+- Release assets `main.js` / `manifest.json` / `styles.css`: staged and downloaded SHA256 match
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
 Release notes: [`docs/release/v0.6.71.md`](docs/release/v0.6.71.md)
 

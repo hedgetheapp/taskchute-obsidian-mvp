@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation: `v0.6.71` (Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No). The latest immutable test distribution remains `v0.6.70` BRAT Prerelease, tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`.
+- Current implementation and immutable test distribution: `v0.6.71` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No), annotated tag object `8f5624beed25754e56a4b012a429a1a4436a453d`, peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`.
 - v0.6.70 real-device `TASKCREATED-SECTION-TOP-ORDER-01` exposed that ordinary TaskCreated lacked an exact placement contract: sender section-top order and remote/mobile appended order diverged despite Ack. v0.6.71 captures a versioned placement contract from post-save Markdown neighbors and verifies exact inbound placement before Ack. Synthetic tests pass; device verification and the plugin full matrix remain `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.

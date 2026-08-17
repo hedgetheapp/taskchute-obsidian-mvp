@@ -5,11 +5,11 @@
 - 調査日: 2026-08-17
 - manifest version: `0.6.71`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.71 TaskCreated exact placement integrated candidate
-- latest release tag: `v0.6.70`（immutable BRAT実機試験用Prerelease。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`。公開済みtag / Release / assetsは固定。v0.6.71 tagは未作成）
+- canonical docs checkpoint: v0.6.71 TaskCreated exact placement BRAT Prerelease
+- latest release tag: `v0.6.71`（immutable BRAT実機試験用Prerelease。annotated tag object `8f5624beed25754e56a4b012a429a1a4436a453d`、peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.70はimmutable BRAT Prereleaseとして試験配布済みで、TaskBoard D&Dのtargeted実機試験にはPASS証跡がある。一方、通常TaskCreatedのsection-top作成ではsenderが先頭、remote / mobileが末尾となる実機FAILが確認された。v0.6.71は作成後Markdownの物理隣接entryからversioned placement contractを構築し、受信側もexact placementを保存後検証してからAckする。syntheticはPASSだが未配布・実機未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`である。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.70はimmutable BRAT Prereleaseとして試験配布済みで、TaskBoard D&Dのtargeted実機試験にはPASS証跡がある。一方、通常TaskCreatedのsection-top作成ではsenderが先頭、remote / mobileが末尾となる実機FAILが確認された。v0.6.71は作成後Markdownの物理隣接entryからversioned placement contractを構築し、受信側もexact placementを保存後検証してからAckする。immutable BRAT Prereleaseとして試験配布済みだが実機未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`である。
 
 ## 文書運用
 
@@ -23,7 +23,7 @@
 | State | v0.6.71 |
 |---|---|
 | Integrated | Yes |
-| Prereleased / Test-distributed | No |
+| Prereleased / Test-distributed | Yes |
 | Verified | No |
 | Released | No |
 
@@ -82,7 +82,7 @@ v0.6.70はTaskBoardのrow / section / mobile quick dropを`dispatchTaskBoardTask
 
 v0.6.70の`TASKCREATED-SECTION-TOP-ORDER-01`では、T-0667 / E-20260817-0015のTaskCreated seq 2462がremote / mobile appliedになったにもかかわらず、devはafternoon先頭、remote / mobileは末尾へ保存した。payloadにplacement anchor/order contractがなく、ordinary inboundが既存section末尾へgeneric insertしたことが原因である。date move操作はこのbaseline divergenceを確認した時点で開始しておらず、v0.6.70の`TMV4-DATE-MOVE-01`はTaskMoved FAILではなく`BLOCKED`とする。
 
-v0.6.71はordinary TaskCreatedへ任意の`taskcreated_placement_version=1`、`placement_mode`、必要時`placement_anchor_entry_id`を追加する。senderはlocal save後にMarkdownを再読込し、同sectionの直前entryを優先、なければ直後entry、どちらもなければ`only-in-section`としてsnapshot化する。inboundはexact anchor / section / adjacencyまたはonly-row状態を保存後に再検証してからAckする。versionなしpayloadはbounded diagnostic付きlegacy fallback、未知versionは未Ack停止とし、既Ack済みv0.6.70 rowの自動修復や補正TaskMovedは行わない。focused testと既存standalone testsはPASSしているが、server round-tripと三端末実機試験は未実施である。
+v0.6.71はordinary TaskCreatedへ任意の`taskcreated_placement_version=1`、`placement_mode`、必要時`placement_anchor_entry_id`を追加する。senderはlocal save後にMarkdownを再読込し、同sectionの直前entryを優先、なければ直後entry、どちらもなければ`only-in-section`としてsnapshot化する。inboundはexact anchor / section / adjacencyまたはonly-row状態を保存後に再検証してからAckする。versionなしpayloadはbounded diagnostic付きlegacy fallback、未知versionは未Ack停止とし、既Ack済みv0.6.70 rowの自動修復や補正TaskMovedは行わない。focused testと既存standalone testsはPASSし、tag由来assetsとdownloaded assetsのSHA256一致も確認済みだが、server round-tripと三端末実機試験は未実施である。
 
 v0.6.70実機試験では、section / empty-section routeのT-0653 / E-20260816-0029、row routeのT-0654 / E-20260816-0030、empty night routeのT-0655 / E-20260816-0031がtargeted PASSとなった。3件ともCtrl+Z前にexact semantic action、operation ID、batch ID、fingerprint、history topを確認し、forward / Undo / Redo TaskMovedがD1 seq 2404〜2406、2409〜2411、2414〜2416としてremote / mobile appliedになった。Undo / Redo後はdev / remote physical sectionとmobile UIが収束した。これによりv0.6.69 failureは試験した3 routeについて解消したが、plugin全体 / full matrixは`NOT_VERIFIED`、Delivery StateはVerified=Noのままとする。
 

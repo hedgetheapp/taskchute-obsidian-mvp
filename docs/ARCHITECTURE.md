@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: main統合済み・未配布のv0.6.71。ordinary TaskCreatedは作成後Markdownのexact physical neighborからversioned placement snapshotを作り、inboundも保存後adjacencyを検証してからAckする。最新immutable配布はtag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`のv0.6.70 BRAT Prereleaseで、公開済みassetsは変更しない。v0.6.71のsyntheticはPASSしたが実機とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
+調査基準: main統合・immutable BRAT試験配布済みのv0.6.71。ordinary TaskCreatedは作成後Markdownのexact physical neighborからversioned placement snapshotを作り、inboundも保存後adjacencyを検証してからAckする。tag target `24b3a480593a03921bc3bb497842b0a14fc8cae8`由来の3 assetsは公開後downloadとのSHA256一致を確認済みで、差し替えない。syntheticはPASSしたが実機とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
 
 ## 1. 概要
 

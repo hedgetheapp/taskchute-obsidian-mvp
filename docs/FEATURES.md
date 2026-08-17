@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はmain統合済み・未配布のv0.6.71を現行feature inventoryとする。最新immutable配布はv0.6.70 BRAT Prereleaseである。v0.6.71はordinary TaskCreatedの実保存後Markdownからexact placementをsnapshot化し、受信側で隣接関係を保存後検証する。syntheticはPASSだが実機は未検証で、full matrixは`NOT_VERIFIED`である。
+この一覧はimmutable BRAT試験配布済みのv0.6.71を現行feature inventoryとする。v0.6.71はordinary TaskCreatedの実保存後Markdownからexact placementをsnapshot化し、受信側で隣接関係を保存後検証する。syntheticと配布asset integrityはPASSだが実機は未検証で、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 

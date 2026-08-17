@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様はmain統合済み・未配布の`v0.6.71`を基準とする。最新immutable配布は`v0.6.70` BRAT Prereleaseで、tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`の公開済み配布物は固定されている。v0.6.71はordinary TaskCreated exact placementを追加したが実機未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様はmain統合・BRAT試験配布済みの`v0.6.71`を基準とする。annotated tag objectは`8f5624beed25754e56a4b012a429a1a4436a453d`、peeled targetは`24b3a480593a03921bc3bb497842b0a14fc8cae8`で、公開済み配布物は固定する。v0.6.71はordinary TaskCreated exact placementを追加したが実機未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 

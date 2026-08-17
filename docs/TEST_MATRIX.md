@@ -2,10 +2,10 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.71 integrated candidate（ordinary TaskCreated exact placementを実装。未配布・実機未検証、plugin全体 / full matrixは`NOT_VERIFIED`）
-- 最新配布済みcheckpoint: immutable `v0.6.70` BRAT Prerelease、tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`
+- 対象実装: v0.6.71 BRAT Prerelease（ordinary TaskCreated exact placementを実装・試験配布済み。実機未検証、plugin全体 / full matrixは`NOT_VERIFIED`）
+- 配布済みcheckpoint: immutable `v0.6.71` BRAT Prerelease、tag target `24b3a480593a03921bc3bb497842b0a14fc8cae8`
 - v0.6.71はpost-save Markdown neighborからTaskCreated placement v1を構築し、inboundでexact adjacencyを保存後検証する。synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.71についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
