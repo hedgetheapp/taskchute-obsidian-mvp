@@ -4,13 +4,13 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current release: `v0.6.63` BRAT Prerelease
+- Current implementation: `v0.6.71` (integrated, not yet test-distributed)
 - Current branch: `feature/v6.6-routine-sync`
-- Canonical docs checkpoint: `v0.6.63` tag target
-- Release commit: Git tag `v0.6.63`のtargetを参照
+- Latest immutable test distribution: `v0.6.70` BRAT Prerelease
+- v0.6.71 release tag: not created
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.63は、reload後にruntime rowのsection identityが空でも、exact source/target `entry_id`と物理Markdown見出しからsame-section D&Dを解決する実機試験用BRAT Prereleaseです。generic task追加行にも作成時からsection metadataを保存します。明示section ID不一致を止める一般guard、TaskMoved v4 identity、rename handoff、insert-below orderは維持します。synthetic / structural試験は完了していますが、実Vault / 実mobileでは`NOT_VERIFIED`であり、Verified済み安定版ではありません。
+v0.6.71は、通常TaskCreatedの作成後Markdownからexactな隣接`entry_id`を取得し、versioned placement contractとして送信・受信側で保存後検証する実装です。v0.6.70で確認されたsection-top作成の三端末order divergenceを対象にします。synthetic / structural試験は完了していますが、BRAT配布と実Vault / 実mobile試験は未実施で、Verified済み安定版ではありません。
 
 ## Canonical Documentation
 

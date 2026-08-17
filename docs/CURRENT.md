@@ -3,13 +3,13 @@
 ## 調査基準
 
 - 調査日: 2026-08-17
-- manifest version: `0.6.70`
+- manifest version: `0.6.71`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.70 TaskBoard D&D targeted device evidence
-- release tag: `v0.6.70`（現在のimmutable BRAT実機試験用Prerelease。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`。公開済みtag / Release / assetsは固定）
+- canonical docs checkpoint: v0.6.71 TaskCreated exact placement integrated candidate
+- latest release tag: `v0.6.70`（immutable BRAT実機試験用Prerelease。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`。公開済みtag / Release / assetsは固定。v0.6.71 tagは未作成）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.69はimmutable BRAT Prereleaseとして試験配布済みだが、実機`UNDO-BRIDGE-CROSS-SECTION-01`はD&D直後・Ctrl+Z前にsemantic lifecycleが存在せずFAILした。v0.6.70は実際のTaskBoard row / section drop callbackを共通dispatch gatewayへ集約し、section-target helperにもoperation-scoped semantic contractを適用する。cross-sectionのsection / row / empty-section target、same-section reorder、duplicate-task-id multi-entry Undo / Redoのtargeted実機試験はPASSした。plugin全体 / full matrixは`NOT_VERIFIED`で、Verified / Releasedとはしない。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.70はimmutable BRAT Prereleaseとして試験配布済みで、TaskBoard D&Dのtargeted実機試験にはPASS証跡がある。一方、通常TaskCreatedのsection-top作成ではsenderが先頭、remote / mobileが末尾となる実機FAILが確認された。v0.6.71は作成後Markdownの物理隣接entryからversioned placement contractを構築し、受信側もexact placementを保存後検証してからAckする。syntheticはPASSだが未配布・実機未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`である。
 
 ## 文書運用
 
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.70 |
+| State | v0.6.71 |
 |---|---|
 | Integrated | Yes |
-| Prereleased / Test-distributed | Yes |
+| Prereleased / Test-distributed | No |
 | Verified | No |
 | Released | No |
 
@@ -79,6 +79,10 @@ v0.6.68実機試験ではrouting自体は成功したが、UNDO-BRIDGE-CROSS-SEC
 v0.6.69実機試験でもUNDO-BRIDGE-CROSS-SECTION-01はFAILした。fixture `undo-v069-cross-normal`のobserved entryはE-20260816-0028で、single selectionだった。D&D直後・Ctrl+Z前にactive operation / pending batchはnull、top actionはoperation ID / batch ID / fingerprint / semanticを持たないgeneric snapshotで、lifecycle / drag diagnosticsも空だった。Ctrl+Zは失敗前提検出後に意図的に実行していない。source traceではrow targetが`moveTaskByDrag()`へ入る一方、section-container / empty-section targetがlegacy `moveTaskToSectionByDrag()`へ入り、Markdownとforward TaskMovedを更新しながらoperation-scoped lifecycleを開始しないbypassを確認した。
 
 v0.6.70はTaskBoardのrow / section / mobile quick dropを`dispatchTaskBoardTaskDrop()`へ集約し、routeをmutation前に診断する。section-target helperも最初のwrite前にoperationを開始し、forward TaskMoved後はrow helperと同じ`finalizeTaskMovedUndoSemanticHandoff()`でsemantic actionとhistory topを検証する。実際の`dropTaskBoardDrag()` callbackを通すrow / section testとfailure barrier testはPASSした。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`のimmutable BRAT Prereleaseとして試験配布済みで、後述のcross-section 3 route、same-section reorder、multi-entry exact-entry Undo / Redoには実Vault / remote / mobile PASS証跡があるが、plugin全体 / full matrixは`NOT_VERIFIED`である。
+
+v0.6.70の`TASKCREATED-SECTION-TOP-ORDER-01`では、T-0667 / E-20260817-0015のTaskCreated seq 2462がremote / mobile appliedになったにもかかわらず、devはafternoon先頭、remote / mobileは末尾へ保存した。payloadにplacement anchor/order contractがなく、ordinary inboundが既存section末尾へgeneric insertしたことが原因である。date move操作はこのbaseline divergenceを確認した時点で開始しておらず、v0.6.70の`TMV4-DATE-MOVE-01`はTaskMoved FAILではなく`BLOCKED`とする。
+
+v0.6.71はordinary TaskCreatedへ任意の`taskcreated_placement_version=1`、`placement_mode`、必要時`placement_anchor_entry_id`を追加する。senderはlocal save後にMarkdownを再読込し、同sectionの直前entryを優先、なければ直後entry、どちらもなければ`only-in-section`としてsnapshot化する。inboundはexact anchor / section / adjacencyまたはonly-row状態を保存後に再検証してからAckする。versionなしpayloadはbounded diagnostic付きlegacy fallback、未知versionは未Ack停止とし、既Ack済みv0.6.70 rowの自動修復や補正TaskMovedは行わない。focused testと既存standalone testsはPASSしているが、server round-tripと三端末実機試験は未実施である。
 
 v0.6.70実機試験では、section / empty-section routeのT-0653 / E-20260816-0029、row routeのT-0654 / E-20260816-0030、empty night routeのT-0655 / E-20260816-0031がtargeted PASSとなった。3件ともCtrl+Z前にexact semantic action、operation ID、batch ID、fingerprint、history topを確認し、forward / Undo / Redo TaskMovedがD1 seq 2404〜2406、2409〜2411、2414〜2416としてremote / mobile appliedになった。Undo / Redo後はdev / remote physical sectionとmobile UIが収束した。これによりv0.6.69 failureは試験した3 routeについて解消したが、plugin全体 / full matrixは`NOT_VERIFIED`、Delivery StateはVerified=Noのままとする。
 

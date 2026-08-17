@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current implementation and immutable test distribution: `v0.6.70` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No), tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`.
-- v0.6.69 real-device `UNDO-BRIDGE-CROSS-SECTION-01` failed before Ctrl+Z: the actual TaskBoard D&D route left no active operation, pending batch, semantic action, or lifecycle diagnostic. v0.6.70 routes row and section-container drops through one UI dispatch gateway and applies the same operation-scoped semantic contract to the legacy section-target helper. The cross-section section-target, row-target, empty-section-target, same-section reorder, and duplicate-task-id multi-entry Undo/Redo behaviors now have current three-device PASS evidence; the plugin overall / full matrix remains `NOT_VERIFIED`.
+- Current implementation: `v0.6.71` (Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No). The latest immutable test distribution remains `v0.6.70` BRAT Prerelease, tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`.
+- v0.6.70 real-device `TASKCREATED-SECTION-TOP-ORDER-01` exposed that ordinary TaskCreated lacked an exact placement contract: sender section-top order and remote/mobile appended order diverged despite Ack. v0.6.71 captures a versioned placement contract from post-save Markdown neighbors and verifies exact inbound placement before Ack. Synthetic tests pass; device verification and the plugin full matrix remain `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 
@@ -25,6 +25,7 @@ Historical files under `docs/archive/` preserve old decisions and test evidence.
 - Vault Markdown is the source of truth for TaskBoard date, section, order, entry position, task definition, and persisted execution state.
 - `Taskchute/_system/index.json` is a rebuildable cache. Do not treat index-only disagreement as authoritative over Markdown.
 - Task identity is `task_id + entry_id`. An event with `entry_id` must not resolve or Ack a different entry using `task_id` alone.
+- Ordinary TaskCreated placement v1 uses the sender's post-save physical neighbor `entry_id`; `creation_source` is diagnostic metadata, not placement authority. Unsupported placement versions and unsatisfied exact placement must remain unacked.
 - Current Routine occurrence identity is `routine:{routine_id}:{YYYY-MM-DD}`. Do not include title, scheduled time, section, or estimate in the key.
 - Do not infer Routine identity from `task_id` alone.
 

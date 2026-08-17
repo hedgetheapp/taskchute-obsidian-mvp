@@ -8,6 +8,32 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.71 - 2026-08-17
+
+Type: Integrated runtime candidate (not yet BRAT Prerelease)
+
+### Changed
+
+- ordinary TaskCreatedへoptional placement v1 contractを追加し、作成後Markdownのexact physical neighborから`before-entry` / `after-entry` / `only-in-section`を構築する。
+- inbound TaskCreated v1はexact anchor / section / adjacencyまたはsection内唯一性を保存後に再検証し、registry verification成功後だけAckする。
+- legacy no-version payloadはbounded diagnostic付き従来fallbackを維持し、未知version・不成立anchor・idempotent placement mismatchは未Ack停止する。
+- rename / refresh / outbox retryはcreation-time placement snapshotを保持し、初期order修復用TaskMovedは生成しない。
+- `manifest.json`を`0.6.71`へ更新した。
+
+### Verification
+
+- `taskcreated-placement-v0671.js`: section-top real-fixture相当、insert-below、sequential create、only-section、legacy/unknown/anchor/idempotent guards、duplicate task ID、protected placement、rename immutability、no TaskMoved repair: synthetic PASS
+- TaskCreated rename、insert-below、interrupt continuation、TaskMoved v4、Undo / Redoを含む全standalone repository tests: PASS
+- v0.6.70 post-prerelease discovery `TASKCREATED-SECTION-TOP-ORDER-01`: FAIL。T-0667 / E-20260817-0015、TaskCreated seq 2462はremote / mobile appliedだがdev section先頭に対して両peerは末尾へ保存。payloadにplacement contractなし。
+- v0.6.70 `TMV4-DATE-MOVE-01` attempt: `BLOCKED`。baseline order divergenceをdate move操作前に検出したため、date-change TaskMovedのPASS/FAIL証跡ではない。
+- v0.6.71 real Vault / D1 optional-field round-trip / remote / mobile: `NOT_VERIFIED`
+- plugin full matrix: `NOT_VERIFIED`
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=No / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.71.md`](docs/release/v0.6.71.md)
+
+---
+
 ## v0.6.70 - 2026-08-16
 
 Type: Runtime BRAT Prerelease for device testing

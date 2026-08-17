@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はBRAT試験配布済みv0.6.70の現行feature inventoryである。配布済みv0.6.69では実TaskBoard D&D直後にoperation / batch / semantic / diagnosticが作られないroute bypassが確認された。v0.6.70はrow / section-container dropを共通gatewayからdispatchし、single-task same-date routeへ同一semantic lifecycleを要求する。cross-sectionのsection-target、row-target、empty-section-target、same-section reorder、duplicate-task-id multi-entry Undo / Redoのtargeted実機試験はPASSし、full matrixは`NOT_VERIFIED`である。
+この一覧はmain統合済み・未配布のv0.6.71を現行feature inventoryとする。最新immutable配布はv0.6.70 BRAT Prereleaseである。v0.6.71はordinary TaskCreatedの実保存後Markdownからexact placementをsnapshot化し、受信側で隣接関係を保存後検証する。syntheticはPASSだが実機は未検証で、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.70で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.71で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -28,7 +28,7 @@
 
 | 機能 | 状態 | 概要・根拠 |
 |---|---|---|
-| Task作成 | 実装済み | 通常追加、section先頭、現在行の下、割り込み追加。全通常作成行へ`section` / `section_id`を保存する。explicit insert-belowは通常target直下へ物理保存し、completed / running / paused保護時だけ既存top-insert規則を使う。`addTask()`、`insertTaskAfterKey()`、`insertTaskBelowCurrent()`。 |
+| Task作成 | 実装済み・v0.6.71実機未試験 | 通常追加、section先頭、現在行の下、割り込み追加。全通常作成行へ`section` / `section_id`を保存する。v0.6.71のordinary TaskCreatedは保存後Markdownのexact neighborをv1 placementとして保持し、remoteもbefore / after / onlyを再現・再読込検証する。legacy payloadは従来互換、未知versionや不成立anchorは未Ack停止する。interrupt-continuation専用contractは維持する。 |
 | Task編集 | 実装済み | title、estimate、start/end plan、actual、各属性を更新。 |
 | Task削除 | 実装済み | 単体・複数・全件系。削除前snapshotとBridge guardを持つ。 |
 | Taskコピー | 実装済み | task noteとboard entryを別IDで複製し、通常targetでは物理行も選択行直下へ保存する。 |
@@ -98,7 +98,7 @@
 | 整合性診断 | 実装済み | folder、ID、frontmatter、duplicate、runtime等を検査。 |
 | one-click repair | 実装済み | backupとreportを作り、安全と判断した項目だけ修復。 |
 | error log管理 | 実装済み | Taskchute由来logの保存・cleanup・診断表示。 |
-| 自動テスト | 一部実装 | `tests/`にv0.6.59からv0.6.70のTaskMoved、rename、insert-below、section handoff、physical context、interrupt continuation、Undo / Redo lifecycle / keyboard routing / actual UI D&D route focused testsがある。汎用test runnerと広範な自動回帰は未実装。 |
+| 自動テスト | 一部実装 | `tests/`にv0.6.59からv0.6.71のTaskMoved、TaskCreated placement / rename、insert-below、section handoff、physical context、interrupt continuation、Undo / Redo lifecycle / keyboard routing / actual UI D&D route focused testsがある。汎用test runnerと広範な自動回帰は未実装。 |
 
 ## Bridge
 

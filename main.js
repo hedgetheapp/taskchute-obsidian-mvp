@@ -3042,6 +3042,233 @@ function collectTaskBoardPhysicalOccurrences(markdown) {
   return { lines, occurrences };
 }
 
+function normalizeBridgeTaskCreatedPlacementContract(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const hasVersion = Object.prototype.hasOwnProperty.call(source, "taskcreated_placement_version")
+    && source.taskcreated_placement_version !== ""
+    && source.taskcreated_placement_version != null;
+  if (!hasVersion) return { ok: true, legacy: true, version: 0, mode: "", anchorEntryId: "" };
+  const version = Number(source.taskcreated_placement_version);
+  if (!Number.isInteger(version) || version !== 1) {
+    return { ok: false, legacy: false, version, mode: "", anchorEntryId: "", reason_code: "taskcreated_placement_version_unsupported", reason: "未対応のTaskCreated placement versionです。" };
+  }
+  const mode = String(source.placement_mode || "").trim();
+  const anchorEntryId = String(source.placement_anchor_entry_id || "").trim();
+  if (!["before-entry", "after-entry", "only-in-section"].includes(mode)) {
+    return { ok: false, legacy: false, version, mode, anchorEntryId, reason_code: "taskcreated_placement_mode_invalid", reason: "TaskCreated placement_modeが不正です。" };
+  }
+  if ((mode === "before-entry" || mode === "after-entry") && !anchorEntryId) {
+    return { ok: false, legacy: false, version, mode, anchorEntryId, reason_code: "taskcreated_placement_anchor_missing", reason: "TaskCreated exact placementに必要なanchor entry_idがありません。" };
+  }
+  if (mode === "only-in-section" && anchorEntryId) {
+    return { ok: false, legacy: false, version, mode, anchorEntryId, reason_code: "taskcreated_placement_anchor_forbidden", reason: "only-in-sectionにanchor entry_idを指定できません。" };
+  }
+  return { ok: true, legacy: false, version, mode, anchorEntryId };
+}
+
+function buildBridgeTaskCreatedPlacementFromSavedMarkdown(markdown, settings, options = {}) {
+  const taskId = String(options.taskId || options.task_id || "").trim();
+  const entryId = String(options.entryId || options.entry_id || "").trim();
+  const collected = collectTaskBoardPhysicalOccurrences(markdown);
+  const entryMatches = collected.occurrences.filter(item => item.entry_id === entryId);
+  const result = {
+    ok: false,
+    reason_code: "",
+    reason: "",
+    task_id: taskId,
+    entry_id: entryId,
+    entry_match_count: entryMatches.length,
+    physical_section_id: "",
+    physical_section_label: "",
+    taskcreated_placement_version: 1,
+    placement_mode: "",
+    placement_anchor_entry_id: ""
+  };
+  if (!taskId || !entryId || entryMatches.length !== 1) {
+    result.reason_code = entryMatches.length > 1 ? "taskcreated_placement_created_entry_duplicate" : "taskcreated_placement_created_entry_missing";
+    result.reason = entryMatches.length > 1
+      ? "作成済みTaskCreated entry_idが物理Markdownに複数あります。"
+      : "作成済みTaskCreated entry_idを物理Markdownから一意に解決できませんでした。";
+    return result;
+  }
+  const occurrence = entryMatches[0];
+  if (occurrence.task_id !== taskId) {
+    result.reason_code = "taskcreated_placement_created_task_mismatch";
+    result.reason = "作成済みTaskCreated行のtask_idが期待値と一致しません。";
+    return result;
+  }
+  const section = findBoardSection(settings || {}, occurrence.physical_section_label);
+  if (!section) {
+    result.reason_code = "taskcreated_placement_physical_section_unresolved";
+    result.reason = "作成済みTaskCreated行の物理sectionを解決できませんでした。";
+    return result;
+  }
+  const rowIdentity = resolveTaskLineSectionIdentityForPhysicalHeading(occurrence.line, settings || {}, occurrence.physical_section_label, { normalizeMissing: false });
+  if (!rowIdentity.ok || String(rowIdentity.physical_section_id || "") !== String(section.id || "")) {
+    result.reason_code = rowIdentity.reason_code || "taskcreated_placement_row_section_mismatch";
+    result.reason = rowIdentity.reason || "作成済みTaskCreated行のsection metadataが物理見出しと一致しません。";
+    return result;
+  }
+  const sectionOccurrences = collected.occurrences.filter(item => item.physical_section_label === occurrence.physical_section_label);
+  const position = sectionOccurrences.indexOf(occurrence);
+  if (position < 0) {
+    result.reason_code = "taskcreated_placement_created_entry_missing_from_section";
+    result.reason = "作成済みTaskCreated行を物理section順から解決できませんでした。";
+    return result;
+  }
+  const previous = position > 0 ? sectionOccurrences[position - 1] : null;
+  const next = position + 1 < sectionOccurrences.length ? sectionOccurrences[position + 1] : null;
+  const selectedNeighbor = previous || next;
+  if (selectedNeighbor && !selectedNeighbor.entry_id) {
+    result.reason_code = "taskcreated_placement_neighbor_entry_missing";
+    result.reason = "作成済みTaskCreated行の隣接rowにentry_idがありません。";
+    return result;
+  }
+  if (selectedNeighbor && collected.occurrences.filter(item => item.entry_id === selectedNeighbor.entry_id).length !== 1) {
+    result.reason_code = "taskcreated_placement_neighbor_entry_duplicate";
+    result.reason = "作成済みTaskCreated行の隣接entry_idが物理Markdown内で一意ではありません。";
+    return result;
+  }
+  result.physical_section_id = String(section.id || "").trim();
+  result.physical_section_label = String(section.name || occurrence.physical_section_label || "").trim();
+  if (previous) {
+    result.placement_mode = "after-entry";
+    result.placement_anchor_entry_id = previous.entry_id;
+  } else if (next) {
+    result.placement_mode = "before-entry";
+    result.placement_anchor_entry_id = next.entry_id;
+  } else {
+    result.placement_mode = "only-in-section";
+  }
+  result.ok = true;
+  result.reason_code = "taskcreated_placement_captured";
+  result.reason = "保存済みMarkdownの隣接entryからTaskCreated placementを確定しました。";
+  return result;
+}
+
+function inspectBridgeTaskCreatedPlacement(markdown, settings, options = {}) {
+  const taskId = String(options.taskId || options.task_id || "").trim();
+  const entryId = String(options.entryId || options.entry_id || "").trim();
+  const expectedSectionId = String(options.sectionId || options.section_id || "").trim();
+  const contract = normalizeBridgeTaskCreatedPlacementContract(options.contract || options.payload || options);
+  const collected = collectTaskBoardPhysicalOccurrences(markdown);
+  const entryMatches = collected.occurrences.filter(item => item.entry_id === entryId);
+  const result = {
+    ok: false,
+    reason_code: "",
+    reason: "",
+    contract,
+    entry_match_count: entryMatches.length,
+    anchor_match_count: 0,
+    physical_section_id: "",
+    row_section_id: "",
+    adjacent_to_anchor: false,
+    section_entry_count: 0
+  };
+  if (!contract.ok || contract.legacy) {
+    result.reason_code = contract.reason_code || "taskcreated_placement_contract_missing";
+    result.reason = contract.reason || "TaskCreated v1 placement contractがありません。";
+    return result;
+  }
+  if (!taskId || !entryId || entryMatches.length !== 1) {
+    result.reason_code = entryMatches.length > 1 ? "taskcreated_placement_created_entry_duplicate" : "taskcreated_placement_created_entry_missing";
+    result.reason = "TaskCreated行をexact entry_idで一意に検証できませんでした。";
+    return result;
+  }
+  const occurrence = entryMatches[0];
+  if (occurrence.task_id !== taskId) {
+    result.reason_code = "taskcreated_placement_created_task_mismatch";
+    result.reason = "TaskCreated行のtask_idがpayloadと一致しません。";
+    return result;
+  }
+  const section = findBoardSection(settings || {}, occurrence.physical_section_label);
+  const rowIdentity = resolveTaskLineSectionIdentityForPhysicalHeading(occurrence.line, settings || {}, occurrence.physical_section_label, { normalizeMissing: false });
+  result.physical_section_id = String(section && section.id || "").trim();
+  result.row_section_id = String(rowIdentity.parsed_row_section_id || "").trim();
+  if (!section || !rowIdentity.ok || result.physical_section_id !== expectedSectionId || result.row_section_id !== expectedSectionId) {
+    result.reason_code = rowIdentity.reason_code || "taskcreated_placement_section_mismatch";
+    result.reason = rowIdentity.reason || "TaskCreated行の物理sectionまたはrow metadataがpayload sectionと一致しません。";
+    return result;
+  }
+  const sectionOccurrences = collected.occurrences.filter(item => item.physical_section_label === occurrence.physical_section_label);
+  const position = sectionOccurrences.indexOf(occurrence);
+  result.section_entry_count = sectionOccurrences.length;
+  if (contract.mode === "only-in-section") {
+    if (sectionOccurrences.length !== 1 || position !== 0) {
+      result.reason_code = "taskcreated_placement_only_section_mismatch";
+      result.reason = "only-in-sectionの保存後sectionに作成row以外のtaskがあります。";
+      return result;
+    }
+    result.ok = true;
+    result.reason_code = "taskcreated_placement_verified";
+    result.reason = "TaskCreated only-in-section placementを確認しました。";
+    return result;
+  }
+  const anchorMatches = collected.occurrences.filter(item => item.entry_id === contract.anchorEntryId);
+  result.anchor_match_count = anchorMatches.length;
+  if (anchorMatches.length !== 1) {
+    result.reason_code = anchorMatches.length > 1 ? "taskcreated_placement_anchor_duplicate" : "taskcreated_placement_anchor_missing";
+    result.reason = "TaskCreated placement anchorをexact entry_idで一意に解決できませんでした。";
+    return result;
+  }
+  const anchor = anchorMatches[0];
+  if (anchor.physical_section_label !== occurrence.physical_section_label) {
+    result.reason_code = "taskcreated_placement_anchor_section_mismatch";
+    result.reason = "TaskCreated placement anchorが作成rowと同じ物理sectionにありません。";
+    return result;
+  }
+  const anchorPosition = sectionOccurrences.indexOf(anchor);
+  result.adjacent_to_anchor = contract.mode === "after-entry"
+    ? position === anchorPosition + 1
+    : position + 1 === anchorPosition;
+  if (!result.adjacent_to_anchor) {
+    result.reason_code = "taskcreated_placement_saved_relation_mismatch";
+    result.reason = "TaskCreated行がplacement anchorの指定位置に隣接していません。";
+    return result;
+  }
+  result.ok = true;
+  result.reason_code = "taskcreated_placement_verified";
+  result.reason = "TaskCreated exact relative placementを確認しました。";
+  return result;
+}
+
+function inspectBridgeTaskCreatedPlacementTargetBeforeInsert(markdown, settings, sectionId, contractInput) {
+  const contract = normalizeBridgeTaskCreatedPlacementContract(contractInput || {});
+  const collected = collectTaskBoardPhysicalOccurrences(markdown);
+  const section = findBoardSection(settings || {}, sectionId);
+  if (!contract.ok || contract.legacy) return { ok: false, contract, reason_code: contract.reason_code || "taskcreated_placement_contract_missing", reason: contract.reason || "TaskCreated v1 placement contractがありません。" };
+  if (!section) return { ok: false, contract, reason_code: "taskcreated_placement_section_unresolved", reason: "TaskCreated destination sectionを解決できませんでした。" };
+  const sectionOccurrences = collected.occurrences.filter(item => item.physical_section_label === section.name);
+  if (contract.mode === "only-in-section") {
+    return sectionOccurrences.length === 0
+      ? { ok: true, contract, section, sectionOccurrences }
+      : { ok: false, contract, section, sectionOccurrences, reason_code: "taskcreated_placement_only_section_not_empty", reason: "only-in-sectionのdestination sectionが空ではありません。" };
+  }
+  const anchorMatches = collected.occurrences.filter(item => item.entry_id === contract.anchorEntryId);
+  if (anchorMatches.length !== 1) {
+    return { ok: false, contract, section, sectionOccurrences, anchorMatches, reason_code: anchorMatches.length > 1 ? "taskcreated_placement_anchor_duplicate" : "taskcreated_placement_anchor_missing", reason: "TaskCreated placement anchorをdestination dateから一意に解決できませんでした。" };
+  }
+  const anchor = anchorMatches[0];
+  const anchorSection = findBoardSection(settings || {}, anchor.physical_section_label);
+  if (!anchorSection || String(anchorSection.id || "") !== String(section.id || "")) {
+    return { ok: false, contract, section, sectionOccurrences, anchorMatches, reason_code: "taskcreated_placement_anchor_section_mismatch", reason: "TaskCreated placement anchorがdestination sectionにありません。" };
+  }
+  return { ok: true, contract, section, sectionOccurrences, anchor };
+}
+
+function insertTaskRelativeToEntryId(markdown, anchorEntryId, line, mode) {
+  const collected = collectTaskBoardPhysicalOccurrences(markdown);
+  const anchor = String(anchorEntryId || "").trim();
+  const matches = collected.occurrences.filter(item => item.entry_id === anchor);
+  if (!anchor || matches.length !== 1 || !["before-entry", "after-entry"].includes(String(mode || ""))) {
+    return { ok: false, markdown: String(markdown || ""), matchCount: matches.length };
+  }
+  const target = matches[0];
+  const insertAt = String(mode || "") === "before-entry" ? target.index : target.index + 1;
+  collected.lines.splice(insertAt, 0, line);
+  return { ok: true, markdown: collected.lines.join("\n"), matchCount: 1 };
+}
+
 function inspectInterruptContinuationPlacement(markdown, settings, options = {}) {
   const interruptEntryId = String(options.interruptEntryId || "").trim();
   const continuationEntryId = String(options.continuationEntryId || "").trim();
@@ -17927,7 +18154,25 @@ class TaskchutePlugin extends obsidian.Plugin {
     let verified = false;
     try {
       if (eventType === "TaskCreated") {
-        if (rawResult && rawResult.routineOccurrenceDuplicate) {
+        const isContinuation = !!String(payload.continuation_of_task_id || payload.continued_from_task_id || "").trim()
+          || String(payload.creation_source || "").trim() === "interrupt-continuation";
+        const placementContract = isContinuation
+          ? { ok: true, legacy: true }
+          : normalizeBridgeTaskCreatedPlacementContract(payload);
+        if (!isContinuation && placementContract.ok && !placementContract.legacy) {
+          const date = this.normalizeDate(payload.date || this.getToday());
+          const sectionKey = String(payload.section_id || payload.section || payload.section_label || "").trim();
+          const section = sectionKey ? getSectionByNameOrId(this.settings, sectionKey) : null;
+          const markdown = await readFileText(this.app, this.getTaskchutePath(date));
+          const placementInspection = inspectBridgeTaskCreatedPlacement(markdown, this.settings, {
+            taskId,
+            entryId,
+            sectionId: String(section && section.id || ""),
+            contract: payload
+          });
+          verified = !!placementInspection.ok;
+          rawResult.taskCreatedPlacementVerification = placementInspection;
+        } else if (rawResult && rawResult.routineOccurrenceDuplicate) {
           const date = this.normalizeDate(payload.date || this.getToday());
           const markdown = await readFileText(this.app, this.getTaskchutePath(date));
           const generatedRoutineId = String(payload.generated_by_routine_id || payload.routine_id || "").trim();
@@ -18675,6 +18920,49 @@ class TaskchutePlugin extends obsidian.Plugin {
     const requestedEntryId = String(payload.entry_id || "").trim();
     const continuationAfterEntryId = String(payload.continuation_after_entry_id || "").trim();
     const expectedContinuationAnchorTaskId = String(payload.continuation_next_task_id || payload.next_task_id || "").trim();
+    const taskCreatedPlacement = isContinuation
+      ? { ok: true, legacy: true, specializedContinuation: true, version: 0, mode: "", anchorEntryId: "" }
+      : normalizeBridgeTaskCreatedPlacementContract(payload);
+    const failTaskCreatedPlacement = (phase, detail = {}) => {
+      const reasonCode = String(detail.reason_code || taskCreatedPlacement.reason_code || "taskcreated_placement_failed");
+      const message = String(detail.reason || taskCreatedPlacement.reason || "TaskCreated exact placementを検証できませんでした。");
+      this.recordBridgeStructuredDiagnostic({
+        level: "error",
+        category: "taskcreated-placement",
+        phase,
+        reason: reasonCode,
+        event,
+        status: "failed_unacked",
+        message,
+        detail: {
+          task_id: taskId,
+          entry_id: requestedEntryId,
+          date,
+          section_id: String(sec.id || ""),
+          taskcreated_placement_version: taskCreatedPlacement.version,
+          placement_mode: String(taskCreatedPlacement.mode || ""),
+          placement_anchor_entry_id: String(taskCreatedPlacement.anchorEntryId || ""),
+          anchor_match_count: Math.max(0, Number(detail.anchor_match_count || detail.anchorMatches && detail.anchorMatches.length || 0)),
+          entry_match_count: Math.max(0, Number(detail.entry_match_count || 0))
+        }
+      });
+      return { ok: false, message };
+    };
+    if (!taskCreatedPlacement.ok) {
+      return failTaskCreatedPlacement("inbound_taskcreated_placement_contract_blocked", taskCreatedPlacement);
+    }
+    if (!isContinuation && taskCreatedPlacement.legacy) {
+      this.recordBridgeStructuredDiagnostic({
+        level: "warn",
+        category: "taskcreated-placement",
+        phase: "legacy_taskcreated_placement_fallback",
+        reason: "taskcreated_placement_version_absent",
+        event,
+        status: "legacy-compatible",
+        message: "placement versionのないlegacy TaskCreatedを従来のsection末尾挿入で処理します。",
+        detail: { task_id: taskId, entry_id: requestedEntryId, date, section_id: String(sec.id || ""), creation_source: String(payload.creation_source || "") }
+      });
+    }
     const requestedEntryLines = requestedEntryId
       ? String(md || "").split(/\r?\n/).filter(line => isTaskLine(line) && taskKeyFromTaskLine(line) === requestedEntryId)
       : [];
@@ -18730,6 +19018,17 @@ class TaskchutePlugin extends obsidian.Plugin {
             }
           });
           return { ok: false, message: "既存interrupt continuationの配置を検証できないためAckしません。" };
+        }
+      }
+      if (!isContinuation && !taskCreatedPlacement.legacy) {
+        const existingPlacement = inspectBridgeTaskCreatedPlacement(md, this.settings, {
+          taskId,
+          entryId: requestedEntryId,
+          sectionId: sec.id || "",
+          contract: payload
+        });
+        if (!existingPlacement.ok) {
+          return failTaskCreatedPlacement("inbound_taskcreated_existing_placement_mismatch", existingPlacement);
         }
       }
       const expectedRoutineFields = getExplicitTaskCreatedRoutineFields(payload);
@@ -18888,6 +19187,13 @@ class TaskchutePlugin extends obsidian.Plugin {
       }, "info", "skipped_applied");
       return { ok: true, noop: true, routineOccurrenceDuplicate: true, message: "同一Routine occurrenceは既に存在します。" };
     }
+    let placementTargetBeforeInsert = null;
+    if (!isContinuation && !taskCreatedPlacement.legacy) {
+      placementTargetBeforeInsert = inspectBridgeTaskCreatedPlacementTargetBeforeInsert(md, this.settings, sec.id || "", payload);
+      if (!placementTargetBeforeInsert.ok) {
+        return failTaskCreatedPlacement("inbound_taskcreated_placement_target_blocked", placementTargetBeforeInsert);
+      }
+    }
     if (!existingTarget && !isContinuation && !generatedRoutineId) {
       const yamlAttrs = buildTaskUserYamlAttrs(this.settings, payload || {}, sec.name);
       const taskText = `---\ntype: task\ntask_id: ${taskId}\ntitle: ${title}\nestimate_min: ${estimateMin}\nstart_plan: ${startPlan}\nend_plan: ${endPlan}\nsection_id: ${sec.id || ""}\n${yamlAttrs ? yamlAttrs + "\n" : ""}active: true\nroutine: false\n---\n\n# ${title}\n\n## Notes\n\n## Comments\n`;
@@ -18955,9 +19261,21 @@ class TaskchutePlugin extends obsidian.Plugin {
       });
       return { ok: false, message: "interrupt continuationのanchor section検証に失敗したため保存・Ackしません。" };
     }
-    md = isContinuation && insertAfterEntryId && insertAfterSameSection
-      ? insertTaskAfterKey(md, this.settings, insertAfterEntryId, createdLine, sec.name, { insertPlacement: "explicit-below" })
-      : insertTaskIntoSection(md, this.settings, sec.name, createdLine);
+    if (isContinuation && insertAfterEntryId && insertAfterSameSection) {
+      md = insertTaskAfterKey(md, this.settings, insertAfterEntryId, createdLine, sec.name, { insertPlacement: "explicit-below" });
+    } else if (!isContinuation && !taskCreatedPlacement.legacy && taskCreatedPlacement.mode !== "only-in-section") {
+      const relativeInsert = insertTaskRelativeToEntryId(md, taskCreatedPlacement.anchorEntryId, createdLine, taskCreatedPlacement.mode);
+      if (!relativeInsert.ok) {
+        return failTaskCreatedPlacement("inbound_taskcreated_relative_insert_blocked", {
+          reason_code: relativeInsert.matchCount > 1 ? "taskcreated_placement_anchor_duplicate" : "taskcreated_placement_anchor_missing",
+          reason: "TaskCreated placement anchorへの相対挿入を実行できませんでした。",
+          anchor_match_count: relativeInsert.matchCount
+        });
+      }
+      md = relativeInsert.markdown;
+    } else {
+      md = insertTaskIntoSection(md, this.settings, sec.name, createdLine);
+    }
     const boardWriteOk = await this.writeFileText(notePath, md, { deviceWriterOperation: "bridge-inbound-task-created-board" });
     if (this.isTaskchuteWriteAborted(boardWriteOk)) return { ok: false, message: "Taskchuteノートへの追加が保存前確認で停止しました。" };
     const savedMarkdown = await readFileText(this.app, notePath);
@@ -18991,6 +19309,17 @@ class TaskchutePlugin extends obsidian.Plugin {
           }
         });
         return { ok: false, message: "interrupt continuation保存後のsection/order検証に失敗したためAckしません。" };
+      }
+    }
+    if (!isContinuation && !taskCreatedPlacement.legacy) {
+      const savedPlacement = inspectBridgeTaskCreatedPlacement(savedMarkdown, this.settings, {
+        taskId,
+        entryId,
+        sectionId: sec.id || "",
+        contract: payload
+      });
+      if (!savedPlacement.ok) {
+        return failTaskCreatedPlacement("inbound_taskcreated_post_save_placement_mismatch", savedPlacement);
       }
     }
     const expectedRoutineFields = getExplicitTaskCreatedRoutineFields(payload);
@@ -26199,6 +26528,70 @@ class TaskchutePlugin extends obsidian.Plugin {
     return { ok: true };
   }
 
+  async enqueueBridgeTaskCreatedFromSavedMarkdown(task, options = {}) {
+    if (!this.settings || !this.settings.bridgeEnabled) return false;
+    const taskId = String(task && (task.taskId || task.task_id) || "").trim();
+    const entryId = String(task && (task.entryId || task.entry_id || task.taskKey) || "").trim();
+    const date = this.normalizeDate(String(task && (task.sourceDate || task.date) || "").trim());
+    const expectedSectionId = String(task && (task.sectionId || task.section_id) || "").trim();
+    const notePath = String(task && task.notePath || "").trim() || (date ? this.getTaskchutePath(date) : "");
+    let placement = null;
+    try {
+      const markdown = taskId && entryId && date && notePath ? await readFileText(this.app, notePath) : "";
+      placement = buildBridgeTaskCreatedPlacementFromSavedMarkdown(markdown, this.settings, { taskId, entryId });
+      if (placement.ok && expectedSectionId && String(placement.physical_section_id || "") !== expectedSectionId) {
+        placement = Object.assign({}, placement, {
+          ok: false,
+          reason_code: "taskcreated_placement_sender_section_mismatch",
+          reason: "保存済みTaskCreated行の物理sectionが作成先sectionと一致しません。"
+        });
+      }
+    } catch (e) {
+      placement = {
+        ok: false,
+        reason_code: "taskcreated_placement_capture_read_failed",
+        reason: String(e && e.message || e || "TaskCreated placement capture read failed")
+      };
+    }
+    if (!placement || !placement.ok) {
+      this.recordBridgeStructuredDiagnostic({
+        level: "error",
+        category: "taskcreated-placement",
+        phase: "taskcreated_placement_capture_failed",
+        reason: String(placement && placement.reason_code || "taskcreated_placement_capture_failed"),
+        status: "failed_unqueued",
+        message: String(placement && placement.reason || "保存済みMarkdownからTaskCreated placementを確定できませんでした。"),
+        detail: {
+          task_id: taskId,
+          entry_id: entryId,
+          date,
+          expected_section_id: expectedSectionId,
+          physical_section_id: String(placement && placement.physical_section_id || ""),
+          entry_match_count: Math.max(0, Number(placement && placement.entry_match_count || 0))
+        }
+      });
+      try { await this.savePluginData({ deviceWriterOperation: "bridge-task-created-placement-capture-failed" }); } catch (e) {}
+      return false;
+    }
+    this.recordBridgeStructuredDiagnostic({
+      level: "info",
+      category: "taskcreated-placement",
+      phase: "taskcreated_placement_captured",
+      reason: "saved-markdown-physical-neighbor",
+      status: "verified",
+      message: "保存済みMarkdownからTaskCreated exact placementを確定しました。",
+      detail: {
+        task_id: taskId,
+        entry_id: entryId,
+        date,
+        physical_section_id: String(placement.physical_section_id || ""),
+        placement_mode: String(placement.placement_mode || ""),
+        placement_anchor_entry_id: String(placement.placement_anchor_entry_id || "")
+      }
+    });
+    return await this.enqueueBridgeTaskCreated(task, Object.assign({}, options || {}, { taskCreatedPlacement: placement }));
+  }
+
   async enqueueBridgeTaskCreated(task, options = {}) {
     if (!this.settings || !this.settings.bridgeEnabled) return false;
     if (this.bridgeInboundApplyInProgress || this.settings.bridgeInboundApplyInProgress) return false;
@@ -26228,6 +26621,9 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!(await this.ensureBridgeSectionDefinitionBeforeTaskEvent(task && (task.sectionId || task.section_id || task.section)))) return false;
     if (!(await this.ensureBridgeRoutineDefinitionBeforeGeneratedTask(task))) return false;
 
+    const placement = options && options.taskCreatedPlacement && options.taskCreatedPlacement.ok
+      ? options.taskCreatedPlacement
+      : null;
     const timestamp = new Date().toISOString();
     const event = {
       event_id: createBridgeEventId(),
@@ -26257,6 +26653,11 @@ class TaskchutePlugin extends obsidian.Plugin {
         ...explicitRoutineFields,
         ...this.getBridgeTaskTimeFields(task),
         creation_source: String(options && options.creationSource || "task-add").trim() || "task-add",
+        ...(placement ? {
+          taskcreated_placement_version: 1,
+          placement_mode: String(placement.placement_mode || "").trim(),
+          ...(placement.placement_anchor_entry_id ? { placement_anchor_entry_id: String(placement.placement_anchor_entry_id || "").trim() } : {})
+        } : {}),
         ...(options && options.continuationOfTaskId ? { continuation_of_task_id: String(options.continuationOfTaskId || "").trim() } : {}),
         ...(options && options.continuedFromTaskId ? { continued_from_task_id: String(options.continuedFromTaskId || "").trim() } : {}),
         ...(options && options.continuationSourceTaskId ? { continuation_source_task_id: String(options.continuationSourceTaskId || "").trim() } : {}),
@@ -33911,7 +34312,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (this.isTaskchuteWriteAborted(boardWriteOk)) return false;
 
       const added = { taskId, entryId, taskKey: entryId, title, file: base, section: sec.name, sectionId: sec.id, estimateMin: normalizedEstimateMin, project: meta.project || "", mode: meta.mode || "", checked: false, actualTotal: 0, startPlan: initialStartPlan, endPlan: "", startActual: "", endActual: "", logStatus: "", sourceDate: date, notePath };
-      const bridgeCreated = await this.enqueueBridgeTaskCreated(added, { creationSource: interrupt ? "interrupt-task-add" : "task-add" });
+      const bridgeCreated = await this.enqueueBridgeTaskCreatedFromSavedMarkdown(added, { creationSource: interrupt ? "interrupt-task-add" : "task-add" });
       if (this.settings.bridgeEnabled && bridgeCreated === false) {
         new obsidian.Notice("タスクはローカル作成済みですが、TaskCreatedをBridge outboxへ保存できませんでした。後続イベント送信は停止されます。");
       }
@@ -36809,7 +37210,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         sourceDate: date,
         notePath
       };
-      const bridgeCreated = await this.enqueueBridgeTaskCreated(added, { creationSource: "task-copy" });
+      const bridgeCreated = await this.enqueueBridgeTaskCreatedFromSavedMarkdown(added, { creationSource: "task-copy" });
       if (this.settings.bridgeEnabled && bridgeCreated === false) {
         new obsidian.Notice("タスクはローカル作成済みですが、TaskCreatedをBridge outboxへ保存できませんでした。後続イベント送信は停止されます。");
       }
@@ -36876,7 +37277,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       const saveOk = await this.savePluginData({ deviceWriterOperation: "task-insert-section-top-runtime" });
       if (this.isTaskchuteWriteAborted(saveOk)) return false;
       const added = { taskId, entryId, taskKey: entryId, title, file: fileBase, section: section.name, sectionId: section.id, estimateMin, checked: false, actualTotal: 0, startActual: "", endActual: "", logStatus: "", startPlan, sourceDate: date, notePath };
-      const bridgeCreated = await this.enqueueBridgeTaskCreated(added, { creationSource: "task-insert-section-top" });
+      const bridgeCreated = await this.enqueueBridgeTaskCreatedFromSavedMarkdown(added, { creationSource: "task-insert-section-top" });
       if (this.settings.bridgeEnabled && bridgeCreated === false) {
         new obsidian.Notice("タスクはローカル作成済みですが、TaskCreatedをBridge outboxへ保存できませんでした。後続イベント送信は停止されます。");
       }
@@ -36956,7 +37357,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       const saveOk = await this.savePluginData({ deviceWriterOperation: "task-insert-below-runtime" });
       if (this.isTaskchuteWriteAborted(saveOk)) return false;
       const added = { taskId, entryId, taskKey: entryId, title, file: fileBase, section: section.name, sectionId: section.id, estimateMin, checked: false, actualTotal: 0, startActual: "", endActual: "", logStatus: "", project: baseTask.project || "", mode: baseTask.mode || "", sourceDate: date, notePath };
-      const bridgeCreated = await this.enqueueBridgeTaskCreated(added, { creationSource: "task-insert-below" });
+      const bridgeCreated = await this.enqueueBridgeTaskCreatedFromSavedMarkdown(added, { creationSource: "task-insert-below" });
       if (this.settings.bridgeEnabled && bridgeCreated === false) {
         new obsidian.Notice("タスクはローカル作成済みですが、TaskCreatedをBridge outboxへ保存できませんでした。後続イベント送信は停止されます。");
       }

@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様はmain統合・BRAT試験配布済みの`v0.6.70`を基準とする。v0.6.70はIntegratedかつPrereleased / Test-distributedで、TaskBoard D&D semantic Undo / Redoのcross-section section / row / empty-section target、same-section reorder、duplicate-task-id multi-entry exact-entry targetingにはcurrent実機PASS証跡がある。一方、plugin全体 / full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`の公開済み配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様はmain統合済み・未配布の`v0.6.71`を基準とする。最新immutable配布は`v0.6.70` BRAT Prereleaseで、tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`の公開済み配布物は固定されている。v0.6.71はordinary TaskCreated exact placementを追加したが実機未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -55,6 +55,13 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - 作成時のphysical orderとvisual orderを同じ挿入結果から構築し、order修復目的のTaskMovedは生成しない。
 - task noteの既定pathは`Taskchute/Tasks/{file_base}.md`。
 - Bridge有効時はTaskCreatedをoutboxへ追加する。
+- v0.6.71以降に新規生成するordinary TaskCreatedは、local作成保存後にdate noteを再読込し、exact `task_id + entry_id`と物理sectionを一意確認してから、任意のplacement v1 contractをsnapshotへ含める。fieldsは`taskcreated_placement_version=1`、`placement_mode=after-entry|before-entry|only-in-section`、before/after時の`placement_anchor_entry_id`である。
+- captureは同sectionの実保存後task順を使い、直前entryがあれば`after-entry`、なければ直後entryの`before-entry`、両方なければ`only-in-section`とする。UI intent、`creation_source`、task IDだけの推定、index cacheはplacement authorityにしない。
+- inbound v1はanchorを同一date・同一physical sectionでexact entryとして一意解決し、その直前または直後へ挿入する。`only-in-section`はfresh apply前にsectionが空の場合だけ許可する。保存後にnew rowのexact identity、row metadata、physical section、隣接anchorまたはsection内唯一性を再読込検証し、registry検証後にだけAckする。
+- v1のexact rowが既存ならduplicateは作らず、identityとplacement relationの両方を検証する。存在だけでは冪等Ackしない。不一致rowを自動移動せず未Ack停止する。
+- placement versionなしはbounded `legacy_taskcreated_placement_fallback` diagnostic付きで従来のordinary section insertionを維持し、exact orderを保証しない。未知version、invalid mode、anchor欠落・重複・別section、non-emptyな`only-in-section`、保存後placement不一致はlegacyへ降格せず未Ack停止する。
+- placement contractはcreation-time snapshotである。rename merge、flush中TaskUpdated handoff、Vault refresh、retry/outbox cloneは既存v1 fieldsを再計算・除去しない。後続の実移動はTaskMovedで表し、初期order修復用の補正TaskMovedは生成しない。
+- `creation_source`はordinary createの操作・診断metadataでありplacement instructionではない。`interrupt-continuation`は既存のspecialized exact-anchor lifecycle contractを維持し、ordinary v1へ推測変換しない。
 - TaskCreated未送信の高速更新は、可能な項目をpending TaskCreatedへmergeする。
 - rename時に同一identityのTaskCreatedが現在のflush送信snapshot対象なら、元outboxがpending表示でもmergeしない。同じ`task_id + entry_id`のTaskUpdatedを追加する。
 - TaskCreatedがflush対象外のpending / retry可能failedならtitleとfileをTaskCreatedへmergeし、既存Auto Flushをwakeする。TaskCreated不在は既送信相当としてTaskUpdatedを追加する。

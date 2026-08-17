@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current baseline: v0.6.63 BRAT Prerelease. It resolves exact D&D entries and physical headings without relying on reloaded runtime section fields, and persists section metadata for generic task creation. Synthetic and structural checks passed; real Vault verification remains pending.
+Current baseline: v0.6.71 integrated implementation, not yet test-distributed. Ordinary TaskCreated now carries an exact placement contract captured from post-save Markdown neighbors. Synthetic and structural checks passed; BRAT and real Vault verification remain pending. The latest immutable test distribution is v0.6.70.
 
 ## Current Canonical
 
@@ -32,6 +32,8 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
+- [v0.6.71 integrated release notes](release/v0.6.71.md)
+- [v0.6.70 BRAT Prerelease](release/v0.6.70.md)
 - [v0.6.63 BRAT Prerelease](release/v0.6.63.md)
 - [v0.6.62 BRAT Prerelease](release/v0.6.62.md)
 - [v0.6.61 BRAT Prerelease](release/v0.6.61.md)

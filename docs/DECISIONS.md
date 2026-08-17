@@ -262,6 +262,15 @@
 - 理由: v0.6.69実機ではD&D直後・Ctrl+Z前にoperation / batch / semantic / lifecycle diagnosticが全て存在しなかった。source traceでrow targetは`moveTaskByDrag()`へ入る一方、section targetはlegacy `moveTaskToSectionByDrag()`がMarkdownとTaskMovedを更新しながらsemantic lifecycleを開始しないことを確認したため。
 - 根拠: `TaskchuteView.dispatchTaskBoardTaskDrop()`、`moveTaskByDrag()`、`moveTaskToSectionByDrag()`、`finalizeTaskMovedUndoSemanticHandoff()`、`tests/taskboard-dnd-route-integration-v0670.js`、v0.6.69 entry E-20260816-0028 device evidence。
 
+## D-043: ordinary TaskCreated placementはpost-save physical neighborを正とする
+
+- 判断: v0.6.71以降に生成するordinary TaskCreatedは、senderがlocal保存後Markdownを再読込し、exact `task_id + entry_id`の同section内直前entryを優先、次entry、section内唯一の順でversion 1 placement contractをsnapshot化する。`creation_source`は操作・診断metadataでありplacement authorityにしない。
+- 判断: inbound v1はexact anchorまたはempty-section preconditionを満たす場合だけ書き込み、保存後にidentity、physical/row section、immediate adjacencyまたはsection内唯一性を再検証してからAckする。未知versionや不成立contractをlegacyへ降格せず、既存rowのplacement不一致も自動移動しない。
+- 判断: versionなしlegacy payloadだけは従来互換のgeneric insertionを維持する。初期orderを補正するTaskMoved、既Ack済みhistorical rowのmigration、task ID anchor fallbackは行わない。interrupt-continuationのspecialized exact-anchor contractは変更しない。
+- 理由: Markdown physical orderがboard positionの正であり、protected blockを含むlocal insertion規則をreceiverへ複製するとdriftする。同一task IDの複数entryを区別し、TaskCreated自身でcreation-time orderを確定させるには、実保存結果のexact entry neighborが必要である。
+- 制限: anchorがreceiverで未到達・削除・別section化した場合や、empty-sectionへ複数writerが競合した場合はv1を満たせず未Ack停止する。serverがoptional fieldsを透過保持することはBRAT round-tripで要確認である。
+- 根拠: `buildBridgeTaskCreatedPlacementFromSavedMarkdown()`、`enqueueBridgeTaskCreatedFromSavedMarkdown()`、`applyBridgeInboundTaskCreatedEvent()`、`inspectBridgeTaskCreatedPlacement()`、`tests/taskcreated-placement-v0671.js`、v0.6.70 T-0667 / E-20260817-0015 device failure evidence。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

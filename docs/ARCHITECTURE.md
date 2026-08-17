@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: main統合・BRAT試験配布済みのv0.6.70。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護する。TaskBoardのrow / section-container DOM dropは共通route gatewayへ集約し、shortcut ownershipはcapture-phase gatewayが扱う。cross-sectionのsection / row / empty-section target、same-section reorder、duplicate-task-id multi-entry exact-entry targetingのtargeted実機試験はPASSしたが、plugin全体 / full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`の公開済みassetsは変更しない。
+調査基準: main統合済み・未配布のv0.6.71。ordinary TaskCreatedは作成後Markdownのexact physical neighborからversioned placement snapshotを作り、inboundも保存後adjacencyを検証してからAckする。最新immutable配布はtag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`のv0.6.70 BRAT Prereleaseで、公開済みassetsは変更しない。v0.6.71のsyntheticはPASSしたが実機とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
 
 ## 1. 概要
 
@@ -25,14 +25,15 @@ TaskchutePlugin + ItemViews (main.js)
 
 | Path | 役割 |
 |---|---|
-| `main.js` | 全application logic。約55,309行。CommonJSで`TaskchutePlugin`をexport。 |
+| `main.js` | 全application logic。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.70`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.71`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
 | `tests/tmv4-basic-v0659.js` | Node標準機能だけで実行するTaskMoved v4同一section D&Dのfocused synthetic test。 |
 | `tests/taskcreated-rename-handoff-v0660.js` | pending / in-flight / sent相当のTaskCreated rename handoffを検証するfocused synthetic test。 |
+| `tests/taskcreated-placement-v0671.js` | ordinary TaskCreated v1のpost-save neighbor capture、exact inbound placement、legacy/unknown/idempotency/rename preservationを検証するfocused standalone test。 |
 | `tests/insert-below-order-v0661.js` | explicit insert-belowの物理/visual順、refresh、rename、protected target、task-copy scopeを検証するfocused synthetic test。 |
 | `tests/tmv4-section-handoff-v0662.js` | same-section D&Dの欠落row section meta補完、保存後identity、strict conflict block、TaskMoved 1件を検証するfocused synthetic test。 |
 | `tests/tmv4-physical-context-v0663.js` | reload後runtime section空、exact physical headings、missing meta補完、strict conflict、no-op、generic add metadataを検証するfocused synthetic test。 |
@@ -199,6 +200,10 @@ interrupt開始は二段階で保存する。`closeRunningTaskForInterrupt()`は
 日付移動は`bulkMoveTasksToDate()`がsource date noteから旧entryを除去し、destination date noteで`nextUniqueEntryId()`を使って新entryを採番する。`enqueueBridgeTaskMoved()`には旧identityを`from` / `before`、新identityを`to` / `after`およびtop-level `entry_id`として渡し、source / target orderも各date noteの保存後Markdownから構築する。inboundは`applyBridgeInboundTaskMovedEvent()`が旧entryでsourceを解決し、destination行を新entryへ書き換え、`inspectBridgeTaskMovedDateChangeVaultState()`で旧entry消失、新entry存在、両dateのentry orderとtarget sectionを再読込検証してからAckへ進む。task note link targetと`task_id`は変更しない。
 
 TaskCreated送信時はoutboxからHTTP用snapshotを作り、そのevent ID集合をflush終了までruntimeで保持する。create直後renameは同一identityのTaskCreatedがこの集合に含まれなければoutboxへmergeし、含まれる場合またはTaskCreated不在ならTaskUpdatedをappendする。flush完了mutationは新規TaskUpdatedを保持したまま送信済みTaskCreatedだけを除去する。
+
+ordinary TaskCreated v1のsender flowは、local create保存、date note再読込、exact `task_id + entry_id`とphysical section解決、同sectionの直前entry優先・次entry・only-rowの順でplacement構築、TaskCreated snapshot enqueueである。`enqueueBridgeTaskCreatedFromSavedMarkdown()`がこのhandoffを所有し、refresh / renameはpayloadのplacement fieldsを再計算しない。placement captureをexactに証明できなければmalformed v1やlegacy downgradeを送らず、structured diagnosticを残す。
+
+inbound TaskCreated v1は`normalizeBridgeTaskCreatedPlacementContract()`でversion/mode/anchor shapeを検証し、`inspectBridgeTaskCreatedPlacementTargetBeforeInsert()`がexact anchorまたはempty section preconditionを確認する。before/afterは`insertTaskRelativeToEntryId()`でanchorへ直接挿入し、保存後に`inspectBridgeTaskCreatedPlacement()`がexact new row、physical/row section、immediate neighborまたはonly-rowを再読込検証する。registry verificationもplacementを再確認してからAckへ進む。legacy payloadだけは従来のgeneric insertionを維持し、未知versionは書込前に停止する。interrupt-continuationは専用final-placement / exact-anchor flowを継続する。
 
 ### Inbound Bridge
 
