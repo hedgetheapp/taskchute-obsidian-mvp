@@ -27,6 +27,7 @@ Type: Runtime BRAT Prerelease for device testing
 - TMV4、interrupt continuation、rename、insert-below focused regressions: PASS
 - targeted BRAT device PASS: section target T-0653 / E-20260816-0029（forward / Undo / Redo seq 2404〜2406）、row target T-0654 / E-20260816-0030（seq 2409〜2411）、empty night target T-0655 / E-20260816-0031（seq 2414〜2416）。各chainはremote / mobile applied、exact semantic history topとdev / remote physical・mobile UI収束を確認。
 - same-section Undo / Redo device PASS: A T-0659 / E-20260817-0007、B T-0660 / E-20260817-0008、moved C T-0661 / E-20260817-0009。afternoon内でA/B/C→C/A/B、UndoでA/B/C、RedoでC/A/Bとなり、forward / Undo / Redo seq 2436〜2438はremote / mobile applied、三端末が最終C/A/Bへ収束した。Ctrl+Z前のexact semantic history topは確認済みだが、この試験固有のroute diagnosticsは取得されていない。
+- multi-entry Undo / Redo device PASS: original T-0662 / E-20260817-0010、continuation T-0662 / E-20260817-0012、control T-0664 / E-20260817-0013。baseline 2450後のseq 2451〜2455は全5件がcontinuation E-0012だけを対象にremote / mobile appliedとなり、original E-0010のTaskMoved countは0。seq 2451〜2453が最初のForward / Undo / Redo chain、2454〜2455は追加のUndo / Redo確認cycleで、重複enqueue defectとは推定しない。三端末は各状態で収束した。
 - v0.6.70 plugin全体 / full matrix: `NOT_VERIFIED`
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 

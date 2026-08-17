@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: main統合・BRAT試験配布済みのv0.6.70。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護する。TaskBoardのrow / section-container DOM dropは共通route gatewayへ集約し、shortcut ownershipはcapture-phase gatewayが扱う。cross-sectionのsection / row / empty-section targetとsame-section reorderのtargeted実機試験はPASSしたが、plugin全体 / full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`の公開済みassetsは変更しない。
+調査基準: main統合・BRAT試験配布済みのv0.6.70。same-date D&Dのsnapshot Undo / RedoへTaskMoved v4意味論handoffを行い、D&D Undo batchをoperation-scoped lifecycleで保護する。TaskBoardのrow / section-container DOM dropは共通route gatewayへ集約し、shortcut ownershipはcapture-phase gatewayが扱う。cross-sectionのsection / row / empty-section target、same-section reorder、duplicate-task-id multi-entry exact-entry targetingのtargeted実機試験はPASSしたが、plugin全体 / full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`の公開済みassetsは変更しない。
 
 ## 1. 概要
 
