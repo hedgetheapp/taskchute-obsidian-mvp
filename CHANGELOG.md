@@ -26,6 +26,7 @@ Type: Runtime BRAT Prerelease for device testing
 - v0.6.69 direct handoff、v0.6.68 shortcut routing、v0.6.67 lifecycle: PASS
 - TMV4、interrupt continuation、rename、insert-below focused regressions: PASS
 - targeted BRAT device PASS: section target T-0653 / E-20260816-0029（forward / Undo / Redo seq 2404〜2406）、row target T-0654 / E-20260816-0030（seq 2409〜2411）、empty night target T-0655 / E-20260816-0031（seq 2414〜2416）。各chainはremote / mobile applied、exact semantic history topとdev / remote physical・mobile UI収束を確認。
+- same-section Undo / Redo device PASS: A T-0659 / E-20260817-0007、B T-0660 / E-20260817-0008、moved C T-0661 / E-20260817-0009。afternoon内でA/B/C→C/A/B、UndoでA/B/C、RedoでC/A/Bとなり、forward / Undo / Redo seq 2436〜2438はremote / mobile applied、三端末が最終C/A/Bへ収束した。Ctrl+Z前のexact semantic history topは確認済みだが、この試験固有のroute diagnosticsは取得されていない。
 - v0.6.70 plugin全体 / full matrix: `NOT_VERIFIED`
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 

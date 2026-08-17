@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様はmain統合・BRAT試験配布済みの`v0.6.70`を基準とする。v0.6.70はIntegratedかつPrereleased / Test-distributedで、TaskBoard D&D semantic Undo / Redoのsection / row / empty-section targetにはcurrent実機PASS証跡がある。一方、plugin全体 / full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`の公開済み配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様はmain統合・BRAT試験配布済みの`v0.6.70`を基準とする。v0.6.70はIntegratedかつPrereleased / Test-distributedで、TaskBoard D&D semantic Undo / Redoのcross-section section / row / empty-section targetとsame-section reorderにはcurrent実機PASS証跡がある。一方、plugin全体 / full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`の公開済み配布物は固定されている。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 

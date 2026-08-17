@@ -2,7 +2,7 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.70 BRAT Prerelease（main統合・試験配布済み。TaskBoard D&D semantic Undo / Redoのtargeted 3 routeは実機`PASS`、plugin全体 / full matrixは`NOT_VERIFIED`）
+- 対象実装: v0.6.70 BRAT Prerelease（main統合・試験配布済み。TaskBoard D&D semantic Undo / Redoのcross-section 3 routeとsame-section reorderは実機`PASS`、plugin全体 / full matrixは`NOT_VERIFIED`）
 - 配布済みcheckpoint: immutable `v0.6.70` BRAT Prerelease、tag target `26ae1c2ff4efb5a4d07c6cb553234b7bf506cdfe`
 - v0.6.70は実TaskBoard row / section drop callbackを共通gatewayへ接続し、section-target helperにもoperation-scoped semantic lifecycleを適用する。synthetic PASSはdevice PASSへ昇格しない。
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
@@ -198,8 +198,9 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | UNDO-BRIDGE-CROSS-SECTION-SECTION-TARGET-01 | `PASS` | fixture `undo-v070-section-target`、T-0653 / E-20260816-0029、afternoon→morning、route=`empty-section-body` / `single-section` / `moveTaskToSectionByDrag`。Ctrl+Z前にoperation / batch / fingerprintがnon-empty、semantic=`task-moved-v4`、before=`afternoon`、after=`morning`、`exact_semantic_top`、commit=true、route result=trueを確認。forward seq 2404 / event `f55b9c8b-75b0-4228-82b5-bc1f032245b1`、Undo seq 2405 / `c77a3a3c-8b8a-4490-9ba2-b235b883bf72`、Redo seq 2406 / `d1c94f29-a966-47b7-9cd8-0ed012180368`はremote / mobile applied。Undo後は三端末afternoon、Redo後はdev / remote physicalが`section=午前 section_id=morning`、mobile UIもmorning。 |
 | UNDO-BRIDGE-CROSS-SECTION-ROW-TARGET-01 | `PASS` | fixture `undo-v070-row-target`、T-0654 / E-20260816-0030、afternoon→morning、route=`board-resolver-row` / `single-row` / `moveTaskByDrag`。Ctrl+Z前にexact semantic history top、non-empty operation / batch / fingerprint、commit=true、route result=trueを確認。forward seq 2409 / event `180c1b3d-d38e-41ff-b048-803d4155ec47`、Undo seq 2410 / `742765ce-f01d-44c6-adc2-5c532dcb02ad`、Redo seq 2411 / `474db99d-c69b-4583-904f-30d17fa54077`はremote / mobile applied。最終Redo後はdev / remote physicalが`section=午前 section_id=morning`、mobile UIもmorning。 |
 | UNDO-BRIDGE-EMPTY-SECTION-TARGET-01 | `PASS` | fixture `undo-v070-empty-section`、T-0655 / E-20260816-0031、afternoon→空のnight、route=`empty-section-body` / `single-section` / `moveTaskToSectionByDrag`。operation ID=`taskmoved-undo-11888c9e-b767-421b-a006-ee2ec39eef4d`、batch ID=`taskmoved-batch-58198d43-8bd6-4d14-a035-00aa6e329362`、semantic=`task-moved-v4`、before=`afternoon`、after=`night`、`exact_semantic_top`、commit=true、route result=trueを確認。forward seq 2414 / event `43430c09-2498-4695-8063-7bdb8ffc4a6b`、Undo seq 2415 / `68415e0b-7ae9-4211-aac7-ad79f5d35177`、Redo seq 2416 / `3fff4d18-e59a-4d02-9a7f-8a1a0bd9bd2e`はremote / mobile applied。最終Redo後はdev / remote physicalが`section=夜 section_id=night`、mobile UIもnight。 |
+| UNDO / REDO-BRIDGE-SAME-SECTION-01 | `PASS` | 2026-08-17、afternoonのA T-0659 / E-20260817-0007、B T-0660 / E-20260817-0008、moved C T-0661 / E-20260817-0009。A/B/C→C/A/B、Ctrl+ZでA/B/C、Ctrl+YでC/A/B。Ctrl+Z前はoperation=`taskmoved-undo-c9d0c9b7-0ee6-448d-a9f0-322284a30e87`、batch=`taskmoved-batch-7ed3e6cd-0b45-4e4d-9741-aada98cf53a9`、non-empty fingerprintを持つexact `task-moved-v4` semantic history top。forward seq 2436 / event `79ddc578-ec96-4ba1-b416-9c8728c9fe5d` / source=`task-drag-reorder-confirmed-markdown-v4`、Undo seq 2437 / `18f1bc41-55b7-4327-b042-7dbf27690109` / source=`task-undo-confirmed-markdown-v4`、Redo seq 2438 / `4daa062d-3097-49e3-b9b1-65e9c633bd0b` / source=`task-redo-confirmed-markdown-v4`はremote / mobile applied。三端末は最終C/A/B、全行`section=午後 section_id=afternoon`。この試験固有のroute/lifecycle diagnosticsは取得されておらず、PASS根拠に含めない。 |
 
-この3 routeについてはimmutable v0.6.70 assets上でforward、Ctrl+Z inverse、Ctrl+Y Redo、remote / mobile apply、三端末最終収束を確認した。これはtargeted feature evidenceであり、plugin全体 / full matrixをVerifiedへ昇格しない。
+このcross-section 3 routeとsame-section reorderについてはimmutable v0.6.70 assets上でforward、Ctrl+Z inverse、Ctrl+Y Redo、remote / mobile apply、三端末最終収束を確認した。これはtargeted feature evidenceであり、plugin全体 / full matrixをVerifiedへ昇格しない。
 
 ## Current v0.6.70 Matrix
 
@@ -231,7 +232,7 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | TaskMoved Undo / Redo | UNDO-BRIDGE-CROSS-SECTION-ROW-TARGET-01 | `PASS` | `PASS` | `PASS` | v0.6.70 | `PASS` | T-0654 / E-20260816-0030。row targetのforward seq 2409、Undo 2410、Redo 2411がremote / mobile applied。exact semantic topと三端末収束を確認。 |
 | TaskMoved Undo / Redo | UNDO-BRIDGE-EMPTY-SECTION-TARGET-01 | `PASS` | `PASS` | `PASS` | v0.6.70 | `PASS` | T-0655 / E-20260816-0031。empty night targetのforward seq 2414、Undo 2415、Redo 2416がremote / mobile applied。exact semantic topと三端末収束を確認。 |
 | TaskMoved Undo / Redo | REDO-BRIDGE-CROSS-SECTION-01 | `PASS` | `PASS` | `PASS` | v0.6.70 | `PASS` | umbrella cross-section Redo。fixture `undo-v070-empty-section`、T-0655 / E-20260816-0031でforward seq 2414、Undo seq 2415、Redo seq 2416（payload source=`task-redo-confirmed-markdown-v4`、afternoon→night）がremote / mobile applied。Redo後はdev / remote physicalが`section=夜 section_id=night`、mobile UIもnightへ収束。 |
-| TaskMoved Undo / Redo | UNDO / REDO-BRIDGE-SAME-SECTION-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | entry order authority、exactly one event、no-op 0 eventをsynthetic確認。実機未実施。 |
+| TaskMoved Undo / Redo | UNDO / REDO-BRIDGE-SAME-SECTION-01 | `PASS` | `PASS` | `PASS` | v0.6.70 | `PASS` | A T-0659 / E-20260817-0007、B T-0660 / E-20260817-0008、C T-0661 / E-20260817-0009。A/B/C→C/A/B、Undo A/B/C、Redo C/A/B。seq 2436 / 2437 / 2438はremote / mobile applied、exact semantic topと三端末収束を確認。route diagnosticsは未取得。 |
 | TaskMoved Undo / Redo | UNDO-BRIDGE-MULTI-ENTRY-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | duplicate task_id / distinct entry_idのsynthetic PASS。実機未実施。 |
 | TaskDeleted | 通常・create直後・完了済み・一括削除 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3で通常一連操作と完了済みTaskDeletedのPASS記録あり。後続identity変更後のfull regressionは未記録。 |
 | TaskStarted | Board / Log / LogDaily / runtime保存後検証とAck | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3三端末起点PASS。v0.6.49 lifecycle classifier後の現行統合証跡なし。 |
@@ -255,7 +256,7 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | offline recovery | 通信断中の操作、復帰後drain、重複なし | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | retry実装はある。長時間・圏外・OS停止を含む実機保証なし。 |
 | mobile hidden / resume drain | hidden中fetch/apply/Ackなし、visible後再開 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3でPASS記録あり。v0.6.56での長時間hidden / resume回帰は未記録。 |
 
-v0.6.65のtargeted interrupt-continuation scopeと、v0.6.70のsection / row / empty-section target TaskMoved Undo / Redoはdevice evidenceでPASSした。通常interruptのresume / completion、TaskMoved複合全体、Ack / cursor、offline、safe rekeyなど未実施の行が残るため、plugin full matrixは`NOT_VERIFIED`を維持する。
+v0.6.65のtargeted interrupt-continuation scopeと、v0.6.70のcross-section section / row / empty-section targetおよびsame-section reorder TaskMoved Undo / Redoはdevice evidenceでPASSした。通常interruptのresume / completion、TaskMoved複合全体、Undo / Redo multi-entry、Ack / cursor、offline、safe rekeyなど未実施の行が残るため、plugin full matrixは`NOT_VERIFIED`を維持する。
 
 ## Historical Evidence
 
