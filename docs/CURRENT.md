@@ -86,7 +86,9 @@ v0.6.70実機試験では、section / empty-section routeのT-0653 / E-20260816-
 
 `UNDO-BRIDGE-MULTI-ENTRY-01`もfresh v0.6.70 fixtureでPASSした。同じtask_id T-0662を持つoriginal E-20260817-0010とcontinuation E-20260817-0012がnightに共存する状態で、continuationだけをcontrol T-0664 / E-20260817-0013の下へ移動した。exact semantic history topと全TaskMovedはcontinuation E-0012を対象とし、original E-0010はその場に残った。D1 baseline 2450後のseq 2451〜2453はForward / Undo / Redo、2454〜2455は追加のUndo / Redo確認cycleで、全5件がremote / mobile applied、continuation E-0012のTaskMoved count=5、original E-0010は0だった。追加cycleだけから重複enqueue defectは推定せず、exact entry orderを正として三端末収束を確認した範囲をPASSとする。
 
-同fixtureを使ったTMV4-MULTI-ENTRY-01もPASSした。control T-0643 / E-20260816-0019を加え、同一task_id T-0641のoriginalを維持したままcontinuation E-20260816-0018だけをcontrol直下へD&Dした。D1 seq 2364 / event `23081df0-5c86-4e56-aa7b-86a7e1bf4bb4`のTaskMoved v4はduplicate task IDを保ったentry orderを使用し、remote / mobile applied、三端末が同一順へ収束した。
+この試験のForward部分は`TMV4-MULTI-ENTRY-01`のcurrent v0.6.70証跡としても独立にPASSとする。seq 2451 / event `6d679449-b1b1-4070-b020-8edefd8f0eef`はcontinuation T-0662 / E-20260817-0012だけを対象に、source task order `[T-0662,T-0663,T-0662,T-0664]`とtarget `[T-0662,T-0663,T-0664,T-0662]`のduplicate task IDを保持した。entry orderを正としてremote / mobile applied、三端末Forward順が一致し、original E-20260817-0010は位置を維持した。これはForward単体の証跡であり、後続Undo / Redoを通常TaskMoved PASSの前提にはしない。TaskMoved v4複合umbrellaは他componentのcurrent回帰が未完了のため`NOT_VERIFIED`を維持する。
+
+別のv0.6.65 fixtureでもTMV4-MULTI-ENTRY-01はPASSしていた。control T-0643 / E-20260816-0019を加え、同一task_id T-0641のoriginalを維持したままcontinuation E-20260816-0018だけをcontrol直下へD&Dした。D1 seq 2364 / event `23081df0-5c86-4e56-aa7b-86a7e1bf4bb4`のTaskMoved v4はduplicate task IDを保ったentry orderを使用し、remote / mobile applied、三端末が同一順へ収束した。このhistorical evidenceはv0.6.70 seq 2451のcurrent evidenceと区別して保持する。
 
 Routine occurrence interrupt continuationもPASSした。T-0644のoriginal E-20260816-0020とcontinuation E-20260816-0022は`routine:T-0644:2026-08-16`、routine date / generated date、scheduled time 15:10、routine sourceを三端末で保持した。D1 seq 2373〜2376のlifecycle chainはremote / mobile appliedで、再評価後もoccurrence row countは2件のまま、第三の重複行は生成されなかった。これにより明示interrupt continuationの同一key・別entry作成もtargeted PASSとする。
 
