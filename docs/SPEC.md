@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様は`v0.6.75` candidateのworking treeを基準とする。最新immutable試験配布は`v0.6.74` BRAT Prerelease（peeled target `037975902f5aac1f938c0bf71b167d118815170c`）で、公開済みtag / Release / assetsは固定する。v0.6.75のfocused syntheticはPASSしたが実Vault未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様はimmutable `v0.6.75` BRAT Prerelease（peeled target `38a0facf1c8def2426e10119496e71816376d6f8`）を基準とし、公開済みtag / Release / assetsは固定する。v0.6.75のfocused syntheticはPASSしたが実Vault未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 

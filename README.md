@@ -4,12 +4,12 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current implementation: `v0.6.75` candidate
+- Current implementation and immutable test distribution: `v0.6.75` BRAT Prerelease
 - Current branch: `feature/v6.6-routine-sync`
-- Release target: `037975902f5aac1f938c0bf71b167d118815170c`
+- Release target: `38a0facf1c8def2426e10119496e71816376d6f8`
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.74実機試験で、focus復帰時に既存TaskChute fileへのduplicate `create` eventがburstし、open-board baselineにないpathを一律にvisible invalidationとしていたことを確認しました。v0.6.75候補は、現在viewのboardとloaded task definitionsだけをexplicit present/absent state付きで追跡します。synthetic / structural試験は完了していますが、実機再試験前で、Verified済み安定版ではありません。
+v0.6.74実機試験で、focus復帰時に既存TaskChute fileへのduplicate `create` eventがburstし、open-board baselineにないpathを一律にvisible invalidationとしていたことを確認しました。v0.6.75は、現在viewのboardとloaded task definitionsだけをexplicit present/absent state付きで追跡します。BRAT試験用に固定配布済みですが、実機再試験前で、Verified済み安定版ではありません。
 
 ## Canonical Documentation
 

@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation checkpoint: `v0.6.75` (Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No). Latest immutable test distribution remains `v0.6.74` BRAT Prerelease, annotated tag object `1bd281abcebf84b999c39782a956d808323d2a3f`, peeled target `037975902f5aac1f938c0bf71b167d118815170c`.
+- Current implementation and immutable test distribution: `v0.6.75` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No), annotated tag object `e5b0309a223b3004391400bfb53f516fe12165e5`, peeled target `38a0facf1c8def2426e10119496e71816376d6f8`.
 - v0.6.74 device evidence proved that focus return emits duplicate `create` events for pre-existing TaskChute files. Missing open-board baseline entries incorrectly authorized visible invalidation and repeated generation increments. v0.6.75 uses bounded current-view dependency records with explicit present/absent state; focused tests pass while device verification and the plugin full matrix remain `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.

@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.75 candidateの現行実装を対象とする。v0.6.75はcurrent viewのvisible dependencyとexplicit existence/content stateをUI invalidation authorityにする。syntheticはPASSだが実機は未検証で、full matrixは`NOT_VERIFIED`である。
+この一覧はimmutable v0.6.75 BRAT Prereleaseの現行実装を対象とする。v0.6.75はcurrent viewのvisible dependencyとexplicit existence/content stateをUI invalidation authorityにする。syntheticはPASSだが実機は未検証で、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 

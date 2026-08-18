@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.75 candidateのworking tree。最新immutable試験配布はv0.6.74 BRAT Prerelease（peeled target `037975902f5aac1f938c0bf71b167d118815170c`）であり、公開済みtag / Release / assetsは差し替えない。v0.6.75はvisible dependency invalidationを実装しsyntheticはPASSしたが、実Vault試験とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
+調査基準: immutable v0.6.75 BRAT Prerelease（peeled target `38a0facf1c8def2426e10119496e71816376d6f8`）。公開済みtag / Release / assetsは差し替えない。v0.6.75はvisible dependency invalidationを実装しsyntheticはPASSしたが、実Vault試験とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
 
 ## 1. 概要
 

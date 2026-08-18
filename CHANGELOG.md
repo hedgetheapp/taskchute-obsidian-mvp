@@ -10,7 +10,7 @@ Historical verification recorded below is evidence for that release only. It is 
 
 ## v0.6.75 - 2026-08-18
 
-Type: Runtime BRAT Prerelease candidate for device testing
+Type: Runtime BRAT Prerelease for device testing
 
 ### Changed
 
@@ -27,7 +27,9 @@ Type: Runtime BRAT Prerelease candidate for device testing
 - v0.6.75 real Vault Edge-to-Obsidian focus retest: `NOT_VERIFIED`
 - backlog catch-up real-device test: `NOT_RUN`
 - plugin full matrix: `NOT_VERIFIED`
-- Delivery state before publication: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Published immutable BRAT Prerelease: annotated tag object `e5b0309a223b3004391400bfb53f516fe12165e5`, peeled target `38a0facf1c8def2426e10119496e71816376d6f8`
+- Release assets `main.js` / `manifest.json` / `styles.css`: tagged and downloaded size/SHA256 match
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
 Release notes: [`docs/release/v0.6.75.md`](docs/release/v0.6.75.md)
 

@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current implementation checkpoint: v0.6.75 candidate. Latest immutable test distribution remains v0.6.74 BRAT Prerelease. v0.6.75 distinguishes untracked paths from explicit tracked-absent visible dependencies and suppresses duplicate focus-return `create` storms. Targeted real Vault verification remains pending.
+Current implementation and immutable test distribution: v0.6.75 BRAT Prerelease, peeled target `38a0facf1c8def2426e10119496e71816376d6f8`. v0.6.75 distinguishes untracked paths from explicit tracked-absent visible dependencies and suppresses duplicate focus-return `create` storms. Targeted real Vault verification remains pending.
 
 ## Current Canonical
 

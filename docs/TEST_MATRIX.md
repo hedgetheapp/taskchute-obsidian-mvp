@@ -2,10 +2,9 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.75 candidate（focus-return duplicate create stormをexplicit visible dependency baselineで修正。plugin全体 / full matrixは`NOT_VERIFIED`）
-- 配布済みcheckpoint: immutable `v0.6.74` BRAT Prerelease、tag target `037975902f5aac1f938c0bf71b167d118815170c`
+- 対象実装・配布済みcheckpoint: immutable `v0.6.75` BRAT Prerelease、tag target `38a0facf1c8def2426e10119496e71816376d6f8`（focus-return duplicate create stormをexplicit visible dependency baselineで修正。plugin全体 / full matrixは`NOT_VERIFIED`）
 - v0.6.74のwindow-focus no-change device testはduplicate `create` burstによるvisible reloadで`FAIL`。v0.6.75 synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.75についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
