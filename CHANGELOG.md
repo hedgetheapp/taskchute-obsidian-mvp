@@ -26,7 +26,11 @@ Type: Runtime BRAT Prerelease for device testing
 - TaskCreated rename、insert-below、interrupt continuation、TaskMoved v4、Undo / Redoを含む全standalone repository tests: PASS
 - v0.6.70 post-prerelease discovery `TASKCREATED-SECTION-TOP-ORDER-01`: FAIL。T-0667 / E-20260817-0015、TaskCreated seq 2462はremote / mobile appliedだがdev section先頭に対して両peerは末尾へ保存。payloadにplacement contractなし。
 - v0.6.70 `TMV4-DATE-MOVE-01` attempt: `BLOCKED`。baseline order divergenceをdate move操作前に検出したため、date-change TaskMovedのPASS/FAIL証跡ではない。
-- v0.6.71 real Vault / D1 optional-field round-trip / remote / mobile: `NOT_VERIFIED`
+- v0.6.71 `TASKCREATED-SECTION-TOP-ORDER-01`: current device `PASS`。T-0670 / E-20260818-0004、placement v1 / `before-entry`、TaskCreated seq 2469とrename seq 2470はremote / mobile applied、三端末順が一致。
+- v0.6.71 `INSERT-BELOW-ORDER-01`: current device `PASS`。T-0671 / E-20260818-0005、placement v1 / `after-entry`、TaskCreated seq 2471とrename seq 2472はremote / mobile applied、補正TaskMovedなしで三端末順が一致。
+- v0.6.71 `TMV4-DATE-MOVE-01`: current device `PASS`。T-0672はE-20260818-0006からE-20260819-0001へrekeyし、TaskMoved seq 2475はremote / mobile applied、exact count=1、三端末がsource 0件・destination 1件へ収束。
+- v0.6.71 `TMV4-SECTION-HANDOFF-01`: current device `PASS`。B T-0674 / E-20260819-0003のcontrolled missing metadataをafternoonへ復元し、TaskMoved seq 2482はremote / mobile applied、exact count=1、三端末順が一致。
+- 上記以外のv0.6.71 real Vault / D1 / remote / mobile対象範囲: `NOT_VERIFIED`
 - plugin full matrix: `NOT_VERIFIED`
 - Published immutable BRAT Prerelease: annotated tag object `8f5624beed25754e56a4b012a429a1a4436a453d`, peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`, published 2026-08-17T14:15:10Z
 - Release assets `main.js` / `manifest.json` / `styles.css`: staged and downloaded SHA256 match

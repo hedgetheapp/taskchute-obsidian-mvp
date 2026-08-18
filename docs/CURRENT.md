@@ -2,14 +2,14 @@
 
 ## 調査基準
 
-- 調査日: 2026-08-17
+- 調査日: 2026-08-18
 - manifest version: `0.6.71`
 - branch: `feature/v6.6-routine-sync`
 - canonical docs checkpoint: v0.6.71 TaskCreated exact placement BRAT Prerelease
 - latest release tag: `v0.6.71`（immutable BRAT実機試験用Prerelease。annotated tag object `8f5624beed25754e56a4b012a429a1a4436a453d`、peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.70はimmutable BRAT Prereleaseとして試験配布済みで、TaskBoard D&Dのtargeted実機試験にはPASS証跡がある。一方、通常TaskCreatedのsection-top作成ではsenderが先頭、remote / mobileが末尾となる実機FAILが確認された。v0.6.71は作成後Markdownの物理隣接entryからversioned placement contractを構築し、受信側もexact placementを保存後検証してからAckする。immutable BRAT Prereleaseとして試験配布済みだが実機未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`である。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.70はimmutable BRAT Prereleaseとして試験配布済みで、TaskBoard D&Dのtargeted実機試験にはPASS証跡がある。一方、通常TaskCreatedのsection-top作成ではsenderが先頭、remote / mobileが末尾となる実機FAILが確認された。v0.6.71は作成後Markdownの物理隣接entryからversioned placement contractを構築し、受信側もexact placementを保存後検証してからAckする。immutable BRAT Prereleaseとして試験配布済みで、TaskCreated exact placement 2ケースとTaskMoved v4 2ケースにはcurrent実機PASS証跡があるが、plugin全体 / full matrixは引き続き`NOT_VERIFIED`である。
 
 ## 文書運用
 
@@ -82,7 +82,11 @@ v0.6.70はTaskBoardのrow / section / mobile quick dropを`dispatchTaskBoardTask
 
 v0.6.70の`TASKCREATED-SECTION-TOP-ORDER-01`では、T-0667 / E-20260817-0015のTaskCreated seq 2462がremote / mobile appliedになったにもかかわらず、devはafternoon先頭、remote / mobileは末尾へ保存した。payloadにplacement anchor/order contractがなく、ordinary inboundが既存section末尾へgeneric insertしたことが原因である。date move操作はこのbaseline divergenceを確認した時点で開始しておらず、v0.6.70の`TMV4-DATE-MOVE-01`はTaskMoved FAILではなく`BLOCKED`とする。
 
-v0.6.71はordinary TaskCreatedへ任意の`taskcreated_placement_version=1`、`placement_mode`、必要時`placement_anchor_entry_id`を追加する。senderはlocal save後にMarkdownを再読込し、同sectionの直前entryを優先、なければ直後entry、どちらもなければ`only-in-section`としてsnapshot化する。inboundはexact anchor / section / adjacencyまたはonly-row状態を保存後に再検証してからAckする。versionなしpayloadはbounded diagnostic付きlegacy fallback、未知versionは未Ack停止とし、既Ack済みv0.6.70 rowの自動修復や補正TaskMovedは行わない。focused testと既存standalone testsはPASSし、tag由来assetsとdownloaded assetsのSHA256一致も確認済みだが、server round-tripと三端末実機試験は未実施である。
+v0.6.71はordinary TaskCreatedへ任意の`taskcreated_placement_version=1`、`placement_mode`、必要時`placement_anchor_entry_id`を追加する。senderはlocal save後にMarkdownを再読込し、同sectionの直前entryを優先、なければ直後entry、どちらもなければ`only-in-section`としてsnapshot化する。inboundはexact anchor / section / adjacencyまたはonly-row状態を保存後に再検証してからAckする。versionなしpayloadはbounded diagnostic付きlegacy fallback、未知versionは未Ack停止とし、既Ack済みv0.6.70 rowの自動修復や補正TaskMovedは行わない。focused testと既存standalone testsはPASSし、tag由来assetsとdownloaded assetsのSHA256一致も確認済みである。
+
+v0.6.71 current実機試験では`TASKCREATED-SECTION-TOP-ORDER-01`がPASSした。T-0670 / E-20260818-0004はafternoonの既存task1 T-0666 / E-20260818-0001の前へ`before-entry` anchorで作成され、TaskCreated seq 2469 / event `ae45d3da-f9f9-4aa3-ab1b-d115fabd690e`とrename TaskUpdated seq 2470 / event `73e4aad8-3144-41a0-b30b-0c5242524c5d`がremote / mobile appliedとなった。三端末の最終順はnew / task1 / task2 / task3で一致した。既存canonical test名`INSERT-BELOW-ORDER-01`もPASSし、T-0671 / E-20260818-0005はtask2 T-0668 / E-20260818-0002の`after-entry` anchorとして作成された。TaskCreated seq 2471 / event `e3e5d604-4c5a-4629-bc85-4aff129584f7`とrename seq 2472 / event `68fb2eaf-95ca-41b1-84cc-19b8aef42cbe`はremote / mobile appliedで、補正TaskMovedなしに三端末がsection-top task / task1 / task2 / inserted / task3へ収束した。
+
+同じv0.6.71 assets上で`TMV4-DATE-MOVE-01`もPASSした。T-0672は2026-08-18 / E-20260818-0006から2026-08-19 / E-20260819-0001へentry identityをrekeyし、TaskMoved seq 2475 / event `3a8b40a7-3f70-4473-9472-c04e7128b3b5`がremote / mobile appliedとなった。exact matching TaskMovedは1件で、三端末ともsource 0件、destination 1件、task_idとtask note維持を確認した。途中診断の`after_move_matches_save=false` / `after_save_matches_rebuild=false`は失敗判定ではなく、authoritativeな`after_save_matches_emitted=true`と最終収束・Ack成功をPASS根拠とする。`TMV4-SECTION-HANDOFF-01`もPASSし、T-0674 / E-20260819-0003のrow section metadataだけをcontrolled missing化した後、exact entry D&Dで`section=午後 section_id=afternoon`を復元した。TaskMoved seq 2482 / event `25e60ea3-0dd7-48c2-bec8-6bfe35cae9fd`はremote / mobile applied、exact matching countは1、三端末順はE-20260819-0001 / E-20260819-0003 / E-20260819-0002 / E-20260819-0004で一致した。これら4件はtargeted current PASSであり、v0.6.71全体のVerified判定や他の`NOT_VERIFIED`行を昇格させない。
 
 v0.6.70実機試験では、section / empty-section routeのT-0653 / E-20260816-0029、row routeのT-0654 / E-20260816-0030、empty night routeのT-0655 / E-20260816-0031がtargeted PASSとなった。3件ともCtrl+Z前にexact semantic action、operation ID、batch ID、fingerprint、history topを確認し、forward / Undo / Redo TaskMovedがD1 seq 2404〜2406、2409〜2411、2414〜2416としてremote / mobile appliedになった。Undo / Redo後はdev / remote physical sectionとmobile UIが収束した。これによりv0.6.69 failureは試験した3 routeについて解消したが、plugin全体 / full matrixは`NOT_VERIFIED`、Delivery StateはVerified=Noのままとする。
 
