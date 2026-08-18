@@ -8,6 +8,32 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.72 - 2026-08-18
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- elapsed idle timeをTaskChute UI invalidation authorityから外し、30秒focus / visibility復帰と30分後の最初のinteractionによる無条件disk reloadを廃止した。
+- actual relevant Vault changeをbounded generationで記録し、focus / resume / interactionはfreshness checkだけを行う。no invalidation時のrefreshは0回とする。
+- Bridge inboundをlogical UI refresh sessionとして扱い、mobile resumeの複数passや重複kickoffを同一sessionへjoinする。apply / verify / Ack / cursorはevent単位のまま維持する。
+- successful visible mutationをsession dirtyとして蓄積し、pending zero / safe-stop / error時にopenかつvisibleなTaskBoardを最大1回だけrefreshする。UI refresh失敗はAck済みdata stateへ影響させない。
+- external Vault catch-upも遅着fileを読み切ってから1回だけ描画し、plugin internal write由来のfeedback loop guardを維持する。
+- refresh session ID、kickoff reasons、pass count、mutation count、suppressed request、final/no-refresh reason、terminal state、UI errorのbounded diagnosticsを追加した。
+- `manifest.json`を`0.6.72`へ更新した。
+
+### Verification
+
+- `bridge-inbound-ui-refresh-coalescing-v0672.js`: idle/focus no-op、multi-event/pass、safe-stop prefix、overlap join、view closed/hidden、external invalidation、failure isolation: synthetic PASS
+- v0.6.71 TaskCreated placement、TaskMoved v4、interrupt continuation focused regressions: PASS
+- v0.6.72 real Vault idle no-change / backlog catch-up: `NOT_VERIFIED`
+- plugin full matrix: `NOT_VERIFIED`
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.72.md`](docs/release/v0.6.72.md)
+
+---
+
 ## v0.6.71 - 2026-08-17
 
 Type: Runtime BRAT Prerelease for device testing

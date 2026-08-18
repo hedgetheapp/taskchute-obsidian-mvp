@@ -225,6 +225,17 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - hidden中はpending fetch / apply / Ackを開始しない。
 - visible復帰後にdeferred drainを再開する。
 - recoverableなAck / cursor停止はserver Ack状態とcursorをreconcileしてからruntimeをenabledへ戻し、pending drainを再開する。
+
+### inbound UI refresh / idle resume
+
+- elapsed idle durationはTaskChute UI invalidation authorityではない。30秒以上のfocus / visibility復帰や30分以上後のfirst interactionだけを理由にdisk reload / view refreshしない。
+- focus / visibility / resume / first interactionはfreshness checkを起動できるが、relevant data generationとlast rendered generationが一致し、Bridge-applied dirty stateもない場合のTaskBoard refresh countは0とする。
+- relevant TaskChute Markdown、Routine history、plugin data等のexternal changeはactual invalidationとしてgenerationを進める。unrelated Vault noteはinvalidation対象にしない。clickごとのVault全体hashは行わない。
+- one logical Bridge catch-upはstartup / interval / focus / resume kickoffと複数pending passを1 UI refresh sessionへjoinする。eventのfetch、apply、persist、post-save verify、Ack、cursor merge、安全停止は従来どおり個別・sequence順で行う。
+- session内で成功したvisible mutationが0件ならfinal refreshは0回、1件以上ならopenかつvisibleなTaskBoardを最大1回だけrefreshする。safe-stop前の成功prefixは1回表示し、mutation前safe-stopは0回とする。
+- TaskBoard viewがopenでなければ自動openしない。mobile hidden中はrenderせず、visible復帰後の既存recovery policyを維持する。
+- final UI refreshの例外はdiagnosticへ記録するが、既にapply / verify / Ack済みのeventやcursorを巻き戻さない。
+- plugin inbound write由来のVault eventはinternal-write guardとactive refresh sessionでcoalesceし、Bridge apply→Vault listener→refreshのfeedback loopを作らない。
 - in-flight、write in progress、network error、空pending到着遅延に対するretry / watch windowがある。
 - OSによりprocess自体が停止している期間の保証は要確認。
 

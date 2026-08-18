@@ -2,8 +2,8 @@
 
 ## Current Baseline
 
-- Current implementation and immutable test distribution: `v0.6.71` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No), annotated tag object `8f5624beed25754e56a4b012a429a1a4436a453d`, peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`.
-- v0.6.70 real-device `TASKCREATED-SECTION-TOP-ORDER-01` exposed that ordinary TaskCreated lacked an exact placement contract: sender section-top order and remote/mobile appended order diverged despite Ack. v0.6.71 captures a versioned placement contract from post-save Markdown neighbors and verifies exact inbound placement before Ack. Synthetic tests pass; device verification and the plugin full matrix remain `NOT_VERIFIED`.
+- Current implementation checkpoint: `v0.6.72` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No). The preceding immutable `v0.6.71` distribution remains tag object `8f5624beed25754e56a4b012a429a1a4436a453d`, peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`.
+- v0.6.72 removes elapsed-idle-time reload authority and coalesces Bridge inbound/mobile resume/external catch-up UI refreshes per logical session. Event apply, persistence, post-save verification, Ack, cursor, identity, and safe-stop semantics remain per-event. Synthetic tests pass; targeted idle/backlog device verification and the plugin full matrix remain `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
 
@@ -52,6 +52,7 @@ Otherwise leave the event unacked and record a diagnostic such as identity confl
 ## Change And Test Discipline
 
 - Do not weaken post-save verification, false-applied prevention, cursor safety, mobile hidden drain guards, or identity collision guards.
+- Elapsed inactivity is diagnostic context, not TaskChute UI invalidation authority. Refresh only for a relevant persisted-data change, and coalesce plugin-requested Bridge catch-up renders to at most one per logical drain.
 - A successfully synchronized supported TaskMoved D&D must not enter usable Undo history without exact `bridgeTaskMovedSemantic` at history top. Scheduled or unrelated commits must not finalize its operation-scoped batch; an unprovable handoff must block local-only Undo instead of reporting normal Undoable success.
 - Runtime or Bridge changes require reviewing the affected rows in `docs/TEST_MATRIX.md` and recording real verification state. Do not promote historical PASS results to the current release without current evidence.
 - Keep `PASS`, `FAIL`, `BLOCKED`, and `NOT_VERIFIED` distinct. Unknown or mixed test data is not PASS.

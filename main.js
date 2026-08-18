@@ -11626,6 +11626,67 @@ class TaskchuteShortcutHelpModal extends obsidian.Modal {
 // This is a high-risk area; avoid moving core methods during early splitting.
 // ============================================================================
 
+function createTaskchuteUiRefreshSessionState(input = {}) {
+  const reason = String(input.reason || "bridge-inbound").trim() || "bridge-inbound";
+  return {
+    id: String(input.id || `ui-refresh-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`).trim(),
+    active: true,
+    createdAt: String(input.createdAt || nowIso()),
+    kickoffReasons: [reason],
+    passCount: 0,
+    dirty: false,
+    visibleMutationCount: 0,
+    suppressedRefreshRequestCount: 0,
+    externalInvalidationDetected: false,
+    finalRefreshExecuted: false,
+    finalRefreshReason: "",
+    noRefreshReason: "",
+    terminalState: ""
+  };
+}
+
+function joinTaskchuteUiRefreshSessionState(session, reason = "bridge-inbound") {
+  if (!session || typeof session !== "object") return session;
+  const normalized = String(reason || "bridge-inbound").trim() || "bridge-inbound";
+  const reasons = Array.isArray(session.kickoffReasons) ? session.kickoffReasons : [];
+  if (!reasons.includes(normalized)) reasons.push(normalized);
+  session.kickoffReasons = reasons.slice(-12);
+  return session;
+}
+
+function markTaskchuteUiRefreshSessionDirty(session, input = {}) {
+  if (!session || typeof session !== "object") return session;
+  const count = Math.max(0, Math.floor(Number(input.visibleMutationCount || 0)));
+  if (count > 0 || input.externalInvalidationDetected) session.dirty = true;
+  session.visibleMutationCount = Math.max(0, Number(session.visibleMutationCount || 0)) + count;
+  session.externalInvalidationDetected = !!(session.externalInvalidationDetected || input.externalInvalidationDetected);
+  if (input.suppressedRequest !== false) {
+    session.suppressedRefreshRequestCount = Math.max(0, Number(session.suppressedRefreshRequestCount || 0)) + 1;
+  }
+  return session;
+}
+
+function decideTaskchuteUiRefreshSessionFinalization(session, context = {}) {
+  const state = session && typeof session === "object" ? session : {};
+  const dirty = !!(state.dirty || state.externalInvalidationDetected || Number(state.visibleMutationCount || 0) > 0);
+  if (!dirty) {
+    return { execute: false, reason: String(context.noChangeReason || "pending_zero_no_data_change") };
+  }
+  if (!context.viewOpen) return { execute: false, reason: "view_not_open" };
+  if (context.hidden) return { execute: false, reason: "mobile_hidden_no_render" };
+  return { execute: true, reason: String(context.refreshReason || "bridge_inbound_session_final") };
+}
+
+function decideTaskchuteIdleResumeRefresh(input = {}) {
+  const stale = !!input.relevantInvalidationDetected;
+  if (stale) return { refresh: true, reason: "actual_data_invalidation" };
+  const source = String(input.reason || "focus").trim();
+  return {
+    refresh: false,
+    reason: source.includes("interaction") ? "idle_interaction_no_invalidation" : "focus_no_invalidation"
+  };
+}
+
 class TaskchutePlugin extends obsidian.Plugin {
   async onload() {
     try {
@@ -11667,6 +11728,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.taskchuteDisplayReloadQueuedAt = 0;
       this.taskchuteDisplayReloadPending = false;
       this.lastTaskchuteDisplayReloadAt = 0;
+      this.taskchuteDataGeneration = 0;
+      this.lastRenderedTaskchuteGeneration = 0;
+      this.bridgeInboundUiRefreshSession = null;
+      this.bridgeInboundUiRefreshSessionSequence = 0;
       this.undoStack = [];
       this.redoStack = [];
       this.undoStackLimit = 20;
@@ -12646,7 +12711,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         const hiddenFor = this._tcTaskchuteHiddenAt ? Date.now() - Number(this._tcTaskchuteHiddenAt || 0) : 0;
         if (hiddenFor >= 30000) {
           markWake("visibility-return");
-          this.queueTaskchuteDisplayDataReload("visibility-return", { delayMs: 250 });
+          this.handleTaskchuteIdleResumeFreshnessCheck("visibility-return", hiddenFor);
         }
         this._tcTaskchuteHiddenAt = 0;
       };
@@ -12658,7 +12723,7 @@ class TaskchutePlugin extends obsidian.Plugin {
         const blurredFor = this._tcTaskchuteBlurredAt ? Date.now() - Number(this._tcTaskchuteBlurredAt || 0) : 0;
         if (blurredFor >= 30000) {
           markWake("window-focus");
-          this.queueTaskchuteDisplayDataReload("window-focus", { delayMs: 250 });
+          this.handleTaskchuteIdleResumeFreshnessCheck("window-focus", blurredFor);
         }
         this._tcTaskchuteBlurredAt = 0;
       };
@@ -14121,6 +14186,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     let finishReason = "";
     let safeStopRetryCount = 0;
     let watchWindowPendingFound = false;
+    const uiRefreshHandle = this.beginBridgeInboundUiRefreshSession(source);
     this._bridgeMobileResumeInboundDrainActive = true;
     this._bridgeMobileResumeInboundDrainQueued = false;
     this._bridgeMobileResumeCurrentDrainRunId = runId;
@@ -14306,7 +14372,12 @@ class TaskchutePlugin extends obsidian.Plugin {
           break;
         }
         this.bridgeInboundAutoApplyLastTickAt = 0;
-        lastResult = await this.runBridgeInboundAutoApplyOnce({ mobileResumeDrain: true, runId, source });
+        lastResult = await this.runBridgeInboundAutoApplyOnce({
+          mobileResumeDrain: true,
+          runId,
+          source,
+          uiRefreshSession: uiRefreshHandle.session
+        });
         if (lastResult && lastResult.deferred) {
           finishReason = "deferred-hidden";
           break;
@@ -14587,6 +14658,13 @@ class TaskchutePlugin extends obsidian.Plugin {
       };
     } finally {
       try { await this.savePluginData({ deviceWriterOperation: "bridge-mobile-resume-inbound-drain" }); } catch (e) {}
+      if (uiRefreshHandle.owner) {
+        await this.finalizeBridgeInboundUiRefreshSession(uiRefreshHandle.session, {
+          passCount: passIndex,
+          terminalState: finishReason || (passIndex >= maxPasses ? "max_passes" : "done"),
+          noChangeReason: "pending_zero_no_data_change"
+        });
+      }
       this._bridgeMobileResumeInboundDrainActive = false;
       this._bridgeMobileResumeInboundDrainQueued = false;
       this._bridgeMobileResumeCurrentDrainRunId = "";
@@ -15285,6 +15363,7 @@ class TaskchutePlugin extends obsidian.Plugin {
   }
 
   queueExternalRefresh(reason = "external-change", options = {}) {
+    this.markTaskchuteDataInvalidated(reason);
     this.pendingExternalRefreshReasons = this.pendingExternalRefreshReasons || [];
     this.pendingExternalRefreshReasons.push(reason);
     this.pendingExternalRefreshPaths = this.pendingExternalRefreshPaths || new Set();
@@ -15349,6 +15428,181 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
   }
 
+  recordTaskchuteUiRefreshDiagnostic(phase, detail = {}) {
+    try {
+      if (!this.settings) return;
+      const diagnostics = Array.isArray(this.settings.bridgeInboundAutoApplyRuntimeDiagnostics)
+        ? this.settings.bridgeInboundAutoApplyRuntimeDiagnostics
+        : [];
+      const entry = {
+        recorded_at: nowIso(),
+        status: "ui_refresh",
+        phase: String(phase || "taskchute_ui_refresh").trim(),
+        refresh_session_id: String(detail.refresh_session_id || detail.sessionId || "").trim(),
+        kickoff_reasons: (Array.isArray(detail.kickoff_reasons) ? detail.kickoff_reasons : []).map(value => String(value || "").trim()).filter(Boolean).slice(-12),
+        joined_active_session: !!detail.joined_active_session,
+        idle_reason: String(detail.idle_reason || "").trim(),
+        idle_duration_ms: Math.max(0, Math.floor(Number(detail.idle_duration_ms || 0))),
+        pending_fetch_pass_count: Math.max(0, Math.floor(Number(detail.pending_fetch_pass_count || 0))),
+        visible_mutation_count: Math.max(0, Math.floor(Number(detail.visible_mutation_count || 0))),
+        external_data_invalidation_detected: !!detail.external_data_invalidation_detected,
+        suppressed_refresh_request_count: Math.max(0, Math.floor(Number(detail.suppressed_refresh_request_count || 0))),
+        final_refresh_executed: !!detail.final_refresh_executed,
+        final_refresh_reason: String(detail.final_refresh_reason || "").trim(),
+        no_refresh_reason: String(detail.no_refresh_reason || "").trim(),
+        terminal_state: String(detail.terminal_state || "").trim(),
+        ui_refresh_error: sanitizeBridgeSafeMessage(detail.ui_refresh_error || "")
+      };
+      this.settings.bridgeInboundAutoApplyRuntimeDiagnostics = limitBridgeDiagnosticArrayProtectedAware(
+        diagnostics.concat(entry),
+        "bridgeInboundAutoApplyRuntimeDiagnostics",
+        this.settings
+      );
+    } catch (e) {}
+  }
+
+  markTaskchuteDataInvalidated(reason = "data-change") {
+    this.taskchuteDataGeneration = Math.max(0, Number(this.taskchuteDataGeneration || 0)) + 1;
+    return this.taskchuteDataGeneration;
+  }
+
+  markTaskchuteViewsRendered() {
+    this.lastRenderedTaskchuteGeneration = Math.max(
+      Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0)),
+      Math.max(0, Number(this.taskchuteDataGeneration || 0))
+    );
+  }
+
+  handleTaskchuteIdleResumeFreshnessCheck(reason = "focus", idleDurationMs = 0) {
+    const relevantInvalidationDetected = Math.max(0, Number(this.taskchuteDataGeneration || 0))
+      > Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0));
+    const decision = decideTaskchuteIdleResumeRefresh({ reason, idleDurationMs, relevantInvalidationDetected });
+    this.recordTaskchuteUiRefreshDiagnostic("taskchute_idle_resume_freshness_check", {
+      idle_reason: reason,
+      idle_duration_ms: idleDurationMs,
+      external_data_invalidation_detected: relevantInvalidationDetected,
+      final_refresh_executed: false,
+      no_refresh_reason: decision.refresh ? "external_refresh_pending" : decision.reason,
+      terminal_state: "freshness_checked"
+    });
+    if (!decision.refresh) return false;
+    if (this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active) {
+      markTaskchuteUiRefreshSessionDirty(this.bridgeInboundUiRefreshSession, {
+        externalInvalidationDetected: true,
+        suppressedRequest: true
+      });
+      return false;
+    }
+    if (this.externalRefreshTimer || this.isApplyingExternalRefresh || this.taskchuteDisplayReloadActive || this.taskchuteDisplayReloadPending) return false;
+    return this.queueTaskchuteDisplayDataReload(`actual-invalidation:${reason}`, { delayMs: 250 });
+  }
+
+  beginBridgeInboundUiRefreshSession(reason = "bridge-inbound", options = {}) {
+    const requested = options && options.session;
+    const active = this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active
+      ? this.bridgeInboundUiRefreshSession
+      : null;
+    if (active) {
+      joinTaskchuteUiRefreshSessionState(active, reason);
+      this.recordTaskchuteUiRefreshDiagnostic("bridge_inbound_ui_refresh_session_joined", {
+        refresh_session_id: active.id,
+        kickoff_reasons: active.kickoffReasons,
+        joined_active_session: true,
+        visible_mutation_count: active.visibleMutationCount,
+        suppressed_refresh_request_count: active.suppressedRefreshRequestCount,
+        terminal_state: "active"
+      });
+      return { session: active, owner: false };
+    }
+    if (requested && requested.active) {
+      this.bridgeInboundUiRefreshSession = requested;
+      joinTaskchuteUiRefreshSessionState(requested, reason);
+      return { session: requested, owner: false };
+    }
+    this.bridgeInboundUiRefreshSessionSequence = Math.max(0, Number(this.bridgeInboundUiRefreshSessionSequence || 0)) + 1;
+    const session = createTaskchuteUiRefreshSessionState({
+      id: `bridge-ui-${Date.now()}-${this.bridgeInboundUiRefreshSessionSequence}`,
+      reason
+    });
+    if (Math.max(0, Number(this.taskchuteDataGeneration || 0)) > Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0))) {
+      markTaskchuteUiRefreshSessionDirty(session, {
+        externalInvalidationDetected: true,
+        suppressedRequest: false
+      });
+    }
+    this.bridgeInboundUiRefreshSession = session;
+    this.recordTaskchuteUiRefreshDiagnostic("bridge_inbound_ui_refresh_session_started", {
+      refresh_session_id: session.id,
+      kickoff_reasons: session.kickoffReasons,
+      joined_active_session: false,
+      terminal_state: "active"
+    });
+    return { session, owner: true };
+  }
+
+  requestBridgeInboundUiRefresh(session, detail = {}) {
+    const target = session && session.active ? session : this.bridgeInboundUiRefreshSession;
+    if (!target || !target.active) return false;
+    const visibleMutationCount = Math.max(0, Number(detail.visibleMutationCount || 0));
+    const externalInvalidationDetected = !!detail.externalInvalidationDetected;
+    markTaskchuteUiRefreshSessionDirty(target, {
+      visibleMutationCount,
+      externalInvalidationDetected,
+      suppressedRequest: detail.suppressedRequest !== false
+    });
+    if (Number(detail.passCount || 0) > Number(target.passCount || 0)) target.passCount = Number(detail.passCount || 0);
+    if (visibleMutationCount > 0 || externalInvalidationDetected) {
+      this.markTaskchuteDataInvalidated(detail.reason || "bridge-inbound-applied");
+    }
+    return true;
+  }
+
+  async finalizeBridgeInboundUiRefreshSession(session, detail = {}) {
+    if (!session || !session.active) return { executed: false, reason: "session_inactive" };
+    if (this.bridgeInboundUiRefreshSession !== session) return { executed: false, reason: "not_session_owner" };
+    session.passCount = Math.max(Number(session.passCount || 0), Number(detail.passCount || 0));
+    session.terminalState = String(detail.terminalState || "pending_zero").trim();
+    const decision = decideTaskchuteUiRefreshSessionFinalization(session, {
+      viewOpen: this.hasOpenTaskchuteViews(),
+      hidden: this.isBridgeMobileResumeHidden && this.isBridgeMobileResumeHidden(),
+      noChangeReason: detail.noChangeReason || "pending_zero_no_data_change",
+      refreshReason: detail.refreshReason || "bridge_inbound_session_final"
+    });
+    session.active = false;
+    session.finalRefreshReason = decision.execute ? decision.reason : "";
+    session.noRefreshReason = decision.execute ? "" : decision.reason;
+    let error = "";
+    if (decision.execute) {
+      try {
+        await this.patchTaskchuteViewsFromExternalSync({
+          preserveScroll: true,
+          bridgeInboundFinalRefresh: true,
+          bridgeInboundRefreshSessionId: session.id
+        });
+        session.finalRefreshExecuted = true;
+        this.markTaskchuteViewsRendered();
+      } catch (e) {
+        error = String(e && e.message || e || "");
+        session.finalRefreshExecuted = false;
+      }
+    }
+    this.recordTaskchuteUiRefreshDiagnostic("bridge_inbound_ui_refresh_session_finalized", {
+      refresh_session_id: session.id,
+      kickoff_reasons: session.kickoffReasons,
+      pending_fetch_pass_count: session.passCount,
+      visible_mutation_count: session.visibleMutationCount,
+      external_data_invalidation_detected: session.externalInvalidationDetected,
+      suppressed_refresh_request_count: session.suppressedRefreshRequestCount,
+      final_refresh_executed: session.finalRefreshExecuted,
+      final_refresh_reason: session.finalRefreshReason,
+      no_refresh_reason: session.noRefreshReason,
+      terminal_state: session.terminalState,
+      ui_refresh_error: error
+    });
+    this.bridgeInboundUiRefreshSession = null;
+    return { executed: session.finalRefreshExecuted, reason: decision.reason, error };
+  }
+
   isEditingInsideTaskchuteView() {
     try {
       const active = document && document.activeElement;
@@ -15361,13 +15615,7 @@ class TaskchutePlugin extends obsidian.Plugin {
   }
 
   shouldRunDisplayReloadAfterInactivity() {
-    try {
-      const last = Number(this.lastTaskBoardInteraction || 0);
-      if (!last) return false;
-      return Date.now() - last >= 30 * 60 * 1000;
-    } catch (e) {
-      return false;
-    }
+    return false;
   }
 
   queueTaskchuteDisplayDataReload(reason = "display-reload", options = {}) {
@@ -15397,6 +15645,22 @@ class TaskchutePlugin extends obsidian.Plugin {
 
   async reloadTaskchuteSyncDataFromDisk(options = {}) {
     const force = !!(options && options.force);
+    const reason = String(options && options.reason || "").trim();
+    if (!force && reason.startsWith("actual-invalidation:") && (
+      (this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active)
+      || this._bridgeMobileResumeInboundDrainActive
+      || this._bridgeMobileResumeInboundDrainQueued
+    )) {
+      if (this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active) {
+        this.requestBridgeInboundUiRefresh(this.bridgeInboundUiRefreshSession, {
+          reason,
+          externalInvalidationDetected: true,
+          suppressedRequest: true
+        });
+      }
+      this.taskchuteDisplayReloadPending = false;
+      return false;
+    }
     if (this.taskchuteDisplayReloadActive && !force) {
       this.queueTaskchuteDisplayDataReload("reload-after-active", Object.assign({}, options || {}, { delayMs: 500 }));
       return false;
@@ -15440,7 +15704,8 @@ class TaskchutePlugin extends obsidian.Plugin {
           await this.patchTaskchuteViewsFromExternalSync({
             externalSync: true,
             preserveScroll: options.preserveScroll !== false,
-            reloadSettings: true
+            reloadSettings: true,
+            bridgeInboundRefreshBypass: force
           });
         } catch (patchError) {
           console.error("Taskchute sync data reload view patch error", patchError);
@@ -15449,6 +15714,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
 
       this.lastTaskchuteDisplayReloadAt = Date.now();
+      this.markTaskchuteViewsRendered();
       this.clearWakeSyncGuard();
       if (options && options.notice) new obsidian.Notice("Taskchute同期データを再読み込みしました", 1800);
       return true;
@@ -15536,11 +15802,6 @@ class TaskchutePlugin extends obsidian.Plugin {
         await this.refreshRoutineSettingsViews();
       }
 
-      const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
-      if (leaves.length) {
-        await this.patchTaskchuteViewsFromExternalSync({ externalSync: true, preserveScroll: true, reloadSettings: shouldReloadSettings });
-      }
-
       // Obsidian Syncでは、タスクノート作成/削除と日別Taskchuteノート更新が別イベントとして
       // 少し遅れて届くことがある。最初のイベントだけで古い日別ノートを読んでしまうと、
       // 「一度同期表示が出るが反映されず、次の同期でようやく表示される」状態になるため、
@@ -15565,9 +15826,13 @@ class TaskchutePlugin extends obsidian.Plugin {
         await this.updatePluginDataStatBaseline();
       }
       // Obsidian Syncでは、日別ノート・タスクノート・data.jsonが数百msずれて届くことがある。
-      // 1回目を早く反映しつつ、同じ同期中表示のまま必ず追い読みすることで、
-      // 「一度同期して表示されず、少し後の二度目で表示される」体感遅延を減らす。
-      await this.patchTaskchuteViewsFromExternalSync({ externalSync: true, preserveScroll: true, reloadSettings: shouldReloadSettings || this.pendingExternalSettingsReload || hasLateExternalChange });
+      // v0.6.72では遅着分まで読み切ってから1回だけ描画し、catch-up中の表示点滅を防ぐ。
+      const mobileHidden = this.isBridgeMobileResumeHidden && this.isBridgeMobileResumeHidden();
+      if (this.hasOpenTaskchuteViews() && !mobileHidden) {
+        const joinedInboundSession = !!(this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active);
+        await this.patchTaskchuteViewsFromExternalSync({ externalSync: true, preserveScroll: true, reloadSettings: shouldReloadSettings || this.pendingExternalSettingsReload || hasLateExternalChange });
+        if (!joinedInboundSession) this.markTaskchuteViewsRendered();
+      }
       reasons.push(...lateReasons);
       this.pendingExternalSettingsReload = false;
       this.debugKeyLog("external sync patch", { reasons: reasons.slice(-12), reloadSettings: shouldReloadSettings });
@@ -16092,9 +16357,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     const inactiveFor = previousInteractionAt ? Date.now() - previousInteractionAt : 0;
     this.keyboardScopeActive = true;
     this.lastTaskBoardInteraction = Date.now();
-    if (inactiveFor >= 30 * 60 * 1000) {
-      this.queueTaskchuteDisplayDataReload("long-inactive-board-interaction", { delayMs: 250 });
-    }
+    if (inactiveFor > 0) this.handleTaskchuteIdleResumeFreshnessCheck("taskboard-interaction", inactiveFor);
     this.debugKeyLog("keyboard scope activated", { reason });
   }
 
@@ -22545,7 +22808,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     let appliedCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
-    let refreshNeeded = false;
+    let visibleMutationCount = 0;
     let stoppedReason = "";
     let message = "";
 
@@ -22562,6 +22825,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       return { ok: false, message, appliedCount, skippedCount, failedCount, appliedEventIds, stoppedReason: this.settings.bridgeInboundAutoApplyStoppedReason };
     }
 
+    const uiRefreshHandle = this.beginBridgeInboundUiRefreshSession("manual-safe-apply");
     this.bridgeInboundApplyInProgress = true;
     this.settings.bridgeInboundApplyInProgress = true;
     try {
@@ -22609,6 +22873,15 @@ class TaskchutePlugin extends obsidian.Plugin {
             stoppedReason = formatBridgeInboundApplyFailure(event, result && result.message ? result.message : "反映に失敗したため停止しました。");
             break;
           }
+          if (String(result.apply_status || "applied") !== "skipped_applied") {
+            visibleMutationCount++;
+            this.requestBridgeInboundUiRefresh(uiRefreshHandle.session, {
+              reason: `manual-inbound-${eventType}-applied`,
+              visibleMutationCount: 1,
+              suppressedRequest: false,
+              passCount: 1
+            });
+          }
           const ack = await this.ackBridgeInboundAppliedEvent(event, result);
           if (!ack || !ack.ok) {
             failedCount++;
@@ -22616,7 +22889,6 @@ class TaskchutePlugin extends obsidian.Plugin {
             break;
           }
           appliedCount++;
-          refreshNeeded = true;
           appliedEventIds.push(eventId);
           alreadyAutoApplied.add(eventId);
           appliedByType[eventType].add(eventId);
@@ -22659,12 +22931,14 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.settings.bridgeInboundAutoApplyStoppedReason = stoppedReason;
     this.pruneBridgeDiagnostics("inbound-safe-apply-batch", { force: true });
     await this.savePluginData({ deviceWriterOperation: "bridge-inbound-safe-auto-apply-once" });
-    if (refreshNeeded) {
-      try { await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true }); } catch (e) {
-        try { await this.refreshViews({ preserveScroll: true }); } catch (ignored) {}
-      }
+    if (uiRefreshHandle.owner) {
+      await this.finalizeBridgeInboundUiRefreshSession(uiRefreshHandle.session, {
+        passCount: 1,
+        terminalState: failedCount > 0 ? "safe_stop" : "manual_complete",
+        noChangeReason: appliedCount > 0 ? "" : "pending_zero_no_data_change"
+      });
     }
-    return { ok, message, appliedCount, skippedCount, failedCount, appliedEventIds, stoppedReason };
+    return { ok, message, appliedCount, skippedCount, failedCount, visibleMutationCount, appliedEventIds, stoppedReason };
   }
 
   async runBridgeInboundAutoApplyTimerTick() {
@@ -22754,7 +23028,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     let failedCount = 0;
     let stoppedReason = "";
     let message = "";
-    let refreshNeeded = false;
+    let visibleMutationCount = 0;
     let recoverableFailureKind = "";
     let recoverableFailureMessage = "";
     const mobileResumeDrain = !!(options && options.mobileResumeDrain);
@@ -22771,6 +23045,10 @@ class TaskchutePlugin extends obsidian.Plugin {
       return { ok: false, message: "受信イベント反映は既に処理中です。", appliedCount, skippedCount, failedCount, appliedEventIds, stoppedReason: "別の受信反映処理が実行中です。" };
     }
 
+    const uiRefreshHandle = this.beginBridgeInboundUiRefreshSession(String(options && options.source || (mobileResumeDrain ? "mobile-resume-pass" : "inbound-auto-apply")), {
+      session: options && options.uiRefreshSession
+    });
+    uiRefreshHandle.session.passCount = Math.max(0, Number(uiRefreshHandle.session.passCount || 0)) + 1;
     this.settings.bridgeInboundAutoApplyInProgress = true;
     this.bridgeInboundApplyInProgress = true;
     this.settings.bridgeInboundApplyInProgress = true;
@@ -22952,6 +23230,15 @@ class TaskchutePlugin extends obsidian.Plugin {
             stoppedReason = formatBridgeInboundApplyFailure(event, result && result.message ? result.message : "反映に失敗したため停止しました。");
             break;
           }
+          if (String(result.apply_status || "applied") !== "skipped_applied") {
+            visibleMutationCount++;
+            this.requestBridgeInboundUiRefresh(uiRefreshHandle.session, {
+              reason: `inbound-${eventType}-applied`,
+              visibleMutationCount: 1,
+              suppressedRequest: false,
+              passCount: uiRefreshHandle.session.passCount
+            });
+          }
           this.recordBridgeStructuredDiagnostic({ level: "info", category: "ack", phase: "ack_started", reason: "inbound-auto-apply", event, status: "started", message: "Ackを開始しました。" });
           if (eventType === "TaskMoved") {
             this.recordBridgeTaskMovedInboundDiagnostic("taskmoved_ack_started", event, {
@@ -23009,7 +23296,6 @@ class TaskchutePlugin extends obsidian.Plugin {
             break;
           }
           appliedCount++;
-          refreshNeeded = true;
           appliedEventIds.push(eventId);
           appliedByType[eventType].add(eventId);
         }
@@ -23070,12 +23356,14 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.settings.bridgeInboundAutoApplyLastStoppedReason = stoppedReason;
     this.pruneBridgeDiagnostics("inbound-auto-apply-batch", { force: true });
     await this.savePluginData({ deviceWriterOperation: "bridge-inbound-auto-apply-all" });
-    if (refreshNeeded) {
-      try { await this.patchTaskchuteViewsFromExternalSync({ preserveScroll: true }); } catch (e) {
-        try { await this.refreshViews({ preserveScroll: true }); } catch (ignored) {}
-      }
+    if (uiRefreshHandle.owner) {
+      await this.finalizeBridgeInboundUiRefreshSession(uiRefreshHandle.session, {
+        passCount: uiRefreshHandle.session.passCount,
+        terminalState: deferredUntilVisible ? "deferred_hidden" : failedCount > 0 ? "safe_stop" : recoverableFailureKind ? "recoverable_error" : "pending_zero",
+        noChangeReason: appliedCount > 0 ? "" : "pending_zero_no_data_change"
+      });
     }
-    return { ok: failedCount === 0 && !deferredUntilVisible && !recoverableFailureKind, recoverable: !!recoverableFailureKind, failureKind: recoverableFailureKind, message, appliedCount, skippedCount, failedCount, appliedEventIds, stoppedReason, deferred: deferredUntilVisible };
+    return { ok: failedCount === 0 && !deferredUntilVisible && !recoverableFailureKind, recoverable: !!recoverableFailureKind, failureKind: recoverableFailureKind, message, appliedCount, skippedCount, failedCount, visibleMutationCount, appliedEventIds, stoppedReason, deferred: deferredUntilVisible };
   }
 
   getBridgeInboundAppliedTaskDeletedEventIds() {
@@ -34032,6 +34320,21 @@ class TaskchutePlugin extends obsidian.Plugin {
   }
 
   async patchTaskchuteViewsFromExternalSync(options = {}) {
+    const inboundSession = this.bridgeInboundUiRefreshSession;
+    const sessionManagedRefresh = !!(
+      this.bridgeInboundApplyInProgress
+      || (options && options.externalSync)
+    );
+    if (inboundSession && inboundSession.active && sessionManagedRefresh
+      && !(options && (options.bridgeInboundFinalRefresh || options.bridgeInboundRefreshBypass))) {
+      this.requestBridgeInboundUiRefresh(inboundSession, {
+        reason: "intermediate_view_patch_request",
+        visibleMutationCount: 0,
+        externalInvalidationDetected: !!(options && options.externalSync),
+        suppressedRequest: true
+      });
+      return true;
+    }
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     const isExternalSync = !!(options && options.externalSync);
     for (const leaf of leaves) {
@@ -42358,6 +42661,7 @@ class TaskchuteView extends obsidian.ItemView {
     this.updateViewHeaderTitle();
     await this.plugin.reloadTaskchuteSyncDataFromDisk({ reason: "taskboard-open", date: this.selectedDate, patchViews: false, showStatus: false, preserveScroll: true });
     await this.refresh({ initialFocusTopSection: true, skipDisplaySyncReload: true });
+    if (this.plugin && this.plugin.markTaskchuteViewsRendered) this.plugin.markTaskchuteViewsRendered();
   }
 
   isInteractiveTarget(target) {
@@ -42479,13 +42783,8 @@ class TaskchuteView extends obsidian.ItemView {
     const refreshRunId = (this.refreshRunId || 0) + 1;
     this.refreshRunId = refreshRunId;
     const isCurrentRefresh = () => this.refreshRunId === refreshRunId && !!(this.containerEl && this.containerEl.isConnected !== false);
-    if (!(options && (options.skipDisplaySyncReload || options.externalSync))) {
-      const needsDisplayReload = this.plugin && this.plugin.shouldRunDisplayReloadAfterInactivity && this.plugin.shouldRunDisplayReloadAfterInactivity();
-      if (needsDisplayReload) {
-        await this.plugin.reloadTaskchuteSyncDataFromDisk({ reason: "taskboard-refresh-after-inactive", date: this.selectedDate, patchViews: false, showStatus: false, preserveScroll: true });
-        if (!isCurrentRefresh()) return;
-      }
-    }
+    // Idle duration is not an invalidation source. Bridge/external-change coordinators
+    // decide whether persisted TaskChute data requires a view refresh.
     if (!isCurrentRefresh()) return;
     const previousScroll = options && options.preserveScroll
       ? this.getBoardScrollSnapshot()

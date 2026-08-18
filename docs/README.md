@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current baseline: immutable v0.6.71 BRAT Prerelease. Ordinary TaskCreated now carries an exact placement contract captured from post-save Markdown neighbors. Synthetic, structural, and published-asset integrity checks passed; real Vault verification remains pending.
+Current baseline: v0.6.72 BRAT Prerelease checkpoint. Bridge inbound catch-up and idle/resume freshness checks now refresh TaskChute only for actual relevant data changes, with at most one visible refresh per logical drain. Synthetic and structural checks passed; targeted real Vault verification remains pending.
 
 ## Current Canonical
 
@@ -32,6 +32,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
+- [v0.6.72 BRAT Prerelease](release/v0.6.72.md)
 - [v0.6.71 BRAT Prerelease](release/v0.6.71.md)
 - [v0.6.70 BRAT Prerelease](release/v0.6.70.md)
 - [v0.6.63 BRAT Prerelease](release/v0.6.63.md)

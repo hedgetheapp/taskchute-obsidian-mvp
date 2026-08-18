@@ -271,6 +271,18 @@
 - 制限: anchorがreceiverで未到達・削除・別section化した場合や、empty-sectionへ複数writerが競合した場合はv1を満たせず未Ack停止する。serverがoptional fieldsを透過保持することはBRAT round-tripで要確認である。
 - 根拠: `buildBridgeTaskCreatedPlacementFromSavedMarkdown()`、`enqueueBridgeTaskCreatedFromSavedMarkdown()`、`applyBridgeInboundTaskCreatedEvent()`、`inspectBridgeTaskCreatedPlacement()`、`tests/taskcreated-placement-v0671.js`、v0.6.70 T-0667 / E-20260817-0015 device failure evidence。
 
+## D-044: elapsed idle timeではなくactual data changeをUI invalidation authorityにする
+
+- 判断: focus、visibility復帰、resume、first interactionでは経過時間だけを理由にTaskBoardをreloadしない。relevant Vault / Bridge stateのactual invalidationだけが自動refreshを要求できる。
+- 根拠: `handleTaskchuteIdleResumeFreshnessCheck()`、`markTaskchuteDataInvalidated()`、external Vault watcher。
+- 理由: no-changeの復帰操作でscroll / selectionを壊すreloadを防ぎながら、Obsidian Sync等の実変更は取りこぼさないため。
+
+## D-045: Bridge inboundの表示更新はlogical drain単位でcoalesceする
+
+- 判断: event apply / verify / Ack / cursorは個別に維持し、plugin-requested TaskBoard refreshだけをstartup / interval / focus / resumeと複数passを含むsessionの最後へ集約する。
+- 根拠: `beginBridgeInboundUiRefreshSession()`、`requestBridgeInboundUiRefresh()`、`finalizeBridgeInboundUiRefreshSession()`。
+- 理由: backlog catch-up中のreload stormを止めつつ、safe-stop前に正しく適用されたprefixを一度だけ表示し、UI例外をdata correctnessから分離するため。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

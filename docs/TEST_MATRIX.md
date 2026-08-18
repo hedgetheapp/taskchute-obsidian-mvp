@@ -2,12 +2,12 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.71 BRAT Prerelease（ordinary TaskCreated exact placementを実装・試験配布済み。実機未検証、plugin全体 / full matrixは`NOT_VERIFIED`）
-- 配布済みcheckpoint: immutable `v0.6.71` BRAT Prerelease、tag target `24b3a480593a03921bc3bb497842b0a14fc8cae8`
-- v0.6.71はpost-save Markdown neighborからTaskCreated placement v1を構築し、inboundでexact adjacencyを保存後検証する。synthetic PASSはdevice PASSへ昇格しない。
+- 対象実装: v0.6.72 BRAT Prerelease candidate（Bridge inbound / idle resume UI refresh coalescingを実装。plugin全体 / full matrixは`NOT_VERIFIED`）
+- 直前の配布済みcheckpoint: immutable `v0.6.71` BRAT Prerelease、tag target `24b3a480593a03921bc3bb497842b0a14fc8cae8`
+- v0.6.72はactual data invalidationをrefresh authorityとし、logical inbound drainごとのvisible refreshを0回または最大1回へcoalesceする。synthetic PASSはdevice PASSへ昇格しない。
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
-- dev / remote / mobile列と`Status`列は、いずれもv0.6.71についての判定を示す。
+- dev / remote / mobile列と`Status`列は、いずれもv0.6.72についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
 - Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
@@ -231,7 +231,20 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 
 上記4件はimmutable v0.6.71 assets上のtargeted current PASSである。plugin全体 / full matrixおよび他のcurrent `NOT_VERIFIED`行は昇格しない。
 
-## Current v0.6.71 Matrix
+## v0.6.72 Synthetic Evidence
+
+| Test case | Synthetic result | Device status |
+|---|---|---|
+| UI-REFRESH-IDLE-NOCHANGE-01: idle後のfocus / first interactionでactual changeなし | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-BACKLOG-ONE-PASS-01: 複数inbound eventを個別apply / verify / Ackしfinal refresh最大1回 | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-BACKLOG-MULTIPASS-01: 2 pass以上のdrainを同一sessionへ集約 | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-EXTERNAL-CHANGE-01: relevant external Vault changeだけgenerationを進めfinal refresh 1回 | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-SAFE-STOP-01: 成功prefixは1回、mutation前stopは0回 | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-OVERLAP-01: startup / focus / resume kickoffをactive sessionへjoin | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-VIEW-CLOSED-01: view未open / hiddenではopenまたはforced renderしない | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-FAILURE-ISOLATION-01: final UI errorがapplied / Ack / cursorを巻き戻さない | `PASS` | `NOT_VERIFIED` |
+
+## Current v0.6.72 Matrix
 
 | Area | Test case | dev | remote | mobile | Last verified version | Status | Evidence / Notes |
 |---|---|---|---|---|---|---|---|
@@ -244,19 +257,22 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | Inbound Ack / cursor | CURSOR-GAP-01: server Ack済みsequenceを再applyせずgap解消 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | 2157 / 2158 / 2159相当synthetic PASS。実mobile recoveryは未実施。 |
 | Inbound Ack / cursor | CURSOR-MERGE-01: latest dataへmonotonic merge | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic PASS。外部reloadを伴う実data.json競合は未確認。 |
 | Mobile rescue | MOBILE-RESCUE-01: recoverable Ack / cursor stopからdrain再開 | `NOT_APPLICABLE` | `NOT_APPLICABLE` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic / structural PASS。実mobile rescueは未実施。 |
+| UI refresh coalescing | UI-REFRESH-IDLE-NOCHANGE-01: idle後のfocus / clickで変更なし | `NOT_VERIFIED` | `NOT_APPLICABLE` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.72 focused syntheticはrefresh 0を確認。実desktop / mobileでflash、scroll reset、不要refreshがないことは未確認。 |
+| UI refresh coalescing | UI-REFRESH-BACKLOG-01: backlog multi-pass後にfinal refresh最大1回 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.72 focused syntheticはevent safety pipelineを維持したままrefresh 1回を確認。実Vault / 実mobile backlogは未確認。 |
+| UI refresh coalescing | UI-REFRESH-EXTERNAL-CHANGE-01: relevant external changeを1回反映 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | relevant change generationとactive inbound session joinのsynthetic PASS。Obsidian Sync実データは未確認。 |
 | TaskCreated | 通常taskを作成し、他2端末のMarkdown/UIとAckを確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | `bridge-v6.5-rc1-checklist.md`に三端末起点PASSあり。ただし後続のTaskCreated guard / collision変更を含むv0.6.56回帰は未記録。 |
-| TaskCreated | TASKCREATED-SECTION-TOP-ORDER-01: exact placement v1でsection先頭を再現 | `PASS` | `PASS` | `PASS` | v0.6.71 | `PASS` | T-0670 / E-20260818-0004。TaskCreated seq 2469はplacement v1 / `before-entry` / anchor E-20260818-0001、rename seq 2470を含めremote / mobile applied。三端末はnew / task1 / task2 / task3へ収束。 |
+| TaskCreated | TASKCREATED-SECTION-TOP-ORDER-01: exact placement v1でsection先頭を再現 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.71 | `NOT_VERIFIED` | v0.6.71のT-0670 / E-20260818-0004は三端末PASS。v0.6.72 current実機回帰は未実施。 |
 | TaskCreated / TaskUpdated | TC-RENAME-SECTION-TOP-01: 空section先頭へ作成後即rename | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 | `NOT_VERIFIED` | v0.6.60実機PASS。v0.6.63ではrename handoffコード未変更、focused synthetic再PASSだがcurrent実機証跡へは未昇格。 |
 | TaskCreated / TaskUpdated | TC-RENAME-SEQUENCE-01: insert-belowと3件連続create→rename | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.60 | `NOT_VERIFIED` | v0.6.60でA/B/Cのrename、identity、remote / mobile appliedはPASS。v0.6.63実機回帰は未実施。 |
 | TaskCreated | TASK-ADD-SECTION-META-01: generic add form rowへsection metadata保存 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.63 dev partial | `NOT_VERIFIED` | T-0628 / E-20260816-0001のdev physical rowはv0.6.63で確認済み。v0.6.65では未試験。 |
-| TaskCreated | INSERT-BELOW-ORDER-01: Aの下へB、Bの下へCを作成し物理/UI順を確認 | `PASS` | `PASS` | `PASS` | v0.6.71 | `PASS` | T-0671 / E-20260818-0005をtask2 E-20260818-0002直後へ作成。TaskCreated seq 2471はplacement v1 / `after-entry`、rename seq 2472もremote / mobile applied。補正TaskMovedなしで三端末順が一致。 |
+| TaskCreated | INSERT-BELOW-ORDER-01: Aの下へB、Bの下へCを作成し物理/UI順を確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.71 | `NOT_VERIFIED` | v0.6.71のT-0671 / E-20260818-0005は三端末PASS。v0.6.72 current実機回帰は未実施。 |
 | TaskUpdated | 通常taskのtitle・値変更を物理MarkdownとAckまで確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3証跡はある。v0.6.48以降のfalse Ack対策を含む現行三端末回帰はrepository内に未記録。 |
 | TaskMoved v4 | section移動・日付移動・同一task_id複数entry・空source section | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.71 date / handoff、v0.6.70 others | `NOT_VERIFIED` | v0.6.71ではsection handoffとdate moveがcurrent PASS。BASIC、cross-section、multi-entry、empty-sourceはv0.6.70のPASS証跡に留まりv0.6.71 current回帰が未完了のため、複合overallは昇格しない。 |
 | TaskMoved v4 | TMV4-BASIC-01: v4 entry orderの基本移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.70 | `NOT_VERIFIED` | v0.6.70 same-section Forward seq 2436は三端末PASS。v0.6.71 current実機回帰は未実施。 |
-| TaskMoved v4 | TMV4-SECTION-HANDOFF-01: missing row section metaをphysical headingから補完 | `PASS` | `PASS` | `PASS` | v0.6.71 | `PASS` | B T-0674 / E-20260819-0003のcontrolled missing metadataをafternoon physical headingから復元。TaskMoved seq 2482はremote / mobile applied、exact count=1、三端末順とrow metadataが一致。 |
+| TaskMoved v4 | TMV4-SECTION-HANDOFF-01: missing row section metaをphysical headingから補完 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.71 | `NOT_VERIFIED` | v0.6.71のB T-0674 / E-20260819-0003は三端末PASS。v0.6.72 current実機回帰は未実施。 |
 | TaskMoved v4 | TMV4-CROSS-SECTION-01: section間D&D | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.70 | `NOT_VERIFIED` | v0.6.70 row-target Forward seq 2409は三端末PASS。v0.6.71 current実機回帰は未実施。 |
 | TaskMoved v4 | TMV4-EMPTY-SOURCE-01: source sectionが空になる移動 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.70 | `NOT_VERIFIED` | v0.6.70 seq 2458はempty source arraysを保持して三端末PASS。v0.6.71 current実機回帰は未実施。 |
-| TaskMoved v4 | TMV4-DATE-MOVE-01: 日付移動とdestination entry rekey | `PASS` | `PASS` | `PASS` | v0.6.71 | `PASS` | T-0672を2026-08-18 E-20260818-0006から2026-08-19 E-20260819-0001へrekey。TaskMoved seq 2475はremote / mobile applied、exact count=1、三端末でsource 0件・destination 1件、task_id / task note維持。 |
+| TaskMoved v4 | TMV4-DATE-MOVE-01: 日付移動とdestination entry rekey | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.71 | `NOT_VERIFIED` | v0.6.71のT-0672 date moveは三端末PASS。v0.6.72 current実機回帰は未実施。 |
 | TaskMoved v4 | TMV4-MULTI-ENTRY-01: 同一task_id・異なるentry_id | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.70 | `NOT_VERIFIED` | v0.6.70 seq 2451はexact continuation entryだけを動かして三端末PASS。v0.6.71 current実機回帰は未実施。 |
 | TaskMoved Undo / Redo | UNDO-BRIDGE-CROSS-SECTION-SECTION-TARGET-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.70 | `NOT_VERIFIED` | v0.6.70でforward / Undo / Redo seq 2404〜2406が三端末PASS。v0.6.71 current実機回帰は未実施。 |
 | TaskMoved Undo / Redo | UNDO-BRIDGE-CROSS-SECTION-ROW-TARGET-01 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.70 | `NOT_VERIFIED` | v0.6.70でforward / Undo / Redo seq 2409〜2411が三端末PASS。v0.6.71 current実機回帰は未実施。 |
@@ -286,7 +302,7 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | offline recovery | 通信断中の操作、復帰後drain、重複なし | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | retry実装はある。長時間・圏外・OS停止を含む実機保証なし。 |
 | mobile hidden / resume drain | hidden中fetch/apply/Ackなし、visible後再開 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3でPASS記録あり。v0.6.56での長時間hidden / resume回帰は未記録。 |
 
-v0.6.65のtargeted interrupt-continuation scopeと、v0.6.70のcross-section section / row / empty-section target、same-section reorder、multi-entry exact-entry TaskMoved Undo / Redoにはhistorical device PASS evidenceがある。v0.6.71はTaskCreated placementのsynthetic確認だけで、current device rowsとplugin full matrixは`NOT_VERIFIED`を維持する。
+v0.6.65のtargeted interrupt-continuation scope、v0.6.70のTaskMoved Undo / Redo、v0.6.71のTaskCreated placement / date move / section handoffにはhistorical device PASS evidenceがある。v0.6.72はUI refresh coalescingのsynthetic確認のみで、current device rowsとplugin full matrixは`NOT_VERIFIED`を維持する。
 
 ## Historical Evidence
 

@@ -28,7 +28,7 @@
 
 | 機能 | 状態 | 概要・根拠 |
 |---|---|---|
-| Task作成 | 実装済み・v0.6.71実機未試験 | 通常追加、section先頭、現在行の下、割り込み追加。全通常作成行へ`section` / `section_id`を保存する。v0.6.71のordinary TaskCreatedは保存後Markdownのexact neighborをv1 placementとして保持し、remoteもbefore / after / onlyを再現・再読込検証する。legacy payloadは従来互換、未知versionや不成立anchorは未Ack停止する。interrupt-continuation専用contractは維持する。 |
+| Task作成 | 実装済み・targeted実機PASS | 通常追加、section先頭、現在行の下、割り込み追加。全通常作成行へ`section` / `section_id`を保存する。v0.6.71のordinary TaskCreatedは保存後Markdownのexact neighborをv1 placementとして保持し、remoteもbefore / after / onlyを再現・再読込検証する。section-top / insert-belowはv0.6.71三端末PASS。legacy payloadは従来互換、未知versionや不成立anchorは未Ack停止する。interrupt-continuation専用contractは維持する。 |
 | Task編集 | 実装済み | title、estimate、start/end plan、actual、各属性を更新。 |
 | Task削除 | 実装済み | 単体・複数・全件系。削除前snapshotとBridge guardを持つ。 |
 | Taskコピー | 実装済み | task noteとboard entryを別IDで複製し、通常targetでは物理行も選択行直下へ保存する。 |
@@ -117,7 +117,8 @@
 | TaskMoved v4 | 実装済み | `target_order_entry_ids` / `source_order_entry_ids`を正とする。v0.6.63でbasic / section handoff / cross-section / empty-source / date move、v0.6.65でsame-task multi-entry D&Dが三端末PASS。v0.6.70ではsame-section basic seq 2436、cross-section row-target seq 2409、同一task_idのoriginal / continuation共存fixtureでcontinuationだけを動かすmulti-entry seq 2451、sourceを空にするseq 2458がcurrent三端末PASSとなった。section handoff / date moveを含む現行versionの全組合せ回帰は未完了。 |
 | TaskMoved Undo / Redo Bridge | 実装済み・対象route実機PASS | D&D専用Undo batchへoperation / batch identityを付け、exact task / entryとbefore / after fingerprintを検証後だけsemantic付き履歴としてcommitする。commit後はexact semantic actionがhistory topに1件だけあることも検証する。復元前後のMarkdown検証後に`task-undo-confirmed-markdown-v4` / `task-redo-confirmed-markdown-v4`をenqueueする。v0.6.70でcross-sectionのsection / row / empty-section target、same-section reorder、duplicate-task-id multi-entryのexact continuation targetingについてforward・Undo・Redoと三端末収束を確認した。未試験範囲はTEST_MATRIXを正とする。 |
 | lifecycle classifier | 実装済み | normal / routine_occurrence / identity_conflict。 |
-| mobile resume drain | 実装済み・実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。 |
+| mobile resume drain | 実装済み・v0.6.72実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。v0.6.72では複数pending passを1 logical UI refresh sessionへまとめ、mutationなしは0回、変更ありは最終1回だけTaskBoardをrefreshする。 |
+| idle / focus / resume UI freshness | 実装済み・v0.6.72実機未試験 | 経過時間だけではTaskBoardをreloadしない。focus / visibility / first interactionはactual relevant data generationを確認し、no invalidationならrefresh 0回、外部変更があればcoalesced refreshを行う。 |
 | オフライン復帰 | 一部実装 | network error分類と再試行はある。長時間実機試験は要確認。 |
 | D1 schema管理 | 要確認 | clientはHTTP APIのみ利用。Worker / D1 schemaはこのrepoにない。 |
 
