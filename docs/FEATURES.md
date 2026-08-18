@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.76候補の現行実装を対象とする。最新immutable配布はv0.6.75であり、focus no-changeは実機PASS、6-event backlogのvisible convergenceはFAILである。v0.6.76 focused syntheticはPASSだが実機未検証で、full matrixは`NOT_VERIFIED`である。
+この一覧はimmutable v0.6.76 BRAT Prereleaseの現行実装を対象とする。v0.6.75ではfocus no-changeが実機PASS、6-event backlogのvisible convergenceがFAILだった。v0.6.76 focused syntheticはPASSだが実機未検証で、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 

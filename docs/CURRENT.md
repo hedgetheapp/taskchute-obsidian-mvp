@@ -5,8 +5,8 @@
 - 調査日: 2026-08-19
 - manifest version: `0.6.76`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.76 backlog final UI convergence candidate
-- latest release tag: `v0.6.75`（immutable BRAT実機試験用Prerelease。annotated tag object `e5b0309a223b3004391400bfb53f516fe12165e5`、peeled target `38a0facf1c8def2426e10119496e71816376d6f8`。公開済みtag / Release / assetsは固定）
+- canonical docs checkpoint: v0.6.76 backlog final UI convergence BRAT Prerelease
+- latest release tag: `v0.6.76`（immutable BRAT実機試験用Prerelease。annotated tag object `1303486def806def2993b40925c12f31d33737db`、peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
 この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。immutable v0.6.75の`WINDOW-FOCUS-NOCHANGE-REFRESH-01`は実機PASSした。一方`UI-REFRESH-BACKLOG-01`は、mobileが6 eventをD1上すべてappliedにした後もvisible UIがAだけとなり、2回以上reloadしたためFAILである。mobile physical Markdownを未取得のため、実機証跡だけではUI staleと物理不整合を区別しきれない。コード調査では個別apply / verify / Ackは直列で物理snapshot上書きを確認せず、authoritativeでないfinal partial patchを先行full refreshが後から上書きできるUI raceを確定した。v0.6.76候補はこの競合とsession分断を修正済みだが、focused syntheticのみで実機は`NOT_VERIFIED`である。
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.76 candidate |
+| State | v0.6.76 BRAT Prerelease |
 |---|---|
-| Integrated | No |
-| Prereleased / Test-distributed | No |
+| Integrated | Yes |
+| Prereleased / Test-distributed | Yes |
 | Verified | No |
 | Released | No |
 

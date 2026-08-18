@@ -2,9 +2,9 @@
 
 ## 基準と読み方
 
-- 対象実装: `v0.6.76` candidate。最新配布済みcheckpointはimmutable `v0.6.75` BRAT Prerelease、tag target `38a0facf1c8def2426e10119496e71816376d6f8`。
+- 対象実装・配布済みcheckpoint: immutable `v0.6.76` BRAT Prerelease、tag target `af4a6b1a0893094aba746462be2d0b02d9e3a492`。
 - v0.6.75 device evidenceはwindow-focus no-changeが`PASS`、6-event backlog visible convergenceが`FAIL`。v0.6.76 synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state (v0.6.76 candidate): Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.76についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。

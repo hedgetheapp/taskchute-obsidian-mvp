@@ -10,7 +10,7 @@ Historical verification recorded below is evidence for that release only. It is 
 
 ## v0.6.76 - 2026-08-19
 
-Type: Runtime BRAT Prerelease candidate for device testing
+Type: Runtime BRAT Prerelease for device testing
 
 ### Changed
 
@@ -28,7 +28,9 @@ Type: Runtime BRAT Prerelease candidate for device testing
 - `git diff --check`: PASS
 - v0.6.76 real Vault / mobile backlog retest: `NOT_VERIFIED`
 - plugin full matrix: `NOT_VERIFIED`
-- Delivery state before integration/publication: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Published immutable BRAT Prerelease: annotated tag object `1303486def806def2993b40925c12f31d33737db`, peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`
+- Release assets `main.js` / `manifest.json` / `styles.css`: tagged size/SHA256 match GitHub asset digests
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
 Release notes: [`docs/release/v0.6.76.md`](docs/release/v0.6.76.md)
 

@@ -4,12 +4,12 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current implementation candidate: `v0.6.76`; latest immutable test distribution: `v0.6.75` BRAT Prerelease
+- Current implementation and immutable test distribution: `v0.6.76` BRAT Prerelease
 - Current branch: `feature/v6.6-routine-sync`
 - Release target: `38a0facf1c8def2426e10119496e71816376d6f8`
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.75実機試験ではfocus復帰時のno-change reloadは解消しましたが、mobileの6-event backlog適用後に表示が先頭taskだけへ戻る競合を確認しました。v0.6.76候補はoverlap kickoffを1 sessionへjoinし、最後にolder refresh snapshotを失効させるauthoritative full refreshを1回だけ行います。focused syntheticはPASSですが実機未検証で、Verified済み安定版ではありません。
+v0.6.75実機試験ではfocus復帰時のno-change reloadは解消しましたが、mobileの6-event backlog適用後に表示が先頭taskだけへ戻る競合を確認しました。v0.6.76はoverlap kickoffを1 sessionへjoinし、最後にolder refresh snapshotを失効させるauthoritative full refreshを1回だけ行います。BRAT試験用に固定配布済みですが実機未検証で、Verified済み安定版ではありません。
 
 ## Canonical Documentation
 

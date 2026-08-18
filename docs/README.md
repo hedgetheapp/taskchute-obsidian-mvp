@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current implementation candidate: v0.6.76. The latest immutable test distribution remains v0.6.75 BRAT Prerelease, peeled target `38a0facf1c8def2426e10119496e71816376d6f8`. v0.6.75 passed the focus-return no-change test but failed the six-event mobile backlog UI convergence test. v0.6.76 focused synthetic tests pass; device verification remains pending.
+Current implementation and immutable test distribution: v0.6.76 BRAT Prerelease, peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`. v0.6.75 passed the focus-return no-change test but failed the six-event mobile backlog UI convergence test. v0.6.76 focused synthetic tests pass; device verification remains pending.
 
 ## Current Canonical
 
@@ -32,7 +32,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
-- [v0.6.76 candidate](release/v0.6.76.md)
+- [v0.6.76 BRAT Prerelease](release/v0.6.76.md)
 - [v0.6.75 BRAT Prerelease](release/v0.6.75.md)
 - [v0.6.74 BRAT Prerelease](release/v0.6.74.md)
 - [v0.6.73 BRAT Prerelease](release/v0.6.73.md)
