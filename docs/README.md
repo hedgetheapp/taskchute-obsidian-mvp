@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current implementation checkpoint: v0.6.74 candidate. Latest immutable distribution remains v0.6.73 BRAT Prerelease, whose no-change Edge-to-Obsidian focus return caused one visible reload. v0.6.74 synchronizes open-board stat/content baselines and verifies content before invalidation. Targeted real Vault verification remains pending.
+Current implementation and immutable test distribution: v0.6.74 BRAT Prerelease. Its annotated tag object is `1bd281abcebf84b999c39782a956d808323d2a3f` and peeled target is `037975902f5aac1f938c0bf71b167d118815170c`. v0.6.74 synchronizes open-board stat/content baselines and verifies content before invalidation. Targeted real Vault verification remains pending.
 
 ## Current Canonical
 

@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation checkpoint: `v0.6.74` (Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No). Latest immutable test distribution remains `v0.6.73` BRAT Prerelease, annotated tag object `52a3452a4fc0c62cd64d58725b7c58a1de251f30`, peeled target `7221996c738868b24fae5405efd6cc02657ac499`.
+- Current implementation and immutable test distribution: `v0.6.74` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No), annotated tag object `1bd281abcebf84b999c39782a956d808323d2a3f`, peeled target `037975902f5aac1f938c0bf71b167d118815170c`.
 - v0.6.73 device evidence found one visible reload when returning from Edge to an open TaskChute window with no intentional data change. v0.6.74 updates open-board stat/content baselines after internal saves and render, and compares content before treating a resumed stat poll as external invalidation. Synthetic tests pass; the focused device retest and plugin full matrix remain `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.

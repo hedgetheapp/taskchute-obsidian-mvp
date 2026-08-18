@@ -5,11 +5,11 @@
 - 調査日: 2026-08-18
 - manifest version: `0.6.74`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.74 no-change window-focus reload fix candidate
-- latest release tag: `v0.6.73`（immutable BRAT実機試験用Prerelease。annotated tag object `52a3452a4fc0c62cd64d58725b7c58a1de251f30`、peeled target `7221996c738868b24fae5405efd6cc02657ac499`。公開済みtag / Release / assetsは固定）
+- canonical docs checkpoint: v0.6.74 no-change window-focus reload fix BRAT Prerelease
+- latest release tag: `v0.6.74`（immutable BRAT実機試験用Prerelease。annotated tag object `1bd281abcebf84b999c39782a956d808323d2a3f`、peeled target `037975902f5aac1f938c0bf71b167d118815170c`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.73の実機試験ではTaskChuteを開いたままEdgeからObsidianへ戻ると、意図的data changeなしでもvisible reloadが1回発生して`FAIL`となり、backlog試験は未実施である。v0.6.74候補はopen-board stat pollingのstale baseline誤判定を修正する。focused synthetic / structural試験はPASSしたが、実Vault / 実mobileのtargeted試験とplugin全体 / full matrixは`NOT_VERIFIED`である。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.73の実機試験ではTaskChuteを開いたままEdgeからObsidianへ戻ると、意図的data changeなしでもvisible reloadが1回発生して`FAIL`となり、backlog試験は未実施である。v0.6.74はopen-board stat pollingのstale baseline誤判定を修正し、immutable BRAT Prereleaseとして試験配布済みである。focused synthetic / structural試験はPASSしたが、実Vault / 実mobileのtargeted試験とplugin全体 / full matrixは`NOT_VERIFIED`である。
 
 ## 文書運用
 
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.74 candidate |
+| State | v0.6.74 BRAT Prerelease |
 |---|---|
-| Integrated | No |
-| Prereleased / Test-distributed | No |
+| Integrated | Yes |
+| Prereleased / Test-distributed | Yes |
 | Verified | No |
 | Released | No |
 

@@ -27,6 +27,8 @@ Type: Runtime BRAT Prerelease for device testing
 - v0.6.74 real Vault Edge-to-Obsidian focus retest: `NOT_VERIFIED`
 - backlog catch-up real-device test: `NOT_RUN`
 - plugin full matrix: `NOT_VERIFIED`
+- Published immutable BRAT Prerelease: annotated tag object `1bd281abcebf84b999c39782a956d808323d2a3f`, peeled target `037975902f5aac1f938c0bf71b167d118815170c`
+- Release assets `main.js` / `manifest.json` / `styles.css`: tagged and downloaded SHA256 match
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
 Release notes: [`docs/release/v0.6.74.md`](docs/release/v0.6.74.md)
