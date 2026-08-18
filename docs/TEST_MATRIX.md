@@ -2,10 +2,10 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.73 candidate（idle no-change first-interaction reloadのfalse invalidationを修正。plugin全体 / full matrixは`NOT_VERIFIED`）
-- 配布済みcheckpoint: immutable `v0.6.72` BRAT Prerelease、tag target `1a7a09a7b7d5f2c43a493308fe9166a2d94057d3`
+- 対象実装: v0.6.73 BRAT Prerelease（idle no-change first-interaction reloadのfalse invalidationを修正・試験配布済み。plugin全体 / full matrixは`NOT_VERIFIED`）
+- 配布済みcheckpoint: immutable `v0.6.73` BRAT Prerelease、tag target `7221996c738868b24fae5405efd6cc02657ac499`
 - v0.6.72のidle/no-change device testはvisible reload 1回で`FAIL`。v0.6.73はnonvisual plugin-data通知をdirty扱いせず、visible subset比較と遅延timer再判定を追加する。synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.73についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。

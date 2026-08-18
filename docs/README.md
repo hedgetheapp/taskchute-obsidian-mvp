@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current implementation checkpoint: v0.6.73 candidate. Latest immutable distribution remains v0.6.72 BRAT Prerelease, whose idle/no-change device test recorded one first-interaction reload. v0.6.73 filters nonvisual plugin-data notifications and rechecks delayed refresh generations. Synthetic and structural checks pass; targeted real Vault verification remains pending.
+Current baseline: immutable v0.6.73 BRAT Prerelease. v0.6.72 idle/no-change device evidence recorded one first-interaction reload; v0.6.73 filters nonvisual plugin-data notifications and rechecks delayed refresh generations. Synthetic, structural, and published-asset integrity checks pass; targeted real Vault verification remains pending.
 
 ## Current Canonical
 

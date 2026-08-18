@@ -4,13 +4,13 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current implementation: `v0.6.73` candidate
+- Current implementation: `v0.6.73` BRAT Prerelease
 - Current branch: `feature/v6.6-routine-sync`
-- Latest immutable test distribution: `v0.6.72` BRAT Prerelease
-- Release target: `1a7a09a7b7d5f2c43a493308fe9166a2d94057d3`
+- Latest immutable test distribution: `v0.6.73` BRAT Prerelease
+- Release target: `7221996c738868b24fae5405efd6cc02657ac499`
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.72の実機試験では、意図的なTaskChute data changeがないidle後の最初の操作でvisible reloadが1回発生しました。v0.6.73候補は非表示系`data.json`更新をactual invalidationから分離し、表示影響のあるplugin dataだけを比較してgenerationを進め、遅延refreshも実行時に再判定します。synthetic / structural試験は完了していますが、実機再試験前で、Verified済み安定版ではありません。
+v0.6.72の実機試験では、意図的なTaskChute data changeがないidle後の最初の操作でvisible reloadが1回発生しました。v0.6.73は非表示系`data.json`更新をactual invalidationから分離し、表示影響のあるplugin dataだけを比較してgenerationを進め、遅延refreshも実行時に再判定するBRAT実機試験用Prereleaseです。synthetic / structural試験は完了していますが、実機再試験前で、Verified済み安定版ではありません。
 
 ## Canonical Documentation
 

@@ -5,8 +5,8 @@
 - 調査日: 2026-08-18
 - manifest version: `0.6.73`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.73 idle no-change first-interaction reload fix candidate
-- latest release tag: `v0.6.72`（immutable BRAT実機試験用Prerelease。annotated tag object `bbfbb9aef583a8d4bf09429b3b617d13fe6c2748`、peeled target `1a7a09a7b7d5f2c43a493308fe9166a2d94057d3`。公開済みtag / Release / assetsは固定）
+- canonical docs checkpoint: v0.6.73 idle no-change first-interaction reload fix BRAT Prerelease
+- latest release tag: `v0.6.73`（immutable BRAT実機試験用Prerelease。annotated tag object `52a3452a4fc0c62cd64d58725b7c58a1de251f30`、peeled target `7221996c738868b24fae5405efd6cc02657ac499`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
 この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.72のidle/no-change実機試験は、意図的なTaskChute data changeなしでも最初のinteractionでvisible reloadが1回発生して`FAIL`となり、backlog試験は未実施である。v0.6.73候補は非表示系plugin-data通知によるfalse invalidationを除去する。focused synthetic / structural試験はPASSしたが、実Vault / 実mobileのtargeted試験とplugin全体 / full matrixは`NOT_VERIFIED`である。
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.73 candidate |
+| State | v0.6.73 |
 |---|---|
-| Integrated | No |
-| Prereleased / Test-distributed | No |
+| Integrated | Yes |
+| Prereleased / Test-distributed | Yes |
 | Verified | No |
 | Released | No |
 
