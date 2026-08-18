@@ -226,7 +226,7 @@ apply失敗、verification失敗、hard Ack失敗ではcursorを跨がない。s
 
 v0.6.72以降はinbound data pipelineとUI refreshを分離する。`beginBridgeInboundUiRefreshSession()`がstartup / interval / focus / resume kickoffをactive sessionへjoinし、複数pending passの各eventは従来どおり個別にapply / verify / Ackする。成功したvisible mutationは`requestBridgeInboundUiRefresh()`でdirtyとして集計し、中間の`patchTaskchuteViewsFromExternalSync()`要求はsession内で抑止する。`finalizeBridgeInboundUiRefreshSession()`はpending zero、safe-stop、error等のterminal stateで、openかつvisibleなviewを最大1回だけ描画する。refresh例外はdiagnosticに閉じ、data/Ack/cursorをrollbackしない。
 
-`taskchuteDataGeneration`と`lastRenderedTaskchuteGeneration`はactual relevant changeと最後に描画した世代を表すruntime-only counterである。focus / visibility / first interactionはこの差だけをfreshness根拠とし、経過時間をreload authorityにしない。v0.6.73ではinvalidation sourceを分類し、relevant Markdown / definition change / Bridge visible mutationだけをdirty候補にする。`data.json`は表示対象fieldのfingerprintをload前後で比較し、cursor / outbox / diagnostics等だけのwriteではgenerationを進めない。初回openはcurrent generationをrender済みとしてmarkし、遅延timerも実行時に世代差を再確認する。
+`taskchuteDataGeneration`と`lastRenderedTaskchuteGeneration`はactual relevant changeと最後に描画した世代を表すruntime-only counterである。focus / visibility / first interactionはこの差だけをfreshness根拠とし、経過時間をreload authorityにしない。`data.json`は表示対象fieldのfingerprintをload前後で比較する。v0.6.74ではopen boardごとにstat keyとbounded content fingerprintを保持し、内部write完了・初回render直後に両baselineを更新する。background後のpollと遅延Vault eventはstat差だけでdirtyにせず、content差がある場合だけexternal Markdown invalidationを発生させる。
 
 ### External Vault change
 

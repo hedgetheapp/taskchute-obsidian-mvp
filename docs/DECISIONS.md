@@ -289,6 +289,12 @@
 - 根拠: `decideTaskchuteExternalInvalidation()`、`getTaskchuteVisiblePluginDataSignature()`、`decideTaskchuteDelayedRefresh()`、`flushExternalRefresh()`、`reloadTaskchuteSyncDataFromDisk()`。
 - 理由: v0.6.72実機試験で、意図的なTaskChute data changeがないidle後でも最初のinteractionが1回reloadしたため。Bridge / cursorの内部bookkeepingをvisible mutationと混同せず、実Markdown・定義変更は従来どおり反映する必要がある。
 
+## D-047: focus復帰後のopen-board pollはstat差だけをinvalidationにしない
+
+- 判断: open中TaskBoardの内部保存と初回render後にstat/content baselineを更新する。pollまたは遅延Vault eventでstatが変わってもcontent fingerprintがbaselineと同一なら`view_already_current`として無視し、内容差または比較不能時だけ従来のexternal Markdown invalidationへ進む。
+- 根拠: `buildTaskchuteContentFingerprint()`、`decideTaskchuteOpenBoardStatChange()`、`updateTaskchutePathExternalBaseline()`、`pollOpenTaskchuteBoardExternalChanges()`、`queueTaskchuteRelevantExternalRefresh()`。
+- 理由: background中はinterval pollが停止・遅延し、9秒のinternal-write markerだけが先に失効し得る。復帰後の古いstat baseline差を外部変更と誤認せず、実際のObsidian Sync変更は取りこぼさないため。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

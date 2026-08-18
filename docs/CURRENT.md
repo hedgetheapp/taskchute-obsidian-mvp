@@ -3,13 +3,13 @@
 ## 調査基準
 
 - 調査日: 2026-08-18
-- manifest version: `0.6.73`
+- manifest version: `0.6.74`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.73 idle no-change first-interaction reload fix BRAT Prerelease
+- canonical docs checkpoint: v0.6.74 no-change window-focus reload fix candidate
 - latest release tag: `v0.6.73`（immutable BRAT実機試験用Prerelease。annotated tag object `52a3452a4fc0c62cd64d58725b7c58a1de251f30`、peeled target `7221996c738868b24fae5405efd6cc02657ac499`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.72のidle/no-change実機試験は、意図的なTaskChute data changeなしでも最初のinteractionでvisible reloadが1回発生して`FAIL`となり、backlog試験は未実施である。v0.6.73候補は非表示系plugin-data通知によるfalse invalidationを除去する。focused synthetic / structural試験はPASSしたが、実Vault / 実mobileのtargeted試験とplugin全体 / full matrixは`NOT_VERIFIED`である。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.73の実機試験ではTaskChuteを開いたままEdgeからObsidianへ戻ると、意図的data changeなしでもvisible reloadが1回発生して`FAIL`となり、backlog試験は未実施である。v0.6.74候補はopen-board stat pollingのstale baseline誤判定を修正する。focused synthetic / structural試験はPASSしたが、実Vault / 実mobileのtargeted試験とplugin全体 / full matrixは`NOT_VERIFIED`である。
 
 ## 文書運用
 
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.73 |
+| State | v0.6.74 candidate |
 |---|---|
-| Integrated | Yes |
-| Prereleased / Test-distributed | Yes |
+| Integrated | No |
+| Prereleased / Test-distributed | No |
 | Verified | No |
 | Released | No |
 
@@ -90,7 +90,9 @@ v0.6.71 current実機試験では`TASKCREATED-SECTION-TOP-ORDER-01`がPASSした
 
 v0.6.72は、30秒以上のhidden / blur復帰と30分以上のTaskBoard非操作後の最初のinteractionが、actual data invalidationの有無に関係なくdisplay reloadを予約していた直接結合を除去した。しかし実機`IDLE-NOCHANGE-REFRESH-01`では数分idle・意図的data changeなしでも最初のinteractionでvisible reloadが1回発生し、期待0回に対して`FAIL`となった。Test Aで停止したためbacklog Test Bは`NOT_RUN`であり、この証跡はBridge apply / Ack / cursor failureを示さない。
 
-v0.6.73候補では、`queueExternalRefresh()`が全通知を一律dirtyにしていた残存経路を修正する。relevant Markdown / definition / Bridge visible mutationと、cursor・outbox・diagnostics等のinternal nonvisual writeを分類し、`data.json`は表示対象subsetのload前後差がある場合だけgenerationを進める。TaskBoard bootstrap renderはcurrent generationとして記録し、予約済みreloadもtimer発火時にgeneration差を再確認してstaleならno-opにする。focused syntheticはidle no-change、反復focus、plugin-data no-change、stale timer、genuine external Markdown、Bridge final refresh、diagnosticsを確認済みだが、v0.6.73実機試験前のため`NOT_VERIFIED`である。
+v0.6.73では、`queueExternalRefresh()`が全通知を一律dirtyにしていた経路を修正した。relevant Markdown / definition / Bridge visible mutationとinternal nonvisual writeを分類し、`data.json`は表示対象subsetのload前後差がある場合だけgenerationを進める。TaskBoard bootstrap renderはcurrent generationとして記録し、予約済みreloadもtimer発火時にgeneration差を再確認する。focused syntheticはPASSしたが、下記focus-return実機試験はFAILしたためv0.6.73全体は`NOT_VERIFIED`である。
+
+v0.6.73実機試験では、TaskChuteを開いたままEdgeへ切り替え、意図的data changeなしでObsidianへ戻るとvisible reloadが1回発生した。コード上の経路は、内部board保存後に`boardExternalStatKeys`が即時更新されず、backgroundでpollが止まる間にinternal-write markerが失効し、復帰後pollが古いstat差をexternal Markdown changeと誤認するものだった。`pollOpenTaskchuteBoardExternalChanges()` → `queueExternalRefresh()` → `flushExternalRefresh()` → `patchTaskchuteViewsFromExternalSync()` → existing `TaskchuteView.refresh()`であり、view再生成ではない。v0.6.74候補は内部保存・初回render後にstat/content baselineを更新し、stat差があっても内容fingerprint同一ならno-opにする。実機再試験前のため`NOT_VERIFIED`である。
 
 v0.6.70実機試験では、section / empty-section routeのT-0653 / E-20260816-0029、row routeのT-0654 / E-20260816-0030、empty night routeのT-0655 / E-20260816-0031がtargeted PASSとなった。3件ともCtrl+Z前にexact semantic action、operation ID、batch ID、fingerprint、history topを確認し、forward / Undo / Redo TaskMovedがD1 seq 2404〜2406、2409〜2411、2414〜2416としてremote / mobile appliedになった。Undo / Redo後はdev / remote physical sectionとmobile UIが収束した。これによりv0.6.69 failureは試験した3 routeについて解消したが、plugin全体 / full matrixは`NOT_VERIFIED`、Delivery StateはVerified=Noのままとする。
 

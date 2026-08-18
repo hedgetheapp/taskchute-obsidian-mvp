@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current baseline: immutable v0.6.73 BRAT Prerelease. v0.6.72 idle/no-change device evidence recorded one first-interaction reload; v0.6.73 filters nonvisual plugin-data notifications and rechecks delayed refresh generations. Synthetic, structural, and published-asset integrity checks pass; targeted real Vault verification remains pending.
+Current implementation checkpoint: v0.6.74 candidate. Latest immutable distribution remains v0.6.73 BRAT Prerelease, whose no-change Edge-to-Obsidian focus return caused one visible reload. v0.6.74 synchronizes open-board stat/content baselines and verifies content before invalidation. Targeted real Vault verification remains pending.
 
 ## Current Canonical
 
@@ -32,6 +32,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
+- [v0.6.74 BRAT Prerelease](release/v0.6.74.md)
 - [v0.6.73 BRAT Prerelease](release/v0.6.73.md)
 - [v0.6.72 BRAT Prerelease](release/v0.6.72.md)
 - [v0.6.71 BRAT Prerelease](release/v0.6.71.md)

@@ -8,6 +8,31 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.74 - 2026-08-18
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- open TaskBoardのinternal Markdown保存と初回render後にstat/content baselineを更新する。
+- background復帰後のopen-board pollと遅延Vault eventはmtime/size差だけでdirtyにせず、bounded content fingerprint差を検証する。
+- focus / visibility no-change理由、reload method、view reused/recreated、visible plugin-data fingerprintをbounded diagnosticsへ追加する。
+- focus復帰では既存TaskChute view instanceを再利用し、Bridge apply / Ack / cursor semanticsは変更しない。
+- `manifest.json`を`0.6.74`へ更新した。
+
+### Verification
+
+- v0.6.74 window-focus no-change focused synthetic: PASS
+- v0.6.72 / v0.6.73 refresh regressionsと全standalone repository tests: PASS
+- v0.6.74 real Vault Edge-to-Obsidian focus retest: `NOT_VERIFIED`
+- backlog catch-up real-device test: `NOT_RUN`
+- plugin full matrix: `NOT_VERIFIED`
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.74.md`](docs/release/v0.6.74.md)
+
+---
+
 ## v0.6.73 - 2026-08-18
 
 Type: Runtime BRAT Prerelease for device testing
@@ -25,8 +50,9 @@ Type: Runtime BRAT Prerelease for device testing
 
 - v0.6.73 idle/no-change、internal write、bootstrap、external change、stale timer、manual reload focused synthetic: PASS
 - v0.6.72 refresh coalescingと全standalone repository regression: PASS
-- v0.6.73 real Vault idle no-change retest: `NOT_VERIFIED`
+- v0.6.73 real Vault window-focus no-change retest: `FAIL`
 - backlog catch-up real-device test: `NOT_RUN`（idle no-change PASS後に実施する）
+- post-prerelease `WINDOW-FOCUS-NOCHANGE-REFRESH-01`: `FAIL`。TaskChute open・意図的data changeなしでEdgeからObsidianへ戻るとvisible reload 1回。期待0回。backlogは未実施。
 - plugin full matrix: `NOT_VERIFIED`
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 
