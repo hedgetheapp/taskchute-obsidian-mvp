@@ -224,13 +224,13 @@ timer / mobile resume / manual action
 
 apply失敗、verification失敗、hard Ack失敗ではcursorを跨がない。server Ack成功後のcursor persistence失敗とambiguous network responseはrecoverableとして記録し、同じMarkdownを再適用せずreconcileする。
 
-v0.6.72ではinbound data pipelineとUI refreshを分離する。`beginBridgeInboundUiRefreshSession()`がstartup / interval / focus / resume kickoffをactive sessionへjoinし、複数pending passの各eventは従来どおり個別にapply / verify / Ackする。成功したvisible mutationは`requestBridgeInboundUiRefresh()`でdirtyとして集計し、中間の`patchTaskchuteViewsFromExternalSync()`要求はsession内で抑止する。`finalizeBridgeInboundUiRefreshSession()`はpending zero、safe-stop、error等のterminal stateで、openかつvisibleなviewを最大1回だけ描画する。refresh例外はdiagnosticに閉じ、data/Ack/cursorをrollbackしない。
+v0.6.72以降はinbound data pipelineとUI refreshを分離する。`beginBridgeInboundUiRefreshSession()`がstartup / interval / focus / resume kickoffをactive sessionへjoinし、複数pending passの各eventは従来どおり個別にapply / verify / Ackする。成功したvisible mutationは`requestBridgeInboundUiRefresh()`でdirtyとして集計し、中間の`patchTaskchuteViewsFromExternalSync()`要求はsession内で抑止する。`finalizeBridgeInboundUiRefreshSession()`はpending zero、safe-stop、error等のterminal stateで、openかつvisibleなviewを最大1回だけ描画する。refresh例外はdiagnosticに閉じ、data/Ack/cursorをrollbackしない。
 
-`taskchuteDataGeneration`と`lastRenderedTaskchuteGeneration`はactual relevant changeと最後に描画した世代を表すruntime-only counterである。focus / visibility / first interactionはこの差だけをfreshness根拠とし、経過時間をreload authorityにしない。counterはVault全体hashではなく、既存のrelevant-path watcherとBridge successful mutationで進む。
+`taskchuteDataGeneration`と`lastRenderedTaskchuteGeneration`はactual relevant changeと最後に描画した世代を表すruntime-only counterである。focus / visibility / first interactionはこの差だけをfreshness根拠とし、経過時間をreload authorityにしない。v0.6.73ではinvalidation sourceを分類し、relevant Markdown / definition change / Bridge visible mutationだけをdirty候補にする。`data.json`は表示対象fieldのfingerprintをload前後で比較し、cursor / outbox / diagnostics等だけのwriteではgenerationを進めない。初回openはcurrent generationをrender済みとしてmarkし、遅延timerも実行時に世代差を再確認する。
 
 ### External Vault change
 
-Vault create / modify / delete / renameをwatchし、内部write markerを除外する。Obsidian Sync到着後の短いsettleと遅着関連fileを待ち、関連Markdownと`data.json`を読み直して1回だけviewをrefreshする。Bridge session中にlistenerが受けた関連changeは同sessionのdirty stateへjoinし、feedback loopを作らない。
+Vault create / modify / delete / renameをwatchし、内部write markerを除外する。Obsidian Sync到着後の短いsettleと遅着関連fileを待つ。関連Markdownはphysical changeをinvalidationにし、`data.json`はload前後のvisible subsetが変わった場合だけinvalidationにする。Bridge session中にlistenerが受けた関連changeは同sessionのdirty stateへjoinし、feedback loopを作らない。
 
 ## 8. Bridge境界
 

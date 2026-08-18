@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current baseline: immutable v0.6.72 BRAT Prerelease. Bridge inbound catch-up and idle/resume freshness checks now refresh TaskChute only for actual relevant data changes, with at most one visible refresh per logical drain. Synthetic, structural, and published-asset integrity checks passed; targeted real Vault verification remains pending.
+Current implementation checkpoint: v0.6.73 candidate. Latest immutable distribution remains v0.6.72 BRAT Prerelease, whose idle/no-change device test recorded one first-interaction reload. v0.6.73 filters nonvisual plugin-data notifications and rechecks delayed refresh generations. Synthetic and structural checks pass; targeted real Vault verification remains pending.
 
 ## Current Canonical
 
@@ -32,6 +32,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
+- [v0.6.73 BRAT Prerelease](release/v0.6.73.md)
 - [v0.6.72 BRAT Prerelease](release/v0.6.72.md)
 - [v0.6.71 BRAT Prerelease](release/v0.6.71.md)
 - [v0.6.70 BRAT Prerelease](release/v0.6.70.md)

@@ -8,6 +8,32 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.73 - 2026-08-18
+
+Type: Runtime BRAT Prerelease for device testing
+
+### Changed
+
+- `queueExternalRefresh()`の無条件generation加算を廃止し、TaskChute Markdown、definition、Bridge visible mutation、plugin-data比較待ち、internal nonvisual writeを明示分類する。
+- external `data.json`はload前後のrender-visible fingerprintが変わった場合だけUI invalidationとする。cursor、outbox、diagnostics等だけの保存はrefreshしない。
+- TaskBoard open/render成功時にrendered generationとvisible plugin-data signatureをcurrentへ揃える。
+- delayed actual-invalidation timerは実行時にgenerationを再照合し、すでにrender済みなら`stale_timer_no_invalidation`でno-opにする。
+- generation/source/decisionを追跡するbounded diagnosticsを追加した。
+- `manifest.json`を`0.6.73`へ更新した。
+
+### Verification
+
+- v0.6.73 idle/no-change、internal write、bootstrap、external change、stale timer、manual reload focused synthetic: PASS
+- v0.6.72 refresh coalescingと全standalone repository regression: PASS
+- v0.6.73 real Vault idle no-change retest: `NOT_VERIFIED`
+- backlog catch-up real-device test: `NOT_RUN`（idle no-change PASS後に実施する）
+- plugin full matrix: `NOT_VERIFIED`
+- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.73.md`](docs/release/v0.6.73.md)
+
+---
+
 ## v0.6.72 - 2026-08-18
 
 Type: Runtime BRAT Prerelease for device testing
@@ -26,7 +52,8 @@ Type: Runtime BRAT Prerelease for device testing
 
 - `bridge-inbound-ui-refresh-coalescing-v0672.js`: idle/focus no-op、multi-event/pass、safe-stop prefix、overlap join、view closed/hidden、external invalidation、failure isolation: synthetic PASS
 - v0.6.71 TaskCreated placement、TaskMoved v4、interrupt continuation focused regressions: PASS
-- v0.6.72 real Vault idle no-change / backlog catch-up: `NOT_VERIFIED`
+- v0.6.72 real Vault idle no-change: `FAIL`、backlog catch-up: `NOT_RUN`
+- post-prerelease `IDLE-NOCHANGE-REFRESH-01`: `FAIL`。数分idle、意図的data changeなしでも最初のTaskChute interactionでvisible reloadが1回発生。期待は0回。ここでTest Aを停止し、backlog Test Bは未実施。
 - plugin full matrix: `NOT_VERIFIED`
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 

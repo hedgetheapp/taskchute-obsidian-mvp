@@ -11687,6 +11687,46 @@ function decideTaskchuteIdleResumeRefresh(input = {}) {
   };
 }
 
+function normalizeTaskchuteInvalidationSource(value) {
+  const source = String(value || "").trim();
+  const allowed = new Set([
+    "bridge_visible_mutation",
+    "external_taskchute_markdown_change",
+    "external_definition_change",
+    "local_visible_operation",
+    "internal_nonvisual_write_ignored",
+    "plugin_data_requires_comparison",
+    "bootstrap_render_mark_current"
+  ]);
+  return allowed.has(source) ? source : "";
+}
+
+function decideTaskchuteExternalInvalidation(reason = "external-change", options = {}) {
+  const explicit = normalizeTaskchuteInvalidationSource(options && options.invalidationSource);
+  if (explicit) {
+    return {
+      markDirty: !["internal_nonvisual_write_ignored", "plugin_data_requires_comparison"].includes(explicit),
+      compareVisiblePluginData: explicit === "plugin_data_requires_comparison",
+      source: explicit
+    };
+  }
+  const normalizedReason = String(reason || "external-change").trim().toLowerCase();
+  if (normalizedReason.includes("plugin-data")) {
+    return { markDirty: false, compareVisiblePluginData: true, source: "plugin_data_requires_comparison" };
+  }
+  if (normalizedReason === "deferred-external-change") {
+    return { markDirty: false, compareVisiblePluginData: false, source: "internal_nonvisual_write_ignored" };
+  }
+  return { markDirty: true, compareVisiblePluginData: false, source: "external_taskchute_markdown_change" };
+}
+
+function decideTaskchuteDelayedRefresh(input = {}) {
+  const dataGeneration = Math.max(0, Number(input.dataGeneration || 0));
+  const renderedGeneration = Math.max(0, Number(input.renderedGeneration || 0));
+  if (dataGeneration <= renderedGeneration) return { refresh: false, reason: "stale_timer_no_invalidation" };
+  return { refresh: true, reason: "actual_data_invalidation" };
+}
+
 class TaskchutePlugin extends obsidian.Plugin {
   async onload() {
     try {
@@ -11730,6 +11770,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.lastTaskchuteDisplayReloadAt = 0;
       this.taskchuteDataGeneration = 0;
       this.lastRenderedTaskchuteGeneration = 0;
+      this.taskchuteLastInvalidationSource = "";
+      this.lastRenderedTaskchuteVisiblePluginDataSignature = "";
+      this.pendingExternalInvalidationSources = new Set();
       this.bridgeInboundUiRefreshSession = null;
       this.bridgeInboundUiRefreshSessionSequence = 0;
       this.undoStack = [];
@@ -15067,14 +15110,14 @@ class TaskchutePlugin extends obsidian.Plugin {
       } catch (leafError) {
         console.error("Taskchute device/wake write guard leaf lookup error", leafError);
         hasTaskchuteLeavesForGuardPatch = false;
-        this.queueExternalRefresh("device-write-guard-leaf-lookup-failed", { reloadSettings: true, paths: guardPaths });
+        this.queueExternalRefresh("device-write-guard-leaf-lookup-failed", { reloadSettings: true, paths: guardPaths, invalidationSource: "external_definition_change" });
       }
       if (hasTaskchuteLeavesForGuardPatch) {
         try {
           await this.patchTaskchuteViewsFromExternalSync({ externalSync: true, preserveScroll: true, reloadSettings: true });
         } catch (patchError) {
           console.error("Taskchute device/wake write guard view patch error", patchError);
-          this.queueExternalRefresh("device-write-guard-patch-failed", { reloadSettings: true, paths: guardPaths });
+          this.queueExternalRefresh("device-write-guard-patch-failed", { reloadSettings: true, paths: guardPaths, invalidationSource: "external_definition_change" });
         }
       }
       if (needsDeviceGuard && !autoContinueAfterDeviceReload) {
@@ -15363,7 +15406,23 @@ class TaskchutePlugin extends obsidian.Plugin {
   }
 
   queueExternalRefresh(reason = "external-change", options = {}) {
-    this.markTaskchuteDataInvalidated(reason);
+    const invalidation = decideTaskchuteExternalInvalidation(reason, options || {});
+    this.pendingExternalInvalidationSources = this.pendingExternalInvalidationSources instanceof Set
+      ? this.pendingExternalInvalidationSources
+      : new Set();
+    this.pendingExternalInvalidationSources.add(invalidation.source);
+    if (invalidation.markDirty) {
+      this.markTaskchuteDataInvalidated(invalidation.source);
+    } else if (invalidation.source === "internal_nonvisual_write_ignored") {
+      this.recordTaskchuteUiRefreshDiagnostic("taskchute_internal_nonvisual_write_ignored", {
+        idle_reason: reason,
+        refresh_decision: "no_refresh",
+        final_refresh_executed: false,
+        no_refresh_reason: "internal_nonvisual_write_ignored",
+        pending_external_refresh: !!this.externalRefreshTimer,
+        terminal_state: "ignored"
+      });
+    }
     this.pendingExternalRefreshReasons = this.pendingExternalRefreshReasons || [];
     this.pendingExternalRefreshReasons.push(reason);
     this.pendingExternalRefreshPaths = this.pendingExternalRefreshPaths || new Set();
@@ -15443,6 +15502,13 @@ class TaskchutePlugin extends obsidian.Plugin {
         joined_active_session: !!detail.joined_active_session,
         idle_reason: String(detail.idle_reason || "").trim(),
         idle_duration_ms: Math.max(0, Math.floor(Number(detail.idle_duration_ms || 0))),
+        data_generation: Math.max(0, Math.floor(Number(detail.data_generation != null ? detail.data_generation : this.taskchuteDataGeneration || 0))),
+        rendered_generation: Math.max(0, Math.floor(Number(detail.rendered_generation != null ? detail.rendered_generation : this.lastRenderedTaskchuteGeneration || 0))),
+        generation_after_render: Math.max(0, Math.floor(Number(detail.generation_after_render || 0))),
+        last_invalidation_source: String(detail.last_invalidation_source || this.taskchuteLastInvalidationSource || "").trim(),
+        pending_external_refresh: !!detail.pending_external_refresh,
+        bridge_dirty: !!detail.bridge_dirty,
+        refresh_decision: String(detail.refresh_decision || "").trim(),
         pending_fetch_pass_count: Math.max(0, Math.floor(Number(detail.pending_fetch_pass_count || 0))),
         visible_mutation_count: Math.max(0, Math.floor(Number(detail.visible_mutation_count || 0))),
         external_data_invalidation_detected: !!detail.external_data_invalidation_detected,
@@ -15463,14 +15529,53 @@ class TaskchutePlugin extends obsidian.Plugin {
 
   markTaskchuteDataInvalidated(reason = "data-change") {
     this.taskchuteDataGeneration = Math.max(0, Number(this.taskchuteDataGeneration || 0)) + 1;
+    this.taskchuteLastInvalidationSource = normalizeTaskchuteInvalidationSource(reason) || String(reason || "data-change").trim();
     return this.taskchuteDataGeneration;
   }
 
-  markTaskchuteViewsRendered() {
+  getTaskchuteVisiblePluginDataSignature(settings = this.settings, runtime = this.runtime) {
+    const source = settings && typeof settings === "object" ? settings : {};
+    try {
+      return JSON.stringify({
+        dailyFolder: source.dailyFolder || "",
+        taskchuteFolder: source.taskchuteFolder || "",
+        tasksFolder: source.tasksFolder || "",
+        calendarsFolder: source.calendarsFolder || "",
+        userHolidays: source.userHolidays || [],
+        exceptionBusinessDays: source.exceptionBusinessDays || [],
+        defaultEstimateMin: Number(source.defaultEstimateMin || 0),
+        projects: source.projects || [],
+        projectNoteMeta: source.projectNoteMeta || {},
+        modes: source.modes || [],
+        modeNoteMeta: source.modeNoteMeta || {},
+        bridgeAttributeDefinitionMeta: source.bridgeAttributeDefinitionMeta || {},
+        userAttributes: source.userAttributes || [],
+        manualOvernightLimitHours: Number(source.manualOvernightLimitHours || 0),
+        rotationRoutines: source.rotationRoutines || [],
+        sections: source.sections || [],
+        bridgeRoutineOccurrenceOverrides: source.bridgeRoutineOccurrenceOverrides || [],
+        runtimeTaskState: this.runtimeTaskStateSignature(runtime)
+      });
+    } catch (e) {
+      return "";
+    }
+  }
+
+  markTaskchuteViewsRendered(source = "render") {
     this.lastRenderedTaskchuteGeneration = Math.max(
       Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0)),
       Math.max(0, Number(this.taskchuteDataGeneration || 0))
     );
+    this.lastRenderedTaskchuteVisiblePluginDataSignature = this.getTaskchuteVisiblePluginDataSignature();
+    if (source === "bootstrap_render_mark_current") {
+      this.recordTaskchuteUiRefreshDiagnostic("taskchute_bootstrap_render_mark_current", {
+        refresh_decision: "mark_current",
+        final_refresh_executed: false,
+        no_refresh_reason: "bootstrap_render_mark_current",
+        generation_after_render: this.lastRenderedTaskchuteGeneration,
+        terminal_state: "rendered"
+      });
+    }
   }
 
   handleTaskchuteIdleResumeFreshnessCheck(reason = "focus", idleDurationMs = 0) {
@@ -15480,6 +15585,11 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.recordTaskchuteUiRefreshDiagnostic("taskchute_idle_resume_freshness_check", {
       idle_reason: reason,
       idle_duration_ms: idleDurationMs,
+      data_generation: this.taskchuteDataGeneration,
+      rendered_generation: this.lastRenderedTaskchuteGeneration,
+      pending_external_refresh: !!(this.externalRefreshTimer || (this.pendingExternalRefreshReasons && this.pendingExternalRefreshReasons.length)),
+      bridge_dirty: !!(this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.dirty),
+      refresh_decision: decision.refresh ? "refresh" : "no_refresh",
       external_data_invalidation_detected: relevantInvalidationDetected,
       final_refresh_executed: false,
       no_refresh_reason: decision.refresh ? "external_refresh_pending" : decision.reason,
@@ -15552,7 +15662,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     });
     if (Number(detail.passCount || 0) > Number(target.passCount || 0)) target.passCount = Number(detail.passCount || 0);
     if (visibleMutationCount > 0 || externalInvalidationDetected) {
-      this.markTaskchuteDataInvalidated(detail.reason || "bridge-inbound-applied");
+      this.markTaskchuteDataInvalidated(visibleMutationCount > 0 ? "bridge_visible_mutation" : "external_taskchute_markdown_change");
     }
     return true;
   }
@@ -15580,7 +15690,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           bridgeInboundRefreshSessionId: session.id
         });
         session.finalRefreshExecuted = true;
-        this.markTaskchuteViewsRendered();
+        this.markTaskchuteViewsRendered("bridge_visible_mutation");
       } catch (e) {
         error = String(e && e.message || e || "");
         session.finalRefreshExecuted = false;
@@ -15646,6 +15756,24 @@ class TaskchutePlugin extends obsidian.Plugin {
   async reloadTaskchuteSyncDataFromDisk(options = {}) {
     const force = !!(options && options.force);
     const reason = String(options && options.reason || "").trim();
+    if (!force && reason.startsWith("actual-invalidation:")) {
+      const delayedDecision = decideTaskchuteDelayedRefresh({
+        dataGeneration: this.taskchuteDataGeneration,
+        renderedGeneration: this.lastRenderedTaskchuteGeneration
+      });
+      if (!delayedDecision.refresh) {
+        this.taskchuteDisplayReloadPending = false;
+        this.recordTaskchuteUiRefreshDiagnostic("taskchute_delayed_refresh_noop", {
+          idle_reason: reason,
+          refresh_decision: "no_refresh",
+          final_refresh_executed: false,
+          no_refresh_reason: delayedDecision.reason,
+          pending_external_refresh: false,
+          terminal_state: "timer_rechecked"
+        });
+        return false;
+      }
+    }
     if (!force && reason.startsWith("actual-invalidation:") && (
       (this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active)
       || this._bridgeMobileResumeInboundDrainActive
@@ -15709,12 +15837,12 @@ class TaskchutePlugin extends obsidian.Plugin {
           });
         } catch (patchError) {
           console.error("Taskchute sync data reload view patch error", patchError);
-          this.queueExternalRefresh("manual-sync-reload-patch-failed", { reloadSettings: true, paths });
+          this.queueExternalRefresh("manual-sync-reload-patch-failed", { reloadSettings: true, paths, invalidationSource: "external_definition_change" });
         }
       }
 
       this.lastTaskchuteDisplayReloadAt = Date.now();
-      this.markTaskchuteViewsRendered();
+      this.markTaskchuteViewsRendered(force ? "explicit_manual_reload" : "external_change_rendered");
       this.clearWakeSyncGuard();
       if (options && options.notice) new obsidian.Notice("Taskchute同期データを再読み込みしました", 1800);
       return true;
@@ -15779,9 +15907,13 @@ class TaskchutePlugin extends obsidian.Plugin {
     const reasons = this.pendingExternalRefreshReasons || [];
     const pendingPaths = Array.from(this.pendingExternalRefreshPaths || []);
     const shouldReloadSettings = !!this.pendingExternalSettingsReload;
+    const invalidationSources = new Set(this.pendingExternalInvalidationSources || []);
+    const visiblePluginDataBefore = this.getTaskchuteVisiblePluginDataSignature();
+    let loadedPluginData = false;
     this.pendingExternalRefreshReasons = [];
     this.pendingExternalRefreshPaths = new Set();
     this.pendingExternalSettingsReload = false;
+    this.pendingExternalInvalidationSources = new Set();
 
     try {
       this.isApplyingExternalRefresh = true;
@@ -15795,11 +15927,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (shouldReloadSettings) {
         const loaded = await this.loadData();
         this.applyLoadedData(loaded || {});
+        loadedPluginData = true;
         await this.updatePluginDataStatBaseline();
-        await this.refreshProjectSettingsViews();
-        await this.refreshSectionSettingsViews();
-        await this.refreshModeSettingsViews();
-        await this.refreshRoutineSettingsViews();
       }
 
       // Obsidian Syncでは、タスクノート作成/削除と日別Taskchuteノート更新が別イベントとして
@@ -15809,6 +15938,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       await sleepTaskchute(550);
       const lateReasons = this.pendingExternalRefreshReasons || [];
       const latePaths = Array.from(this.pendingExternalRefreshPaths || []);
+      const lateInvalidationSources = new Set(this.pendingExternalInvalidationSources || []);
+      lateInvalidationSources.forEach(source => invalidationSources.add(source));
       const hasLateExternalChange = !!(lateReasons.length || latePaths.length);
       if (this.externalRefreshTimer) {
         window.clearTimeout(this.externalRefreshTimer);
@@ -15816,6 +15947,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
       this.pendingExternalRefreshReasons = [];
       this.pendingExternalRefreshPaths = new Set();
+      this.pendingExternalInvalidationSources = new Set();
       await this.waitForExternalRefreshPathsToSettle([
         ...latePaths,
         ...this.collectOpenTaskchuteBoardPaths()
@@ -15823,15 +15955,48 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (shouldReloadSettings || this.pendingExternalSettingsReload || hasLateExternalChange) {
         const loaded = await this.loadData();
         this.applyLoadedData(loaded || {});
+        loadedPluginData = true;
         await this.updatePluginDataStatBaseline();
       }
+      const visiblePluginDataAfter = this.getTaskchuteVisiblePluginDataSignature();
+      const pluginDataVisibleChanged = loadedPluginData && visiblePluginDataBefore !== visiblePluginDataAfter;
+      if (pluginDataVisibleChanged) {
+        this.markTaskchuteDataInvalidated("external_definition_change");
+      } else if (loadedPluginData && invalidationSources.has("plugin_data_requires_comparison")) {
+        this.taskchuteLastInvalidationSource = "internal_nonvisual_write_ignored";
+        this.recordTaskchuteUiRefreshDiagnostic("taskchute_plugin_data_nonvisual_change_ignored", {
+          refresh_decision: "no_refresh",
+          final_refresh_executed: false,
+          no_refresh_reason: "internal_nonvisual_write_ignored",
+          pending_external_refresh: false,
+          terminal_state: "compared"
+        });
+      }
+      const refreshDecision = decideTaskchuteDelayedRefresh({
+        dataGeneration: this.taskchuteDataGeneration,
+        renderedGeneration: this.lastRenderedTaskchuteGeneration
+      });
+      if (pluginDataVisibleChanged) {
+        await this.refreshProjectSettingsViews();
+        await this.refreshSectionSettingsViews();
+        await this.refreshModeSettingsViews();
+        await this.refreshRoutineSettingsViews();
+      }
       // Obsidian Syncでは、日別ノート・タスクノート・data.jsonが数百msずれて届くことがある。
-      // v0.6.72では遅着分まで読み切ってから1回だけ描画し、catch-up中の表示点滅を防ぐ。
+      // 遅着分まで読み切り、表示対象の実変更がある場合だけ1回描画する。
       const mobileHidden = this.isBridgeMobileResumeHidden && this.isBridgeMobileResumeHidden();
-      if (this.hasOpenTaskchuteViews() && !mobileHidden) {
+      if (refreshDecision.refresh && this.hasOpenTaskchuteViews() && !mobileHidden) {
         const joinedInboundSession = !!(this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active);
         await this.patchTaskchuteViewsFromExternalSync({ externalSync: true, preserveScroll: true, reloadSettings: shouldReloadSettings || this.pendingExternalSettingsReload || hasLateExternalChange });
-        if (!joinedInboundSession) this.markTaskchuteViewsRendered();
+        if (!joinedInboundSession) this.markTaskchuteViewsRendered("external_change_rendered");
+      } else if (!refreshDecision.refresh) {
+        this.recordTaskchuteUiRefreshDiagnostic("taskchute_external_refresh_noop", {
+          refresh_decision: "no_refresh",
+          final_refresh_executed: false,
+          no_refresh_reason: refreshDecision.reason,
+          pending_external_refresh: false,
+          terminal_state: "no_invalidation"
+        });
       }
       reasons.push(...lateReasons);
       this.pendingExternalSettingsReload = false;
@@ -28817,6 +28982,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.isApplyingExternalRefresh = false;
       this.pendingExternalRefreshReasons = [];
       this.pendingExternalRefreshPaths = new Set();
+      this.pendingExternalInvalidationSources = new Set();
       this.pendingExternalSettingsReload = false;
       this.syncBusyCount = 0;
       this.syncState = null;
@@ -28849,6 +29015,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.externalRefreshTimerStartedAt = 0;
       this.pendingExternalRefreshReasons = [];
       this.pendingExternalRefreshPaths = new Set();
+      this.pendingExternalInvalidationSources = new Set();
       this.pendingExternalSettingsReload = false;
       console.warn("Taskchute sync timer was stale; cleared pending external refresh state.");
     }
@@ -28858,6 +29025,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.externalRefreshApplyingStartedAt = 0;
       this.pendingExternalRefreshReasons = [];
       this.pendingExternalRefreshPaths = new Set();
+      this.pendingExternalInvalidationSources = new Set();
       this.pendingExternalSettingsReload = false;
       console.warn("Taskchute external refresh was stale; released sync lock.");
     }
@@ -28867,6 +29035,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (queuedAt && now - queuedAt > 30000) {
         this.pendingExternalRefreshReasons = [];
         this.pendingExternalRefreshPaths = new Set();
+        this.pendingExternalInvalidationSources = new Set();
         this.pendingExternalSettingsReload = false;
         this.externalRefreshQueuedAt = 0;
         console.warn("Taskchute pending sync reasons were stale; cleared them.");
@@ -42661,7 +42830,7 @@ class TaskchuteView extends obsidian.ItemView {
     this.updateViewHeaderTitle();
     await this.plugin.reloadTaskchuteSyncDataFromDisk({ reason: "taskboard-open", date: this.selectedDate, patchViews: false, showStatus: false, preserveScroll: true });
     await this.refresh({ initialFocusTopSection: true, skipDisplaySyncReload: true });
-    if (this.plugin && this.plugin.markTaskchuteViewsRendered) this.plugin.markTaskchuteViewsRendered();
+    if (this.plugin && this.plugin.markTaskchuteViewsRendered) this.plugin.markTaskchuteViewsRendered("bootstrap_render_mark_current");
   }
 
   isInteractiveTarget(target) {

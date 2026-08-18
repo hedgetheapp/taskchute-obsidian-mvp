@@ -283,6 +283,12 @@
 - 根拠: `beginBridgeInboundUiRefreshSession()`、`requestBridgeInboundUiRefresh()`、`finalizeBridgeInboundUiRefreshSession()`。
 - 理由: backlog catch-up中のreload stormを止めつつ、safe-stop前に正しく適用されたprefixを一度だけ表示し、UI例外をdata correctnessから分離するため。
 
+## D-046: plugin data通知は表示影響を比較してからUI invalidationにする
+
+- 判断: `data.json`のexternal notification自体をTaskChute表示変更の証拠にしない。load前後の表示対象subsetを比較し、差がある場合だけgenerationを進める。cursor、outbox、diagnostics等の非表示系writeは自動reload authorityにしない。初回renderはcurrent generationとして記録し、遅延refreshは実行時にもgeneration差を再確認する。
+- 根拠: `decideTaskchuteExternalInvalidation()`、`getTaskchuteVisiblePluginDataSignature()`、`decideTaskchuteDelayedRefresh()`、`flushExternalRefresh()`、`reloadTaskchuteSyncDataFromDisk()`。
+- 理由: v0.6.72実機試験で、意図的なTaskChute data changeがないidle後でも最初のinteractionが1回reloadしたため。Bridge / cursorの内部bookkeepingをvisible mutationと混同せず、実Markdown・定義変更は従来どおり反映する必要がある。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

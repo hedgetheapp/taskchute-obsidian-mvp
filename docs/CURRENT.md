@@ -3,13 +3,13 @@
 ## 調査基準
 
 - 調査日: 2026-08-18
-- manifest version: `0.6.72`
+- manifest version: `0.6.73`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.72 Bridge inbound / idle resume UI refresh coalescing BRAT Prerelease
+- canonical docs checkpoint: v0.6.73 idle no-change first-interaction reload fix candidate
 - latest release tag: `v0.6.72`（immutable BRAT実機試験用Prerelease。annotated tag object `bbfbb9aef583a8d4bf09429b3b617d13fe6c2748`、peeled target `1a7a09a7b7d5f2c43a493308fe9166a2d94057d3`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.71のimmutable assetsではTaskCreated exact placement 2ケースとTaskMoved v4 2ケースに実機PASS証跡がある。v0.6.72はBridge backlog catch-upとidle復帰時のUI refreshをactual data change単位へcoalesceする。focused synthetic / structural試験はPASSしたが、実Vault / 実mobileのtargeted試験とplugin全体 / full matrixは`NOT_VERIFIED`である。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.72のidle/no-change実機試験は、意図的なTaskChute data changeなしでも最初のinteractionでvisible reloadが1回発生して`FAIL`となり、backlog試験は未実施である。v0.6.73候補は非表示系plugin-data通知によるfalse invalidationを除去する。focused synthetic / structural試験はPASSしたが、実Vault / 実mobileのtargeted試験とplugin全体 / full matrixは`NOT_VERIFIED`である。
 
 ## 文書運用
 
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.72 |
+| State | v0.6.73 candidate |
 |---|---|
-| Integrated | Yes |
-| Prereleased / Test-distributed | Yes |
+| Integrated | No |
+| Prereleased / Test-distributed | No |
 | Verified | No |
 | Released | No |
 
@@ -88,7 +88,9 @@ v0.6.71 current実機試験では`TASKCREATED-SECTION-TOP-ORDER-01`がPASSした
 
 同じv0.6.71 assets上で`TMV4-DATE-MOVE-01`もPASSした。T-0672は2026-08-18 / E-20260818-0006から2026-08-19 / E-20260819-0001へentry identityをrekeyし、TaskMoved seq 2475 / event `3a8b40a7-3f70-4473-9472-c04e7128b3b5`がremote / mobile appliedとなった。exact matching TaskMovedは1件で、三端末ともsource 0件、destination 1件、task_idとtask note維持を確認した。途中診断の`after_move_matches_save=false` / `after_save_matches_rebuild=false`は失敗判定ではなく、authoritativeな`after_save_matches_emitted=true`と最終収束・Ack成功をPASS根拠とする。`TMV4-SECTION-HANDOFF-01`もPASSし、T-0674 / E-20260819-0003のrow section metadataだけをcontrolled missing化した後、exact entry D&Dで`section=午後 section_id=afternoon`を復元した。TaskMoved seq 2482 / event `25e60ea3-0dd7-48c2-bec8-6bfe35cae9fd`はremote / mobile applied、exact matching countは1、三端末順はE-20260819-0001 / E-20260819-0003 / E-20260819-0002 / E-20260819-0004で一致した。これら4件はtargeted current PASSであり、v0.6.71全体のVerified判定や他の`NOT_VERIFIED`行を昇格させない。
 
-v0.6.72は、30秒以上のhidden / blur復帰と30分以上のTaskBoard非操作後の最初のinteractionが、actual data invalidationの有無に関係なくdisplay reloadを予約していた結合を除去する。focus / visibility / interactionは軽量freshness checkの契機に留め、elapsed idle time単独ではUIをrefreshしない。Bridge inboundはstartup / interval / focus / mobile resumeなど重複kickoffを同一logical refresh sessionへjoinし、各eventのapply・保存・再読込検証・Ack・cursor処理は従来どおり個別に行いながら、visible mutationが1件以上ある場合だけsession終端で最大1回refreshする。External Vault changeもrelevant data generationを進めるが、inbound session中は同sessionへ合流する。focused syntheticはidle no-change=0、複数event / 複数pass=1、safe-stop成功prefix=1、mutation前stop=0、external relevant change=1、重複kickoff single-flightを確認済みである。実機のidle no-changeとbacklog catch-upは`NOT_VERIFIED`である。
+v0.6.72は、30秒以上のhidden / blur復帰と30分以上のTaskBoard非操作後の最初のinteractionが、actual data invalidationの有無に関係なくdisplay reloadを予約していた直接結合を除去した。しかし実機`IDLE-NOCHANGE-REFRESH-01`では数分idle・意図的data changeなしでも最初のinteractionでvisible reloadが1回発生し、期待0回に対して`FAIL`となった。Test Aで停止したためbacklog Test Bは`NOT_RUN`であり、この証跡はBridge apply / Ack / cursor failureを示さない。
+
+v0.6.73候補では、`queueExternalRefresh()`が全通知を一律dirtyにしていた残存経路を修正する。relevant Markdown / definition / Bridge visible mutationと、cursor・outbox・diagnostics等のinternal nonvisual writeを分類し、`data.json`は表示対象subsetのload前後差がある場合だけgenerationを進める。TaskBoard bootstrap renderはcurrent generationとして記録し、予約済みreloadもtimer発火時にgeneration差を再確認してstaleならno-opにする。focused syntheticはidle no-change、反復focus、plugin-data no-change、stale timer、genuine external Markdown、Bridge final refresh、diagnosticsを確認済みだが、v0.6.73実機試験前のため`NOT_VERIFIED`である。
 
 v0.6.70実機試験では、section / empty-section routeのT-0653 / E-20260816-0029、row routeのT-0654 / E-20260816-0030、empty night routeのT-0655 / E-20260816-0031がtargeted PASSとなった。3件ともCtrl+Z前にexact semantic action、operation ID、batch ID、fingerprint、history topを確認し、forward / Undo / Redo TaskMovedがD1 seq 2404〜2406、2409〜2411、2414〜2416としてremote / mobile appliedになった。Undo / Redo後はdev / remote physical sectionとmobile UIが収束した。これによりv0.6.69 failureは試験した3 routeについて解消したが、plugin全体 / full matrixは`NOT_VERIFIED`、Delivery StateはVerified=Noのままとする。
 

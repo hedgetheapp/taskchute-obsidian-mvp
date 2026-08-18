@@ -230,7 +230,8 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 
 - elapsed idle durationはTaskChute UI invalidation authorityではない。30秒以上のfocus / visibility復帰や30分以上後のfirst interactionだけを理由にdisk reload / view refreshしない。
 - focus / visibility / resume / first interactionはfreshness checkを起動できるが、relevant data generationとlast rendered generationが一致し、Bridge-applied dirty stateもない場合のTaskBoard refresh countは0とする。
-- relevant TaskChute Markdown、Routine history、plugin data等のexternal changeはactual invalidationとしてgenerationを進める。unrelated Vault noteはinvalidation対象にしない。clickごとのVault全体hashは行わない。
+- relevant TaskChute Markdown、Routine history、表示に影響するplugin dataのexternal changeはactual invalidationとしてgenerationを進める。`data.json`の通知だけではdirtyにせず、表示対象subsetの変更を比較してからgenerationを進める。cursor、outbox、diagnostics等の非表示系writeとunrelated Vault noteはinvalidation対象にしない。clickごとのVault全体hashは行わない。
+- TaskBoardの初回open / bootstrap renderはその時点のgenerationをrender済みとして記録する。予約済みの遅延refreshはtimer発火時にもgeneration差を再確認し、既にcurrentならno-opにする。
 - one logical Bridge catch-upはstartup / interval / focus / resume kickoffと複数pending passを1 UI refresh sessionへjoinする。eventのfetch、apply、persist、post-save verify、Ack、cursor merge、安全停止は従来どおり個別・sequence順で行う。
 - session内で成功したvisible mutationが0件ならfinal refreshは0回、1件以上ならopenかつvisibleなTaskBoardを最大1回だけrefreshする。safe-stop前の成功prefixは1回表示し、mutation前safe-stopは0回とする。
 - TaskBoard viewがopenでなければ自動openしない。mobile hidden中はrenderせず、visible復帰後の既存recovery policyを維持する。
