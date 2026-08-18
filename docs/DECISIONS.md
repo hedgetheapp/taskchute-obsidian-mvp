@@ -302,6 +302,13 @@
 - 理由: v0.6.74実機probeで、focus復帰時に既存の非表示日boardとtask definitionsへduplicate `create` eventがburstし、open-board mapにentryがないことだけでgenerationを繰り返し進めてvisible reloadしたため。
 - 根拠: `collectTaskchuteVisibleDependencyDescriptors()`、`refreshTaskchuteVisibleDependencyBaseline()`、`decideTaskchuteVisibleDependencyInvalidation()`、`queueTaskchuteRelevantExternalRefresh()`、`tests/taskchute-visible-dependency-invalidation-v0675.js`。
 
+## D-049: one physical inbound catch-upは1 sessionとauthoritative final refreshで閉じる
+
+- 判断: activeまたはqueuedなmobile resume drainへ到着したstartup / focus / visibility / resume kickoffは同じUI refresh sessionへjoinし、別follow-up sessionを予約しない。複数passでもfinal renderはterminal時の最大1回とする。
+- 判断: finalizerはactive apply/save/verifyが0であることを要求し、dirty sessionの最終描画は`TaskchuteView.refresh()`を通るauthoritative full refreshにする。先行refreshのrun generationを失効させ、古いprefix snapshotのlate renderを許可しない。
+- 理由: v0.6.75実機backlogでは6 eventがserver appliedでもvisible UIがAだけとなり、2回以上reloadした。コード上、final partial patchはrefresh generationを進めず、以前に開始したfull refreshが後からAだけを描画できた。また重複kickoffが別sessionを予約でき、1 catch-upを複数final renderへ分断できた。
+- 根拠: `scheduleMobileResumeInboundDrain()`、`runMobileResumeInboundDrain()`、`finalizeBridgeInboundUiRefreshSession()`、`TaskchuteView.refresh()`、`tests/bridge-backlog-final-ui-v0676.js`。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

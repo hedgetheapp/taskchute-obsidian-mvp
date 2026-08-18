@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はimmutable v0.6.75 BRAT Prereleaseの現行実装を対象とする。v0.6.75はcurrent viewのvisible dependencyとexplicit existence/content stateをUI invalidation authorityにする。syntheticはPASSだが実機は未検証で、full matrixは`NOT_VERIFIED`である。
+この一覧はv0.6.76候補の現行実装を対象とする。最新immutable配布はv0.6.75であり、focus no-changeは実機PASS、6-event backlogのvisible convergenceはFAILである。v0.6.76 focused syntheticはPASSだが実機未検証で、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.75で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.76で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -117,7 +117,7 @@
 | TaskMoved v4 | 実装済み | `target_order_entry_ids` / `source_order_entry_ids`を正とする。v0.6.63でbasic / section handoff / cross-section / empty-source / date move、v0.6.65でsame-task multi-entry D&Dが三端末PASS。v0.6.70ではsame-section basic seq 2436、cross-section row-target seq 2409、同一task_idのoriginal / continuation共存fixtureでcontinuationだけを動かすmulti-entry seq 2451、sourceを空にするseq 2458がcurrent三端末PASSとなった。section handoff / date moveを含む現行versionの全組合せ回帰は未完了。 |
 | TaskMoved Undo / Redo Bridge | 実装済み・対象route実機PASS | D&D専用Undo batchへoperation / batch identityを付け、exact task / entryとbefore / after fingerprintを検証後だけsemantic付き履歴としてcommitする。commit後はexact semantic actionがhistory topに1件だけあることも検証する。復元前後のMarkdown検証後に`task-undo-confirmed-markdown-v4` / `task-redo-confirmed-markdown-v4`をenqueueする。v0.6.70でcross-sectionのsection / row / empty-section target、same-section reorder、duplicate-task-id multi-entryのexact continuation targetingについてforward・Undo・Redoと三端末収束を確認した。未試験範囲はTEST_MATRIXを正とする。 |
 | lifecycle classifier | 実装済み | normal / routine_occurrence / identity_conflict。 |
-| mobile resume drain | 実装済み・v0.6.74実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。複数pending passは1 logical UI refresh sessionへまとめ、mutationなしは0回、変更ありは最終1回だけTaskBoardをrefreshする。backlog実機試験はfocus no-change FAILで停止中。 |
+| mobile resume drain | 実装済み・v0.6.76実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。重複kickoffと複数pending passは1 physical catch-up sessionへjoinし、mutationなしは0回、変更ありはolder refresh snapshotを失効させるauthoritative full refreshを最終1回だけ行う。v0.6.75 backlog実機試験はFAIL。 |
 | idle / focus / resume UI freshness | 実装済み・v0.6.75実機未試験 | focus / visibilityはtriggerでありinvalidation authorityではない。current open board、Routine history、loaded task definitionsだけをexplicit present/absent state付きで追跡する。untracked pathとtracked-presentの同一content duplicate `create`はrefreshしない。v0.6.74実機のfocus-return create stormはFAIL。 |
 | オフライン復帰 | 一部実装 | network error分類と再試行はある。長時間実機試験は要確認。 |
 | D1 schema管理 | 要確認 | clientはHTTP APIのみ利用。Worker / D1 schemaはこのrepoにない。 |

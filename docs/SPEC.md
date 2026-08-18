@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様はimmutable `v0.6.75` BRAT Prerelease（peeled target `38a0facf1c8def2426e10119496e71816376d6f8`）を基準とし、公開済みtag / Release / assetsは固定する。v0.6.75のfocused syntheticはPASSしたが実Vault未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.76`候補を基準とする。最新immutable配布は`v0.6.75` BRAT Prerelease（peeled target `38a0facf1c8def2426e10119496e71816376d6f8`）で、公開済みtag / Release / assetsは固定する。v0.6.76のfocused syntheticはPASSしたが実Vault未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -236,9 +236,10 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - current viewのinvalidation authorityは、open board、そのboardにloadedされたtask definition、Routine historyのexplicit visible dependency baselineとする。baseline recordはexistenceを保持し、mapにないuntracked pathと、作成前のtracked-absent pathを区別する。
 - untracked TaskChute pathのevent、およびtracked-present pathのcontentが同一なduplicate `create`はcurrent viewをinvalidateしない。tracked-absentからpresent、tracked-presentのcontent差、delete / renameはactual visible changeとして最大1回のrefreshへcoalesceできる。
 - window focus / visibility returnでは既存TaskChute view instanceを再利用し、focusだけを理由に`setViewState`やview再生成を行わない。
-- one logical Bridge catch-upはstartup / interval / focus / resume kickoffと複数pending passを1 UI refresh sessionへjoinする。eventのfetch、apply、persist、post-save verify、Ack、cursor merge、安全停止は従来どおり個別・sequence順で行う。
+- one physical Bridge catch-upはstartup / interval / focus / resumeの重複kickoffと複数pending passを1 UI refresh sessionへjoinする。active/queued drainへのkickoffは別follow-up sessionを予約しない。eventのfetch、apply、persist、post-save verify、Ack、cursor merge、安全停止は従来どおり個別・sequence順で行う。
 - session内で成功したvisible mutationが0件ならfinal refreshは0回、1件以上ならopenかつvisibleなTaskBoardを最大1回だけrefreshする。safe-stop前の成功prefixは1回表示し、mutation前safe-stopは0回とする。
 - TaskBoard viewがopenでなければ自動openしない。mobile hidden中はrenderせず、visible復帰後の既存recovery policyを維持する。
+- finalizerはactive apply/save/verify operationが0になるまで実行せず、visible mutationがある場合だけauthoritative full refreshを1回行う。このrefreshはviewのrefresh generationを進め、先行refreshの古いsnapshotが後から描画することを防ぐ。
 - final UI refreshの例外はdiagnosticへ記録するが、既にapply / verify / Ack済みのeventやcursorを巻き戻さない。
 - plugin inbound write由来のVault eventはinternal-write guardとactive refresh sessionでcoalesceし、Bridge apply→Vault listener→refreshのfeedback loopを作らない。
 - in-flight、write in progress、network error、空pending到着遅延に対するretry / watch windowがある。

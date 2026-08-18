@@ -11628,15 +11628,25 @@ class TaskchuteShortcutHelpModal extends obsidian.Modal {
 
 function createTaskchuteUiRefreshSessionState(input = {}) {
   const reason = String(input.reason || "bridge-inbound").trim() || "bridge-inbound";
+  const startedAt = String(input.startedAt || input.createdAt || nowIso());
   return {
     id: String(input.id || `ui-refresh-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`).trim(),
     active: true,
-    createdAt: String(input.createdAt || nowIso()),
+    createdAt: startedAt,
+    startedAt,
+    endedAt: "",
     kickoffReasons: [reason],
+    joinCount: 0,
     passCount: 0,
+    passSummaries: [],
+    firstServerSequence: 0,
+    lastServerSequence: 0,
     dirty: false,
+    dirtyTransitionCount: 0,
     visibleMutationCount: 0,
     suppressedRefreshRequestCount: 0,
+    activeOperationCount: 0,
+    maxActiveOperationCount: 0,
     externalInvalidationDetected: false,
     finalRefreshExecuted: false,
     finalRefreshReason: "",
@@ -11651,19 +11661,56 @@ function joinTaskchuteUiRefreshSessionState(session, reason = "bridge-inbound") 
   const reasons = Array.isArray(session.kickoffReasons) ? session.kickoffReasons : [];
   if (!reasons.includes(normalized)) reasons.push(normalized);
   session.kickoffReasons = reasons.slice(-12);
+  session.joinCount = Math.max(0, Number(session.joinCount || 0)) + 1;
   return session;
 }
 
 function markTaskchuteUiRefreshSessionDirty(session, input = {}) {
   if (!session || typeof session !== "object") return session;
   const count = Math.max(0, Math.floor(Number(input.visibleMutationCount || 0)));
+  const wasDirty = !!session.dirty;
   if (count > 0 || input.externalInvalidationDetected) session.dirty = true;
+  if (!wasDirty && session.dirty) session.dirtyTransitionCount = Math.max(0, Number(session.dirtyTransitionCount || 0)) + 1;
   session.visibleMutationCount = Math.max(0, Number(session.visibleMutationCount || 0)) + count;
   session.externalInvalidationDetected = !!(session.externalInvalidationDetected || input.externalInvalidationDetected);
   if (input.suppressedRequest !== false) {
     session.suppressedRefreshRequestCount = Math.max(0, Number(session.suppressedRefreshRequestCount || 0)) + 1;
   }
   return session;
+}
+
+function recordTaskchuteUiRefreshSessionPassState(session, input = {}) {
+  if (!session || typeof session !== "object") return session;
+  const pass = Math.max(0, Math.floor(Number(input.pass || input.passCount || 0)));
+  const first = Math.max(0, Math.floor(Number(input.firstServerSequence || 0)));
+  const last = Math.max(0, Math.floor(Number(input.lastServerSequence || 0)));
+  if (pass > Number(session.passCount || 0)) session.passCount = pass;
+  if (first && (!session.firstServerSequence || first < session.firstServerSequence)) session.firstServerSequence = first;
+  if (last > Number(session.lastServerSequence || 0)) session.lastServerSequence = last;
+  const summaries = Array.isArray(session.passSummaries) ? session.passSummaries : [];
+  summaries.push({
+    pass,
+    pendingBefore: Math.max(0, Math.floor(Number(input.pendingBefore || 0))),
+    pendingAfter: Math.max(0, Math.floor(Number(input.pendingAfter || 0))),
+    firstServerSequence: first,
+    lastServerSequence: last,
+    terminal: !!input.terminal
+  });
+  session.passSummaries = summaries.slice(-20);
+  return session;
+}
+
+function beginTaskchuteUiRefreshSessionOperation(session) {
+  if (!session || typeof session !== "object") return 0;
+  session.activeOperationCount = Math.max(0, Number(session.activeOperationCount || 0)) + 1;
+  session.maxActiveOperationCount = Math.max(Number(session.maxActiveOperationCount || 0), session.activeOperationCount);
+  return session.activeOperationCount;
+}
+
+function endTaskchuteUiRefreshSessionOperation(session) {
+  if (!session || typeof session !== "object") return 0;
+  session.activeOperationCount = Math.max(0, Number(session.activeOperationCount || 0) - 1);
+  return session.activeOperationCount;
 }
 
 function decideTaskchuteUiRefreshSessionFinalization(session, context = {}) {
@@ -11833,6 +11880,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.pendingExternalInvalidationSources = new Set();
       this.bridgeInboundUiRefreshSession = null;
       this.bridgeInboundUiRefreshSessionSequence = 0;
+      this._bridgeMobileResumeQueuedKickoffReasons = [];
       this.undoStack = [];
       this.redoStack = [];
       this.undoStackLimit = 20;
@@ -12897,7 +12945,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       in_flight: !!(this.settings && this.settings.bridgeInboundAutoApplyInProgress || this.bridgeInboundApplyInProgress || this.settings && this.settings.bridgeInboundApplyInProgress),
       write_in_progress: this.isBridgeMobileResumePullWriteInProgress ? this.isBridgeMobileResumePullWriteInProgress() : false,
       drain_active: !!this._bridgeMobileResumeInboundDrainActive,
-      followup_pending: !!this._bridgeMobileResumeInboundDrainFollowupRequested,
+      followup_pending: false,
+      queued_kickoff_count: Array.isArray(this._bridgeMobileResumeQueuedKickoffReasons) ? this._bridgeMobileResumeQueuedKickoffReasons.length : 0,
       queued: !!this._bridgeMobileResumeInboundDrainQueued
     };
   }
@@ -14119,22 +14168,34 @@ class TaskchutePlugin extends obsidian.Plugin {
       return this.deferBridgeMobileResumeDrainUntilVisible(source, drainOptions, "bridge_mobile_resume_drain_deferred_hidden");
     }
     if (this._bridgeMobileResumeInboundDrainActive || this._bridgeMobileResumeInboundDrainQueued) {
-      this._bridgeMobileResumeInboundDrainFollowupRequested = true;
-      this._bridgeMobileResumeInboundDrainFollowupSource = `${source}:followup`;
-      this._bridgeMobileResumeInboundDrainFollowupOptions = Object.assign({}, options || {}, {
-        delayMs: 1000,
-        parentRunId: runId,
-        runId: this.createBridgeMobileResumeDrainRunId()
-      });
+      if (this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active) {
+        joinTaskchuteUiRefreshSessionState(this.bridgeInboundUiRefreshSession, source);
+        this.recordTaskchuteUiRefreshDiagnostic("bridge_inbound_ui_refresh_session_joined", {
+          refresh_session_id: this.bridgeInboundUiRefreshSession.id,
+          kickoff_reasons: this.bridgeInboundUiRefreshSession.kickoffReasons,
+          joined_active_session: true,
+          join_count: this.bridgeInboundUiRefreshSession.joinCount,
+          visible_mutation_count: this.bridgeInboundUiRefreshSession.visibleMutationCount,
+          suppressed_refresh_request_count: this.bridgeInboundUiRefreshSession.suppressedRefreshRequestCount,
+          terminal_state: "active"
+        });
+      } else {
+        const queuedReasons = Array.isArray(this._bridgeMobileResumeQueuedKickoffReasons)
+          ? this._bridgeMobileResumeQueuedKickoffReasons
+          : [];
+        if (!queuedReasons.includes(source)) queuedReasons.push(source);
+        this._bridgeMobileResumeQueuedKickoffReasons = queuedReasons.slice(-12);
+      }
       this.recordBridgeMobileResumeDrainDiagnostic("bridge_mobile_resume_drain_skipped_in_flight", {
         source,
         reason: source,
         runId,
-        decision: "followup-requested"
+        decision: this._bridgeMobileResumeInboundDrainActive ? "joined-active-session" : "joined-queued-drain"
       });
-      return { ok: false, skipped: true, reason: "in-flight" };
+      return { ok: true, joined: true, skipped: true, reason: this._bridgeMobileResumeInboundDrainActive ? "joined-active-session" : "joined-queued-drain" };
     }
     this._bridgeMobileResumeInboundDrainQueued = true;
+    this._bridgeMobileResumeQueuedKickoffReasons = [source];
     this.recordBridgeMobileResumeDrainDiagnostic("bridge_mobile_resume_drain_scheduled", {
       source,
       reason: source,
@@ -14288,6 +14349,11 @@ class TaskchutePlugin extends obsidian.Plugin {
     let safeStopRetryCount = 0;
     let watchWindowPendingFound = false;
     const uiRefreshHandle = this.beginBridgeInboundUiRefreshSession(source);
+    const queuedKickoffReasons = Array.isArray(this._bridgeMobileResumeQueuedKickoffReasons)
+      ? this._bridgeMobileResumeQueuedKickoffReasons.slice()
+      : [];
+    queuedKickoffReasons.filter(reason => String(reason || "").trim() !== source).forEach(reason => joinTaskchuteUiRefreshSessionState(uiRefreshHandle.session, reason));
+    this._bridgeMobileResumeQueuedKickoffReasons = [];
     this._bridgeMobileResumeInboundDrainActive = true;
     this._bridgeMobileResumeInboundDrainQueued = false;
     this._bridgeMobileResumeCurrentDrainRunId = runId;
@@ -14498,6 +14564,14 @@ class TaskchutePlugin extends obsidian.Plugin {
         const skippedCount = Math.max(0, Math.floor(Number(lastResult && lastResult.skippedCount || 0)));
         const failedCount = Math.max(0, Math.floor(Number(lastResult && lastResult.failedCount || 0)));
         const progressMade = appliedCount > 0 || beforeSignature !== afterSignature;
+        recordTaskchuteUiRefreshSessionPassState(uiRefreshHandle.session, {
+          pass: passIndex,
+          pendingBefore: Math.max(0, Number(beforePendingSummary && beforePendingSummary.pending_count || 0)),
+          pendingAfter: Math.max(0, Number(pendingSummary && pendingSummary.pending_count || 0)),
+          firstServerSequence: Math.max(0, Number(beforePendingSummary && beforePendingSummary.first_server_sequence || pendingSummary && pendingSummary.first_server_sequence || 0)),
+          lastServerSequence: Math.max(0, Number(beforePendingSummary && beforePendingSummary.last_server_sequence || pendingSummary && pendingSummary.last_server_sequence || 0)),
+          terminal: !!(afterFetch.ok && Number(pendingSummary && pendingSummary.pending_count || 0) <= 0)
+        });
         this.recordBridgeMobileResumeDrainDiagnostic("bridge_mobile_resume_drain_pending_summary", {
           source,
           reason: source,
@@ -14677,17 +14751,6 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!(options && options.watchWindow === false)) {
             this.startBridgeMobileResumeWatchWindow(runId, source, pendingSummary, options || {});
           }
-          const settleCount = Math.max(0, Math.floor(Number(options && options.settleCount || 0)));
-          if (settleCount < 2 && (Date.now() - startedAt + passIntervalMs) < maxRuntimeMs) {
-            this._bridgeMobileResumeInboundDrainFollowupRequested = true;
-            this._bridgeMobileResumeInboundDrainFollowupSource = `${source}:empty-settle-${settleCount + 1}`;
-            this._bridgeMobileResumeInboundDrainFollowupOptions = Object.assign({}, options || {}, {
-              delayMs: settleCount === 0 ? 1500 : 5000,
-              settleCount: settleCount + 1,
-              retryCount: 0,
-              runId: this.createBridgeMobileResumeDrainRunId()
-            });
-          }
           break;
         }
         if (progressMade) {
@@ -14769,14 +14832,6 @@ class TaskchutePlugin extends obsidian.Plugin {
       this._bridgeMobileResumeInboundDrainActive = false;
       this._bridgeMobileResumeInboundDrainQueued = false;
       this._bridgeMobileResumeCurrentDrainRunId = "";
-      if (this._bridgeMobileResumeInboundDrainFollowupRequested) {
-        const followupSource = String(this._bridgeMobileResumeInboundDrainFollowupSource || `${source}:followup`).trim();
-        const followupOptions = Object.assign({}, this._bridgeMobileResumeInboundDrainFollowupOptions || {}, { retryCount: 0 });
-        this._bridgeMobileResumeInboundDrainFollowupRequested = false;
-        this._bridgeMobileResumeInboundDrainFollowupSource = "";
-        this._bridgeMobileResumeInboundDrainFollowupOptions = null;
-        try { this.scheduleMobileResumeInboundDrain(followupSource, followupOptions); } catch (e) {}
-      }
     }
   }
 
@@ -15863,6 +15918,9 @@ class TaskchutePlugin extends obsidian.Plugin {
         refresh_session_id: String(detail.refresh_session_id || detail.sessionId || "").trim(),
         kickoff_reasons: (Array.isArray(detail.kickoff_reasons) ? detail.kickoff_reasons : []).map(value => String(value || "").trim()).filter(Boolean).slice(-12),
         joined_active_session: !!detail.joined_active_session,
+        joined_session_count: Math.max(0, Math.floor(Number(detail.joined_session_count || detail.join_count || 0))),
+        session_started_at: String(detail.session_started_at || "").trim(),
+        session_ended_at: String(detail.session_ended_at || "").trim(),
         idle_reason: String(detail.idle_reason || "").trim(),
         idle_duration_ms: Math.max(0, Math.floor(Number(detail.idle_duration_ms || 0))),
         data_generation: Math.max(0, Math.floor(Number(detail.data_generation != null ? detail.data_generation : this.taskchuteDataGeneration || 0))),
@@ -15892,13 +15950,30 @@ class TaskchutePlugin extends obsidian.Plugin {
         generation_after: Math.max(0, Math.floor(Number(detail.generation_after || 0))),
         refresh_queued: !!detail.refresh_queued,
         pending_fetch_pass_count: Math.max(0, Math.floor(Number(detail.pending_fetch_pass_count || 0))),
+        pending_pass_summaries: (Array.isArray(detail.pending_pass_summaries) ? detail.pending_pass_summaries : []).slice(-20).map(item => ({
+          pass: Math.max(0, Math.floor(Number(item && item.pass || 0))),
+          pending_before: Math.max(0, Math.floor(Number(item && (item.pendingBefore != null ? item.pendingBefore : item.pending_before) || 0))),
+          pending_after: Math.max(0, Math.floor(Number(item && (item.pendingAfter != null ? item.pendingAfter : item.pending_after) || 0))),
+          first_server_sequence: Math.max(0, Math.floor(Number(item && (item.firstServerSequence != null ? item.firstServerSequence : item.first_server_sequence) || 0))),
+          last_server_sequence: Math.max(0, Math.floor(Number(item && (item.lastServerSequence != null ? item.lastServerSequence : item.last_server_sequence) || 0))),
+          terminal: !!(item && item.terminal)
+        })),
+        pending_first_sequence: Math.max(0, Math.floor(Number(detail.pending_first_sequence || 0))),
+        pending_last_sequence: Math.max(0, Math.floor(Number(detail.pending_last_sequence || 0))),
         visible_mutation_count: Math.max(0, Math.floor(Number(detail.visible_mutation_count || 0))),
+        dirty_transition_count: Math.max(0, Math.floor(Number(detail.dirty_transition_count || 0))),
         external_data_invalidation_detected: !!detail.external_data_invalidation_detected,
         suppressed_refresh_request_count: Math.max(0, Math.floor(Number(detail.suppressed_refresh_request_count || 0))),
+        active_apply_save_verify_count: Math.max(0, Math.floor(Number(detail.active_apply_save_verify_count || 0))),
+        max_active_apply_save_verify_count: Math.max(0, Math.floor(Number(detail.max_active_apply_save_verify_count || 0))),
         final_refresh_executed: !!detail.final_refresh_executed,
         final_refresh_reason: String(detail.final_refresh_reason || "").trim(),
         no_refresh_reason: String(detail.no_refresh_reason || "").trim(),
         terminal_state: String(detail.terminal_state || "").trim(),
+        generation_before_refresh: Math.max(0, Math.floor(Number(detail.generation_before_refresh || 0))),
+        generation_after_refresh: Math.max(0, Math.floor(Number(detail.generation_after_refresh || 0))),
+        rendered_generation_before_refresh: Math.max(0, Math.floor(Number(detail.rendered_generation_before_refresh || 0))),
+        rendered_generation_after_refresh: Math.max(0, Math.floor(Number(detail.rendered_generation_after_refresh || 0))),
         ui_refresh_error: sanitizeBridgeSafeMessage(detail.ui_refresh_error || "")
       };
       this.settings.bridgeInboundAutoApplyRuntimeDiagnostics = limitBridgeDiagnosticArrayProtectedAware(
@@ -16005,6 +16080,8 @@ class TaskchutePlugin extends obsidian.Plugin {
         refresh_session_id: active.id,
         kickoff_reasons: active.kickoffReasons,
         joined_active_session: true,
+        joined_session_count: active.joinCount,
+        session_started_at: active.startedAt,
         visible_mutation_count: active.visibleMutationCount,
         suppressed_refresh_request_count: active.suppressedRefreshRequestCount,
         terminal_state: "active"
@@ -16032,6 +16109,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       refresh_session_id: session.id,
       kickoff_reasons: session.kickoffReasons,
       joined_active_session: false,
+      joined_session_count: session.joinCount,
+      session_started_at: session.startedAt,
       terminal_state: "active"
     });
     return { session, owner: true };
@@ -16057,8 +16136,22 @@ class TaskchutePlugin extends obsidian.Plugin {
   async finalizeBridgeInboundUiRefreshSession(session, detail = {}) {
     if (!session || !session.active) return { executed: false, reason: "session_inactive" };
     if (this.bridgeInboundUiRefreshSession !== session) return { executed: false, reason: "not_session_owner" };
+    if (Math.max(0, Number(session.activeOperationCount || 0)) > 0) {
+      this.recordTaskchuteUiRefreshDiagnostic("bridge_inbound_ui_refresh_finalize_blocked_active_operation", {
+        refresh_session_id: session.id,
+        kickoff_reasons: session.kickoffReasons,
+        active_apply_save_verify_count: session.activeOperationCount,
+        final_refresh_executed: false,
+        no_refresh_reason: "active_apply_save_verify_in_progress",
+        terminal_state: "finalize_deferred"
+      });
+      return { executed: false, reason: "active_apply_save_verify_in_progress", deferred: true };
+    }
     session.passCount = Math.max(Number(session.passCount || 0), Number(detail.passCount || 0));
     session.terminalState = String(detail.terminalState || "pending_zero").trim();
+    session.endedAt = nowIso();
+    const generationBeforeRefresh = Math.max(0, Number(this.taskchuteDataGeneration || 0));
+    const renderedGenerationBeforeRefresh = Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0));
     const decision = decideTaskchuteUiRefreshSessionFinalization(session, {
       viewOpen: this.hasOpenTaskchuteViews(),
       hidden: this.isBridgeMobileResumeHidden && this.isBridgeMobileResumeHidden(),
@@ -16073,6 +16166,7 @@ class TaskchutePlugin extends obsidian.Plugin {
       try {
         await this.patchTaskchuteViewsFromExternalSync({
           preserveScroll: true,
+          externalSync: true,
           bridgeInboundFinalRefresh: true,
           bridgeInboundRefreshSessionId: session.id
         });
@@ -16086,16 +16180,29 @@ class TaskchutePlugin extends obsidian.Plugin {
     this.recordTaskchuteUiRefreshDiagnostic("bridge_inbound_ui_refresh_session_finalized", {
       refresh_session_id: session.id,
       kickoff_reasons: session.kickoffReasons,
+      joined_session_count: session.joinCount,
+      session_started_at: session.startedAt,
+      session_ended_at: session.endedAt,
       pending_fetch_pass_count: session.passCount,
+      pending_pass_summaries: session.passSummaries,
+      pending_first_sequence: session.firstServerSequence,
+      pending_last_sequence: session.lastServerSequence,
       visible_mutation_count: session.visibleMutationCount,
+      dirty_transition_count: session.dirtyTransitionCount,
       external_data_invalidation_detected: session.externalInvalidationDetected,
       suppressed_refresh_request_count: session.suppressedRefreshRequestCount,
+      active_apply_save_verify_count: session.activeOperationCount,
+      max_active_apply_save_verify_count: session.maxActiveOperationCount,
       final_refresh_executed: session.finalRefreshExecuted,
       final_refresh_reason: session.finalRefreshReason,
       no_refresh_reason: session.noRefreshReason,
       reload_method: session.finalRefreshExecuted ? "patchTaskchuteViewsFromExternalSync" : "none",
       view_instance_action: "reused",
       terminal_state: session.terminalState,
+      generation_before_refresh: generationBeforeRefresh,
+      generation_after_refresh: Math.max(0, Number(this.taskchuteDataGeneration || 0)),
+      rendered_generation_before_refresh: renderedGenerationBeforeRefresh,
+      rendered_generation_after_refresh: Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0)),
       ui_refresh_error: error
     });
     this.bridgeInboundUiRefreshSession = null;
@@ -16389,16 +16496,30 @@ class TaskchutePlugin extends obsidian.Plugin {
       if (refreshDecision.refresh && this.hasOpenTaskchuteViews() && !mobileHidden) {
         const joinedInboundSession = !!(this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active);
         await this.patchTaskchuteViewsFromExternalSync({ externalSync: true, preserveScroll: true, reloadSettings: shouldReloadSettings || this.pendingExternalSettingsReload || hasLateExternalChange });
-        if (!joinedInboundSession) this.markTaskchuteViewsRendered("external_change_rendered");
-        this.recordTaskchuteUiRefreshDiagnostic("taskchute_external_refresh_executed", {
-          refresh_decision: "refresh",
-          final_refresh_executed: true,
-          final_refresh_reason: refreshDecision.reason,
-          reload_method: "flushExternalRefresh->patchTaskchuteViewsFromExternalSync",
-          view_instance_action: "reused",
-          generation_after_render: this.lastRenderedTaskchuteGeneration,
-          terminal_state: "rendered"
-        });
+        if (joinedInboundSession) {
+          this.recordTaskchuteUiRefreshDiagnostic("taskchute_external_refresh_joined_inbound_session", {
+            refresh_session_id: this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.id,
+            kickoff_reasons: this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.kickoffReasons,
+            joined_active_session: true,
+            refresh_decision: "suppressed",
+            final_refresh_executed: false,
+            no_refresh_reason: "joined_active_inbound_session",
+            reload_method: "none",
+            view_instance_action: "reused",
+            terminal_state: "joined"
+          });
+        } else {
+          this.markTaskchuteViewsRendered("external_change_rendered");
+          this.recordTaskchuteUiRefreshDiagnostic("taskchute_external_refresh_executed", {
+            refresh_decision: "refresh",
+            final_refresh_executed: true,
+            final_refresh_reason: refreshDecision.reason,
+            reload_method: "flushExternalRefresh->patchTaskchuteViewsFromExternalSync",
+            view_instance_action: "reused",
+            generation_after_render: this.lastRenderedTaskchuteGeneration,
+            terminal_state: "rendered"
+          });
+        }
       } else if (!refreshDecision.refresh) {
         this.recordTaskchuteUiRefreshDiagnostic("taskchute_external_refresh_noop", {
           refresh_decision: "no_refresh",
@@ -20472,6 +20593,7 @@ class TaskchutePlugin extends obsidian.Plugin {
           if (!isContinuation && await this.bridgeLocalTaskIdExists(taskId)) { skippedCount++; continue; }
 
           let result = null;
+          beginTaskchuteUiRefreshSessionOperation(uiRefreshHandle.session);
           try {
             result = await this.applyBridgeInboundEventThroughRegistry(event);
           } catch (e) {
@@ -23422,6 +23544,21 @@ class TaskchutePlugin extends obsidian.Plugin {
             stoppedReason = formatBridgeInboundApplyFailure(event, "payload_json解析に失敗したため停止しました。");
             break;
           }
+          if (eventType === "TaskCreated" || eventType === "TaskUpdated") {
+            this.recordBridgeStructuredDiagnostic({
+              level: "info",
+              category: "apply",
+              phase: "inbound_event_persist_verify_completed",
+              reason: "post_save_verified",
+              event,
+              status: "verified",
+              message: `${eventType}の保存・再読込・検証が完了しました。`,
+              detail: {
+                apply_status: String(result.apply_status || "applied"),
+                verified: result.verified !== false
+              }
+            });
+          }
           const payload = parseBridgeEventPayload(event);
           const taskId = String(payload.task_id || event && event.task_id || "").trim();
           const projectId = String(payload.project_id || "").trim();
@@ -23444,6 +23581,8 @@ class TaskchutePlugin extends obsidian.Plugin {
             };
             this.recordBridgeStructuredDiagnostic({ level: "error", category: "apply", phase: eventType === "TaskCreated" ? "taskcreated_apply_exception" : "apply_exception", reason: "apply_exception", event, status: "error", message: `${eventType}反映中に例外が発生しました。`, detail: errorDetail });
             result = this.buildBridgeInboundApplyFailure(event, "apply_exception", `${eventType}反映中にエラーが発生しました。`, true, { detail: errorDetail, error_detail: errorDetail });
+          } finally {
+            endTaskchuteUiRefreshSessionOperation(uiRefreshHandle.session);
           }
           if (!result || !result.ok) {
             failedCount++;
@@ -23832,7 +23971,15 @@ class TaskchutePlugin extends obsidian.Plugin {
             reason: ack && ack.ok ? "ack_ok" : "ack_failed",
             event,
             status: ack && ack.ok ? "acknowledged" : "error",
-            message: ack && ack.message || ""
+            message: ack && ack.message || "",
+            detail: {
+              ack_http_status: Math.max(0, Math.floor(Number(ack && ack.httpStatus || 0))),
+              server_ack_committed: !!(ack && ack.serverAcked),
+              cursor_persisted: !!(ack && ack.cursorPersisted),
+              cursor_advanced: !!(ack && ack.cursorAdvanced),
+              cursor_before: ack && ack.cursorBefore != null ? ack.cursorBefore : this.getBridgeInboundCurrentCursor(),
+              cursor_after: ack && ack.cursorAfter != null ? ack.cursorAfter : this.getBridgeInboundCurrentCursor()
+            }
           });
           if (eventType === "TaskMoved") {
             this.recordBridgeTaskMovedInboundDiagnostic(ack && ack.serverAcked ? "taskmoved_ack_finished" : "taskmoved_ack_skipped_reason", event, {

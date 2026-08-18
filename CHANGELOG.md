@@ -8,6 +8,32 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.76 - 2026-08-19
+
+Type: Runtime BRAT Prerelease candidate for device testing
+
+### Changed
+
+- overlapping startup / focus / visibility / resume kickoffをactiveまたはqueuedなmobile catch-up sessionへjoinし、別follow-up sessionによる複数final refreshを防止した。
+- inbound eventのapply / save / verify中はUI sessionをfinalizeせず、terminal後にauthoritative full refreshを最大1回だけ行う。
+- final refreshで`TaskchuteView.refresh()`のrun generationを進め、先行refreshの古いprefix snapshotが最終A/B/C表示を上書きする競合を防止した。
+- per-event apply / post-save verification / Ack / cursor safetyは変更せず、session/pass/sequence/active-operation/final-generation diagnosticsを追加した。
+- `manifest.json`を`0.6.76`へ更新した。
+
+### Verification
+
+- v0.6.76 backlog final UI focused synthetic 14 cases: PASS
+- all standalone repository tests (18 files): PASS
+- `node --check .\main.js`: PASS
+- `git diff --check`: PASS
+- v0.6.76 real Vault / mobile backlog retest: `NOT_VERIFIED`
+- plugin full matrix: `NOT_VERIFIED`
+- Delivery state before integration/publication: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.76.md`](docs/release/v0.6.76.md)
+
+---
+
 ## v0.6.75 - 2026-08-18
 
 Type: Runtime BRAT Prerelease for device testing
@@ -24,8 +50,8 @@ Type: Runtime BRAT Prerelease for device testing
 
 - v0.6.75 visible-dependency focused synthetic 16 cases: PASS
 - v0.6.72 / v0.6.73 / v0.6.74 refresh regressionsと全standalone repository tests: PASS
-- v0.6.75 real Vault Edge-to-Obsidian focus retest: `NOT_VERIFIED`
-- backlog catch-up real-device test: `NOT_RUN`
+- v0.6.75 real Vault Edge-to-Obsidian focus retest: `PASS`
+- backlog catch-up real-device test: `FAIL`。seq 2524〜2529はmobile appliedだがvisible reload 2回以上、mobile UIはAのみでB/C欠落。mobile physicalは未取得。
 - plugin full matrix: `NOT_VERIFIED`
 - Published immutable BRAT Prerelease: annotated tag object `e5b0309a223b3004391400bfb53f516fe12165e5`, peeled target `38a0facf1c8def2426e10119496e71816376d6f8`
 - Release assets `main.js` / `manifest.json` / `styles.css`: tagged and downloaded size/SHA256 match

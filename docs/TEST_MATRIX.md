@@ -2,11 +2,11 @@
 
 ## 基準と読み方
 
-- 対象実装・配布済みcheckpoint: immutable `v0.6.75` BRAT Prerelease、tag target `38a0facf1c8def2426e10119496e71816376d6f8`（focus-return duplicate create stormをexplicit visible dependency baselineで修正。plugin全体 / full matrixは`NOT_VERIFIED`）
-- v0.6.74のwindow-focus no-change device testはduplicate `create` burstによるvisible reloadで`FAIL`。v0.6.75 synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
+- 対象実装: `v0.6.76` candidate。最新配布済みcheckpointはimmutable `v0.6.75` BRAT Prerelease、tag target `38a0facf1c8def2426e10119496e71816376d6f8`。
+- v0.6.75 device evidenceはwindow-focus no-changeが`PASS`、6-event backlog visible convergenceが`FAIL`。v0.6.76 synthetic PASSはdevice PASSへ昇格しない。
+- Delivery state (v0.6.76 candidate): Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
-- dev / remote / mobile列と`Status`列は、いずれもv0.6.75についての判定を示す。
+- dev / remote / mobile列と`Status`列は、いずれもv0.6.76についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
 - Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
@@ -297,7 +297,27 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | VISIBLE-DEPENDENCY-CHANGE-01: modify / delete / renameの実変更 | `PASS` | `NOT_VERIFIED` |
 | VISIBLE-DEPENDENCY-BRIDGE-01: pending zeroは0 refresh、visible mutationは最終1 refresh | `PASS` | `NOT_VERIFIED` |
 
-## Current v0.6.75 Matrix
+## v0.6.75 Device Evidence
+
+| Test case | Result | Evidence |
+|---|---|---|
+| WINDOW-FOCUS-NOCHANGE-REFRESH-01 | `PASS` | TaskChuteを開いたままEdgeへ移動し、意図的data changeなしでObsidianへ復帰。sync表示は出たがvisible reloadは0回。 |
+| UI-REFRESH-BACKLOG-01 | `FAIL` | mobile backlogはseq 2524/2525 A `T-0686 / E-20260819-0015`、2526/2527 B `T-0687 / E-20260819-0016`、2528/2529 C `T-0688 / E-20260819-0017`。resume前6/6 not_applied、resume後6/6 mobile applied。visible reloadは2回以上でmobile UIはAのみ、B/C欠落。dev / remote physicalはA/B/C、mobile physicalは未取得のためUI staleとphysical不整合の実機判別は未完了。 |
+
+## v0.6.76 Synthetic Evidence
+
+| Scope | Synthetic / static | Device |
+|---|---|---|
+| UI-REFRESH-BACKLOG-FINAL-01: exact 6-event A create/update, B create/update, C create/update | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-BACKLOG-MULTIPASS-01: 3 passを1 sessionへjoin、final refresh 1回 | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-OVERLAP-01: active / queued kickoffを同じphysical catch-upへjoin | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-ACTIVE-OP-01: apply/save/verify中はfinalize禁止 | `PASS` | `NOT_VERIFIED` |
+| UI-REFRESH-STALE-PREFIX-01: older A-only refreshがfinal A/B/Cを上書きしない | `PASS` | `NOT_VERIFIED` |
+| no-change / visible dependency v0.6.75 regressions | `PASS` | `NOT_VERIFIED` |
+
+v0.6.76 focused testは14 cases、repository standalone testsは18 filesすべてPASSした。これは実装証跡であり、`UI-REFRESH-BACKLOG-01`のcurrent device statusは`NOT_VERIFIED`、v0.6.76全体も`NOT_VERIFIED`とする。
+
+## Current v0.6.76 Matrix
 
 | Area | Test case | dev | remote | mobile | Last verified version | Status | Evidence / Notes |
 |---|---|---|---|---|---|---|---|
@@ -311,7 +331,7 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | Inbound Ack / cursor | CURSOR-MERGE-01: latest dataへmonotonic merge | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic PASS。外部reloadを伴う実data.json競合は未確認。 |
 | Mobile rescue | MOBILE-RESCUE-01: recoverable Ack / cursor stopからdrain再開 | `NOT_APPLICABLE` | `NOT_APPLICABLE` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic / structural PASS。実mobile rescueは未実施。 |
 | UI refresh coalescing | WINDOW-FOCUS-NOCHANGE-REFRESH-01: Edgeからfocus復帰、変更なし | `NOT_VERIFIED` | `NOT_APPLICABLE` | `NOT_APPLICABLE` | none | `NOT_VERIFIED` | v0.6.74 device testはduplicate create stormでFAIL。v0.6.75 focused syntheticはuntracked / tracked-present / tracked-absent分類と20件burst no-opを確認。実機再試験前。 |
-| UI refresh coalescing | UI-REFRESH-BACKLOG-01: backlog multi-pass後にfinal refresh最大1回 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.74はfocus-return FAILで停止したためdevice `NOT_RUN`。v0.6.75 Bridge coalescing regressionはsynthetic PASSだが実機未確認。 |
+| UI refresh coalescing | UI-REFRESH-BACKLOG-01: backlog multi-pass後にfinal refresh最大1回 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.75では6 eventがmobile appliedでもvisible reload 2回以上、最終UIはAのみでFAIL。v0.6.76 focused syntheticはPASSしたがcurrent device retest前。 |
 | UI refresh coalescing | UI-REFRESH-EXTERNAL-CHANGE-01: relevant external changeを1回反映 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | relevant change generationとactive inbound session joinのsynthetic PASS。Obsidian Sync実データは未確認。 |
 | TaskCreated | 通常taskを作成し、他2端末のMarkdown/UIとAckを確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | `bridge-v6.5-rc1-checklist.md`に三端末起点PASSあり。ただし後続のTaskCreated guard / collision変更を含むv0.6.56回帰は未記録。 |
 | TaskCreated | TASKCREATED-SECTION-TOP-ORDER-01: exact placement v1でsection先頭を再現 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.71 | `NOT_VERIFIED` | v0.6.71のT-0670 / E-20260818-0004は三端末PASS。v0.6.72 current実機回帰は未実施。 |
@@ -355,7 +375,7 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | offline recovery | 通信断中の操作、復帰後drain、重複なし | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | retry実装はある。長時間・圏外・OS停止を含む実機保証なし。 |
 | mobile hidden / resume drain | hidden中fetch/apply/Ackなし、visible後再開 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3でPASS記録あり。v0.6.56での長時間hidden / resume回帰は未記録。 |
 
-v0.6.65のtargeted interrupt-continuation scope、v0.6.70のTaskMoved Undo / Redo、v0.6.71のTaskCreated placement / date move / section handoffにはhistorical device PASS evidenceがある。v0.6.72からv0.6.74のfocus / idle no-change device testは`FAIL`、backlogは`NOT_RUN`である。v0.6.75はfocused synthetic確認のみで、current device rowsとplugin full matrixは`NOT_VERIFIED`を維持する。
+v0.6.65のtargeted interrupt-continuation scope、v0.6.70のTaskMoved Undo / Redo、v0.6.71のTaskCreated placement / date move / section handoffにはhistorical device PASS evidenceがある。v0.6.75はfocus no-changeをPASSしたがbacklog visible convergenceをFAILした。v0.6.76はfocused synthetic確認のみで、current device rowsとplugin full matrixは`NOT_VERIFIED`を維持する。
 
 ## Historical Evidence
 
