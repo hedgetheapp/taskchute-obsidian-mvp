@@ -11714,6 +11714,34 @@ function decideTaskchuteOpenBoardStatChange(input = {}) {
   return { invalidate: true, reason: "external_taskchute_markdown_change" };
 }
 
+function decideTaskchuteVisibleDependencyInvalidation(input = {}) {
+  const state = String(input.baselineState || "untracked").trim();
+  const eventKind = String(input.eventKind || "other").trim().toLowerCase();
+  const nextExists = !!input.nextExists;
+  const previousStat = String(input.previousStat || "");
+  const nextStat = String(input.nextStat || "");
+  const previousContent = String(input.previousContent || "");
+  const nextContent = String(input.nextContent || "");
+  const contentAvailable = !!(previousContent && nextContent);
+  if (state === "untracked") return { invalidate: false, reason: "untracked_path_no_visible_invalidation" };
+  if (state === "tracked_absent") {
+    if (nextExists) return { invalidate: true, reason: "tracked_absent_became_present" };
+    return { invalidate: false, reason: "tracked_absent_still_absent" };
+  }
+  if (!nextExists || eventKind === "delete") return { invalidate: true, reason: "tracked_present_became_absent" };
+  if (contentAvailable && previousContent === nextContent) {
+    return {
+      invalidate: false,
+      reason: eventKind === "create" ? "duplicate_create_existing_content_unchanged" : "tracked_content_unchanged"
+    };
+  }
+  if (contentAvailable) return { invalidate: true, reason: "tracked_visible_content_changed" };
+  if (previousStat && nextStat && previousStat === nextStat) {
+    return { invalidate: false, reason: "content_signature_unavailable_stat_unchanged" };
+  }
+  return { invalidate: true, reason: "content_signature_unavailable_stat_changed" };
+}
+
 function normalizeTaskchuteInvalidationSource(value) {
   const source = String(value || "").trim();
   const allowed = new Set([
@@ -11786,6 +11814,8 @@ class TaskchutePlugin extends obsidian.Plugin {
       this.pluginDataStatKey = "";
       this.boardExternalStatKeys = new Map();
       this.boardExternalContentSignatures = new Map();
+      this.taskchuteVisibleDependencyBaselines = new Map();
+      this.taskchuteVisibleDependencyBaselineRefreshPromise = Promise.resolve();
       this._tcWakeSyncGuardRequired = true;
       this._tcLastTaskchuteWriteActivityAt = Date.now();
       this._tcLastTaskchutePreWriteGuardAt = 0;
@@ -15322,6 +15352,7 @@ class TaskchutePlugin extends obsidian.Plugin {
     for (const key of Array.from(this.boardExternalContentSignatures.keys())) {
       if (!seen.has(key)) this.boardExternalContentSignatures.delete(key);
     }
+    await this.refreshTaskchuteVisibleDependencyBaseline("open-board-baseline-update");
   }
 
   async getPathExternalContentSignature(path) {
@@ -15336,17 +15367,139 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
   }
 
+  collectTaskchuteVisibleDependencyDescriptors() {
+    const descriptors = new Map();
+    const add = (path, category) => {
+      const target = safePath(path);
+      if (!target || descriptors.has(target)) return;
+      descriptors.set(target, { path: target, category: String(category || "other_taskchute") });
+    };
+    try {
+      const leaves = this.app && this.app.workspace ? this.app.workspace.getLeavesOfType(VIEW_TYPE) || [] : [];
+      for (const leaf of leaves) {
+        const view = leaf && leaf.view;
+        const date = view && view.selectedDate ? view.selectedDate : this.getToday();
+        add(this.getTaskchutePath(date), "open_board");
+        add(this.getRoutineHistoryPath(date), "routine_definition");
+        const tasks = Array.isArray(view && view.latestTasks) ? view.latestTasks : [];
+        for (const task of tasks) {
+          const routineSource = String(task && (task.routineSource || task.routine_source || task.entryMeta && task.entryMeta.routine_source) || "").trim();
+          const source = isRoutineHistoryTarget(task) && routineSource ? routineSource : String(task && task.file || "").trim();
+          if (!source) continue;
+          add(`${this.settings && this.settings.tasksFolder || "Taskchute/Tasks"}/${source}.md`, isRoutineHistoryTarget(task) ? "routine_definition" : "task_definition");
+        }
+      }
+    } catch (e) {}
+    return Array.from(descriptors.values());
+  }
+
+  classifyTaskchuteVisibleDependencyPath(path) {
+    const target = safePath(path);
+    if (!target) return "other_taskchute";
+    if (this.isRoutineHistoryPath(target)) return "routine_definition";
+    const systemFolder = this.getTaskchuteSystemFolder ? safePath(this.getTaskchuteSystemFolder()) : "";
+    if (target === (this.getTaskchuteIndexPath ? safePath(this.getTaskchuteIndexPath()) : "")) return "index_cache";
+    if (systemFolder && target.startsWith(`${systemFolder}/`)) return "system_internal";
+    const tasksFolder = safePath(this.settings && this.settings.tasksFolder || "Taskchute/Tasks");
+    if (tasksFolder && target.startsWith(`${tasksFolder}/`)) return "task_definition";
+    if (/\/(?:\d{4}-\d{2}-\d{2}) Taskchute\.md$/i.test(`/${target}`)) return "open_board";
+    return "other_taskchute";
+  }
+
+  async readTaskchuteVisibleDependencySnapshot(path, category = "other_taskchute") {
+    const target = safePath(path);
+    const statKey = target ? await this.getPathExternalStatKey(target) : "";
+    const exists = !!(statKey && statKey !== "missing");
+    const contentFingerprint = exists ? await this.getPathExternalContentSignature(target) : "";
+    return {
+      tracked: true,
+      exists,
+      statKey,
+      contentFingerprint,
+      category: String(category || "other_taskchute")
+    };
+  }
+
+  async refreshTaskchuteVisibleDependencyBaseline(reason = "render-current") {
+    const descriptors = this.collectTaskchuteVisibleDependencyDescriptors();
+    const refresh = async () => {
+      const next = new Map();
+      const snapshots = await Promise.all(descriptors.map(async descriptor => [
+        descriptor.path,
+        await this.readTaskchuteVisibleDependencySnapshot(descriptor.path, descriptor.category)
+      ]));
+      snapshots.forEach(([path, snapshot]) => next.set(path, snapshot));
+      this.taskchuteVisibleDependencyBaselines = next;
+      this.recordTaskchuteUiRefreshDiagnostic("taskchute_visible_dependency_baseline_refreshed", {
+        refresh_decision: "baseline_current",
+        no_refresh_reason: String(reason || "render-current"),
+        visible_dependency_count: next.size,
+        final_refresh_executed: false,
+        terminal_state: "baseline_current"
+      });
+      return next;
+    };
+    this.taskchuteVisibleDependencyBaselineRefreshPromise = Promise.resolve(this.taskchuteVisibleDependencyBaselineRefreshPromise)
+      .catch(() => {})
+      .then(refresh);
+    return this.taskchuteVisibleDependencyBaselineRefreshPromise;
+  }
+
+  getTaskchuteVisibleDependencyBaselineState(path) {
+    const target = safePath(path);
+    const baseline = this.taskchuteVisibleDependencyBaselines instanceof Map
+      ? this.taskchuteVisibleDependencyBaselines.get(target)
+      : null;
+    if (!baseline || baseline.tracked !== true) return { state: "untracked", baseline: null };
+    return { state: baseline.exists ? "tracked_present" : "tracked_absent", baseline };
+  }
+
+  recordTaskchuteVisibleDependencyInvalidationDiagnostic(detail = {}) {
+    const generationBefore = Math.max(0, Number(detail.generation_before != null ? detail.generation_before : this.taskchuteDataGeneration || 0));
+    this.recordTaskchuteUiRefreshDiagnostic("taskchute_visible_dependency_event_classified", {
+      invalidation_event_kind: String(detail.event_kind || "other"),
+      invalidation_path: safePath(detail.path),
+      invalidation_path_category: String(detail.path_category || "other_taskchute"),
+      visible_dependency: !!detail.visible_dependency,
+      dependency_baseline_state: String(detail.baseline_state || "untracked"),
+      previous_stat_key: String(detail.previous_stat_key || ""),
+      next_stat_key: String(detail.next_stat_key || ""),
+      previous_content_fingerprint: String(detail.previous_content_fingerprint || ""),
+      next_content_fingerprint: String(detail.next_content_fingerprint || ""),
+      dependency_current_exists: !!detail.current_exists,
+      classification_reason: String(detail.classification_reason || ""),
+      generation_before: generationBefore,
+      generation_after: Math.max(0, Number(detail.generation_after != null ? detail.generation_after : generationBefore)),
+      refresh_queued: !!detail.refresh_queued,
+      refresh_decision: detail.refresh_queued ? "refresh" : "no_refresh",
+      final_refresh_executed: false,
+      no_refresh_reason: detail.refresh_queued ? "" : String(detail.classification_reason || ""),
+      terminal_state: "classified"
+    });
+  }
+
   async updateTaskchutePathExternalBaseline(path) {
     const target = safePath(path);
     if (!target) return false;
     if (!this.boardExternalStatKeys || !(this.boardExternalStatKeys instanceof Map)) this.boardExternalStatKeys = new Map();
     if (!this.boardExternalContentSignatures || !(this.boardExternalContentSignatures instanceof Map)) this.boardExternalContentSignatures = new Map();
     const openPaths = new Set(this.collectOpenTaskchuteBoardPaths().map(value => safePath(value)).filter(Boolean));
-    if (!this.boardExternalStatKeys.has(target) && !openPaths.has(target)) return false;
+    const visibleTracked = this.taskchuteVisibleDependencyBaselines instanceof Map && this.taskchuteVisibleDependencyBaselines.has(target);
+    if (!this.boardExternalStatKeys.has(target) && !openPaths.has(target) && !visibleTracked) return false;
     const key = await this.getPathExternalStatKey(target);
     const signature = await this.getPathExternalContentSignature(target);
     if (key) this.boardExternalStatKeys.set(target, key);
     if (signature) this.boardExternalContentSignatures.set(target, signature);
+    if (this.taskchuteVisibleDependencyBaselines instanceof Map && this.taskchuteVisibleDependencyBaselines.has(target)) {
+      const previous = this.taskchuteVisibleDependencyBaselines.get(target) || {};
+      this.taskchuteVisibleDependencyBaselines.set(target, {
+        tracked: true,
+        exists: !!(key && key !== "missing"),
+        statKey: key,
+        contentFingerprint: signature,
+        category: previous.category || "other_taskchute"
+      });
+    }
     return !!(key || signature);
   }
 
@@ -15362,23 +15515,61 @@ class TaskchutePlugin extends obsidian.Plugin {
       const target = safePath(path);
       if (!target) continue;
       seen.add(target);
+      const dependency = this.getTaskchuteVisibleDependencyBaselineState(target);
+      const dependencyBaseline = dependency.baseline || {};
       const nextKey = await this.getPathExternalStatKey(target);
       if (!nextKey) continue;
-      const prevKey = this.boardExternalStatKeys.get(target);
+      const prevKey = this.boardExternalStatKeys.get(target) || String(dependencyBaseline.statKey || "");
       this.boardExternalStatKeys.set(target, nextKey);
-      if (!prevKey) continue;
+      if (!prevKey) {
+        if (dependency.state === "untracked") {
+          const snapshot = await this.readTaskchuteVisibleDependencySnapshot(target, "open_board");
+          this.taskchuteVisibleDependencyBaselines.set(target, snapshot);
+        }
+        continue;
+      }
       if (prevKey === nextKey) continue;
-      const previousSignature = this.boardExternalContentSignatures.get(target) || "";
+      const baseline = dependencyBaseline;
+      const previousSignature = String(baseline.contentFingerprint || this.boardExternalContentSignatures.get(target) || "");
       const nextSignature = await this.getPathExternalContentSignature(target);
       if (nextSignature) this.boardExternalContentSignatures.set(target, nextSignature);
-      const statDecision = decideTaskchuteOpenBoardStatChange({
-        previousStat: prevKey,
+      const nextExists = nextKey !== "missing";
+      const statDecision = decideTaskchuteVisibleDependencyInvalidation({
+        baselineState: dependency.state,
+        eventKind: "poll",
+        nextExists,
+        previousStat: String(baseline.statKey || prevKey),
         nextStat: nextKey,
         previousContent: previousSignature,
-        nextContent: nextSignature,
-        internalWriteActive: isRecentTaskchuteInternalWrite(target)
+        nextContent: nextSignature
+      });
+      const generationBefore = this.taskchuteDataGeneration;
+      this.recordTaskchuteVisibleDependencyInvalidationDiagnostic({
+        event_kind: "poll",
+        path: target,
+        path_category: baseline.category || "open_board",
+        visible_dependency: dependency.state !== "untracked",
+        baseline_state: dependency.state,
+        previous_stat_key: String(baseline.statKey || prevKey),
+        next_stat_key: nextKey,
+        previous_content_fingerprint: previousSignature,
+        next_content_fingerprint: nextSignature,
+        current_exists: nextExists,
+        classification_reason: statDecision.reason,
+        generation_before: generationBefore,
+        generation_after: statDecision.invalidate ? generationBefore + 1 : generationBefore,
+        refresh_queued: statDecision.invalidate
       });
       if (!statDecision.invalidate) {
+        if (dependency.state !== "untracked") {
+          this.taskchuteVisibleDependencyBaselines.set(target, {
+            tracked: true,
+            exists: nextExists,
+            statKey: nextKey,
+            contentFingerprint: nextSignature || previousSignature,
+            category: baseline.category || "open_board"
+          });
+        }
         this.recordTaskchuteUiRefreshDiagnostic("taskchute_focus_stat_change_content_unchanged", {
           idle_reason: "open-board-stat-poll",
           refresh_decision: "no_refresh",
@@ -15409,30 +15600,56 @@ class TaskchutePlugin extends obsidian.Plugin {
     if (!this.boardExternalStatKeys || !(this.boardExternalStatKeys instanceof Map)) this.boardExternalStatKeys = new Map();
     if (!this.boardExternalContentSignatures || !(this.boardExternalContentSignatures instanceof Map)) this.boardExternalContentSignatures = new Map();
     let shouldQueue = false;
-    let noRefreshReason = "view_already_current";
+    let noRefreshReason = "untracked_path_no_visible_invalidation";
+    const invalidatedPaths = [];
     for (const target of relevantPaths) {
-      if (!this.boardExternalStatKeys.has(target)) {
-        shouldQueue = true;
-        continue;
+      const dependency = this.getTaskchuteVisibleDependencyBaselineState(target);
+      const baseline = dependency.baseline || {};
+      const previousStat = String(baseline.statKey || "");
+      const previousContent = String(baseline.contentFingerprint || "");
+      const snapshot = await this.readTaskchuteVisibleDependencySnapshot(target, baseline.category || this.classifyTaskchuteVisibleDependencyPath(target));
+      const nextStat = snapshot.statKey;
+      const nextContent = snapshot.contentFingerprint;
+      if (dependency.state !== "untracked") {
+        if (nextStat) this.boardExternalStatKeys.set(target, nextStat);
+        if (nextContent) this.boardExternalContentSignatures.set(target, nextContent);
       }
-      const previousStat = this.boardExternalStatKeys.get(target) || "";
-      const previousContent = this.boardExternalContentSignatures.get(target) || "";
-      const nextStat = await this.getPathExternalStatKey(target);
-      const nextContent = await this.getPathExternalContentSignature(target);
-      if (nextStat) this.boardExternalStatKeys.set(target, nextStat);
-      if (nextContent) this.boardExternalContentSignatures.set(target, nextContent);
-      const decision = decideTaskchuteOpenBoardStatChange({
+      const decision = decideTaskchuteVisibleDependencyInvalidation({
+        baselineState: dependency.state,
+        eventKind: kind,
+        nextExists: snapshot.exists,
         previousStat,
         nextStat,
         previousContent,
-        nextContent,
-        internalWriteActive: isRecentTaskchuteInternalWrite(target)
+        nextContent
       });
-      if (decision.invalidate) shouldQueue = true;
-      else noRefreshReason = decision.reason;
+      const generationBefore = this.taskchuteDataGeneration;
+      this.recordTaskchuteVisibleDependencyInvalidationDiagnostic({
+        event_kind: kind,
+        path: target,
+        path_category: baseline.category || snapshot.category,
+        visible_dependency: dependency.state !== "untracked",
+        baseline_state: dependency.state,
+        previous_stat_key: previousStat,
+        next_stat_key: nextStat,
+        previous_content_fingerprint: previousContent,
+        next_content_fingerprint: nextContent,
+        current_exists: snapshot.exists,
+        classification_reason: decision.reason,
+        generation_before: generationBefore,
+        generation_after: decision.invalidate ? generationBefore + 1 : generationBefore,
+        refresh_queued: decision.invalidate
+      });
+      if (decision.invalidate) {
+        shouldQueue = true;
+        invalidatedPaths.push(target);
+      } else {
+        noRefreshReason = decision.reason;
+        if (dependency.state !== "untracked") this.taskchuteVisibleDependencyBaselines.set(target, snapshot);
+      }
     }
     if (shouldQueue) {
-      this.queueExternalRefresh(`${kind}:${relevantPaths[0]}`, { paths: relevantPaths });
+      this.queueExternalRefresh(`${kind}:${invalidatedPaths[0]}`, { paths: invalidatedPaths });
       return true;
     }
     this.recordTaskchuteUiRefreshDiagnostic("taskchute_vault_event_content_unchanged", {
@@ -15493,7 +15710,20 @@ class TaskchutePlugin extends obsidian.Plugin {
 
     Promise.resolve(this.queueTaskchuteRelevantExternalRefresh(kind, paths)).catch(error => {
       console.error("Taskchute relevant external refresh classification error", error);
-      this.queueExternalRefresh(`${kind}:${relevantPath}`, { paths: paths.filter(p => this.isTaskchuteRelatedPath(p)) });
+      const dependency = this.getTaskchuteVisibleDependencyBaselineState(relevantPath);
+      if (dependency.state !== "untracked") {
+        this.queueExternalRefresh(`${kind}:${relevantPath}:classification-failed`, { paths: [relevantPath] });
+      } else {
+        this.recordTaskchuteVisibleDependencyInvalidationDiagnostic({
+          event_kind: kind,
+          path: relevantPath,
+          path_category: "other_taskchute",
+          visible_dependency: false,
+          baseline_state: "untracked",
+          classification_reason: "classification_error_untracked_no_visible_invalidation",
+          refresh_queued: false
+        });
+      }
     });
   }
 
@@ -15646,6 +15876,21 @@ class TaskchutePlugin extends obsidian.Plugin {
         bridge_active_session: !!(detail.bridge_active_session != null ? detail.bridge_active_session : this.bridgeInboundUiRefreshSession && this.bridgeInboundUiRefreshSession.active),
         reload_method: String(detail.reload_method || "").trim(),
         view_instance_action: String(detail.view_instance_action || "").trim(),
+        invalidation_event_kind: String(detail.invalidation_event_kind || "").trim(),
+        invalidation_path: safePath(detail.invalidation_path),
+        invalidation_path_category: String(detail.invalidation_path_category || "").trim(),
+        visible_dependency: !!detail.visible_dependency,
+        visible_dependency_count: Math.max(0, Math.floor(Number(detail.visible_dependency_count || 0))),
+        dependency_baseline_state: String(detail.dependency_baseline_state || "").trim(),
+        previous_stat_key: String(detail.previous_stat_key || "").trim(),
+        next_stat_key: String(detail.next_stat_key || "").trim(),
+        previous_content_fingerprint: String(detail.previous_content_fingerprint || "").trim(),
+        next_content_fingerprint: String(detail.next_content_fingerprint || "").trim(),
+        dependency_current_exists: !!detail.dependency_current_exists,
+        classification_reason: String(detail.classification_reason || "").trim(),
+        generation_before: Math.max(0, Math.floor(Number(detail.generation_before || 0))),
+        generation_after: Math.max(0, Math.floor(Number(detail.generation_after || 0))),
+        refresh_queued: !!detail.refresh_queued,
         pending_fetch_pass_count: Math.max(0, Math.floor(Number(detail.pending_fetch_pass_count || 0))),
         visible_mutation_count: Math.max(0, Math.floor(Number(detail.visible_mutation_count || 0))),
         external_data_invalidation_detected: !!detail.external_data_invalidation_detected,
@@ -15704,6 +15949,9 @@ class TaskchutePlugin extends obsidian.Plugin {
       Math.max(0, Number(this.taskchuteDataGeneration || 0))
     );
     this.lastRenderedTaskchuteVisiblePluginDataSignature = this.getTaskchuteVisiblePluginDataSignature();
+    Promise.resolve(this.refreshTaskchuteVisibleDependencyBaseline(source)).catch(error => {
+      console.error("Taskchute visible dependency baseline refresh error", error);
+    });
     if (source === "bootstrap_render_mark_current") {
       this.recordTaskchuteUiRefreshDiagnostic("taskchute_bootstrap_render_mark_current", {
         refresh_decision: "mark_current",
@@ -43276,6 +43524,9 @@ class TaskchuteView extends obsidian.ItemView {
       this.displayMenuColumnMode = reopenDisplayColumnMode;
       this.openDisplayMenuFromCurrentButton();
     }
+    if (this.plugin && this.plugin.refreshTaskchuteVisibleDependencyBaseline) {
+      await this.plugin.refreshTaskchuteVisibleDependencyBaseline("taskchute-view-refresh");
+    }
   }
 
   async applyExternalTaskPatch(options = {}) {
@@ -43463,6 +43714,9 @@ class TaskchuteView extends obsidian.ItemView {
     this.updateLiveActualDisplays();
     if (previousScroll) this.restoreBoardScrollSnapshot(previousScroll);
     if (options && options.editTaskId) this.focusTaskTitleEditorSoon(options.editTaskId);
+    if (this.plugin && this.plugin.refreshTaskchuteVisibleDependencyBaseline) {
+      await this.plugin.refreshTaskchuteVisibleDependencyBaseline("taskchute-external-patch");
+    }
     return true;
   }
 

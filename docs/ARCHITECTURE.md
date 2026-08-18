@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: main統合・immutable BRAT試験配布済みのv0.6.71。ordinary TaskCreatedは作成後Markdownのexact physical neighborからversioned placement snapshotを作り、inboundも保存後adjacencyを検証してからAckする。tag target `24b3a480593a03921bc3bb497842b0a14fc8cae8`由来の3 assetsは公開後downloadとのSHA256一致を確認済みで、差し替えない。syntheticはPASSしたが実機とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
+調査基準: v0.6.75 candidateのworking tree。最新immutable試験配布はv0.6.74 BRAT Prerelease（peeled target `037975902f5aac1f938c0bf71b167d118815170c`）であり、公開済みtag / Release / assetsは差し替えない。v0.6.75はvisible dependency invalidationを実装しsyntheticはPASSしたが、実Vault試験とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
 
 ## 1. 概要
 
@@ -27,13 +27,14 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.71`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.75`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
 | `tests/tmv4-basic-v0659.js` | Node標準機能だけで実行するTaskMoved v4同一section D&Dのfocused synthetic test。 |
 | `tests/taskcreated-rename-handoff-v0660.js` | pending / in-flight / sent相当のTaskCreated rename handoffを検証するfocused synthetic test。 |
 | `tests/taskcreated-placement-v0671.js` | ordinary TaskCreated v1のpost-save neighbor capture、exact inbound placement、legacy/unknown/idempotency/rename preservationを検証するfocused standalone test。 |
+| `tests/taskchute-visible-dependency-invalidation-v0675.js` | current visible dependencyのexplicit present/absent state、duplicate create burst、genuine create/modify/delete/rename、Bridge coalescingを検証するfocused standalone test。 |
 | `tests/insert-below-order-v0661.js` | explicit insert-belowの物理/visual順、refresh、rename、protected target、task-copy scopeを検証するfocused synthetic test。 |
 | `tests/tmv4-section-handoff-v0662.js` | same-section D&Dの欠落row section meta補完、保存後identity、strict conflict block、TaskMoved 1件を検証するfocused synthetic test。 |
 | `tests/tmv4-physical-context-v0663.js` | reload後runtime section空、exact physical headings、missing meta補完、strict conflict、no-op、generic add metadataを検証するfocused synthetic test。 |
@@ -226,7 +227,7 @@ apply失敗、verification失敗、hard Ack失敗ではcursorを跨がない。s
 
 v0.6.72以降はinbound data pipelineとUI refreshを分離する。`beginBridgeInboundUiRefreshSession()`がstartup / interval / focus / resume kickoffをactive sessionへjoinし、複数pending passの各eventは従来どおり個別にapply / verify / Ackする。成功したvisible mutationは`requestBridgeInboundUiRefresh()`でdirtyとして集計し、中間の`patchTaskchuteViewsFromExternalSync()`要求はsession内で抑止する。`finalizeBridgeInboundUiRefreshSession()`はpending zero、safe-stop、error等のterminal stateで、openかつvisibleなviewを最大1回だけ描画する。refresh例外はdiagnosticに閉じ、data/Ack/cursorをrollbackしない。
 
-`taskchuteDataGeneration`と`lastRenderedTaskchuteGeneration`はactual relevant changeと最後に描画した世代を表すruntime-only counterである。focus / visibility / first interactionはこの差だけをfreshness根拠とし、経過時間をreload authorityにしない。`data.json`は表示対象fieldのfingerprintをload前後で比較する。v0.6.74ではopen boardごとにstat keyとbounded content fingerprintを保持し、内部write完了・初回render直後に両baselineを更新する。background後のpollと遅延Vault eventはstat差だけでdirtyにせず、content差がある場合だけexternal Markdown invalidationを発生させる。
+`taskchuteDataGeneration`と`lastRenderedTaskchuteGeneration`はactual relevant changeと最後に描画した世代を表すruntime-only counterである。focus / visibility / first interactionはこの差だけをfreshness根拠とし、経過時間をreload authorityにしない。`data.json`は表示対象fieldのfingerprintをload前後で比較する。v0.6.75の`taskchuteVisibleDependencyBaselines`はwhole-Vault scanを行わず、open viewが実際に参照するboard / Routine history / loaded task definition集合だけを収集し、existence、stat key、bounded content fingerprint、categoryを持つ。initial/full/partial render、Bridge final render、manual reload、追跡中pathのinternal write後にbaselineをcurrentにする。Vault eventはこのbaselineに対してだけvisible invalidation authorityを持つ。
 
 ### External Vault change
 

@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current implementation and immutable test distribution: v0.6.74 BRAT Prerelease. Its annotated tag object is `1bd281abcebf84b999c39782a956d808323d2a3f` and peeled target is `037975902f5aac1f938c0bf71b167d118815170c`. v0.6.74 synchronizes open-board stat/content baselines and verifies content before invalidation. Targeted real Vault verification remains pending.
+Current implementation checkpoint: v0.6.75 candidate. Latest immutable test distribution remains v0.6.74 BRAT Prerelease. v0.6.75 distinguishes untracked paths from explicit tracked-absent visible dependencies and suppresses duplicate focus-return `create` storms. Targeted real Vault verification remains pending.
 
 ## Current Canonical
 
@@ -32,6 +32,7 @@ An unchecked procedure is not PASS evidence. Do not promote historical results t
 
 - [Changelog](../CHANGELOG.md): release/version単位の変更要約
 - [Development workflow](DEVELOPMENT_WORKFLOW.md)
+- [v0.6.75 BRAT Prerelease](release/v0.6.75.md)
 - [v0.6.74 BRAT Prerelease](release/v0.6.74.md)
 - [v0.6.73 BRAT Prerelease](release/v0.6.73.md)
 - [v0.6.72 BRAT Prerelease](release/v0.6.72.md)

@@ -8,6 +8,31 @@ For current verification status, see [`docs/TEST_MATRIX.md`](docs/TEST_MATRIX.md
 
 Historical verification recorded below is evidence for that release only. It is not automatically promoted to the current release.
 
+## v0.6.75 - 2026-08-18
+
+Type: Runtime BRAT Prerelease candidate for device testing
+
+### Changed
+
+- current TaskChute viewのinvalidation authorityを、TaskChute関連path全般ではなく、open boardと表示行が参照するtask/routine definitionから成るbounded visible dependency setへ限定した。
+- visible dependency baselineで`untracked`、`tracked_present`、`tracked_absent`を明示的に区別し、既存contentに対する重複`create`と非表示pathのeventをno-opにした。
+- tracked-absent dependencyの新規出現、tracked-present dependencyの実content変更・削除・renameは従来どおりgenuine invalidationとして扱う。
+- event kind、path category、baseline state、stat/fingerprint前後、generation前後、refresh判定を既存bounded diagnosticsへ追加した。
+- `manifest.json`を`0.6.75`へ更新した。
+
+### Verification
+
+- v0.6.75 visible-dependency focused synthetic 16 cases: PASS
+- v0.6.72 / v0.6.73 / v0.6.74 refresh regressionsと全standalone repository tests: PASS
+- v0.6.75 real Vault Edge-to-Obsidian focus retest: `NOT_VERIFIED`
+- backlog catch-up real-device test: `NOT_RUN`
+- plugin full matrix: `NOT_VERIFIED`
+- Delivery state before publication: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+
+Release notes: [`docs/release/v0.6.75.md`](docs/release/v0.6.75.md)
+
+---
+
 ## v0.6.74 - 2026-08-18
 
 Type: Runtime BRAT Prerelease for device testing
@@ -24,7 +49,8 @@ Type: Runtime BRAT Prerelease for device testing
 
 - v0.6.74 window-focus no-change focused synthetic: PASS
 - v0.6.72 / v0.6.73 refresh regressionsと全standalone repository tests: PASS
-- v0.6.74 real Vault Edge-to-Obsidian focus retest: `NOT_VERIFIED`
+- v0.6.74 real Vault Edge-to-Obsidian focus retest: `FAIL`
+- temporary local-only probe confirmed that focus return emitted a burst of `create` events for pre-existing current, historical/future board, and task-definition files. Missing open-board baseline entries were classified as `missing_open_board_baseline`, generation advanced repeatedly, and the plugin performed the visible refresh.
 - backlog catch-up real-device test: `NOT_RUN`
 - plugin full matrix: `NOT_VERIFIED`
 - Published immutable BRAT Prerelease: annotated tag object `1bd281abcebf84b999c39782a956d808323d2a3f`, peeled target `037975902f5aac1f938c0bf71b167d118815170c`

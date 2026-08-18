@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様はmain統合・BRAT試験配布済みの`v0.6.71`を基準とする。annotated tag objectは`8f5624beed25754e56a4b012a429a1a4436a453d`、peeled targetは`24b3a480593a03921bc3bb497842b0a14fc8cae8`で、公開済み配布物は固定する。v0.6.71はordinary TaskCreated exact placementを追加したが実機未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.75` candidateのworking treeを基準とする。最新immutable試験配布は`v0.6.74` BRAT Prerelease（peeled target `037975902f5aac1f938c0bf71b167d118815170c`）で、公開済みtag / Release / assetsは固定する。v0.6.75のfocused syntheticはPASSしたが実Vault未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -233,6 +233,8 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - relevant TaskChute Markdown、Routine history、表示に影響するplugin dataのexternal changeはactual invalidationとしてgenerationを進める。`data.json`の通知だけではdirtyにせず、表示対象subsetの変更を比較してからgenerationを進める。cursor、outbox、diagnostics等の非表示系writeとunrelated Vault noteはinvalidation対象にしない。clickごとのVault全体hashは行わない。
 - TaskBoardの初回open / bootstrap renderはその時点のgenerationをrender済みとして記録する。予約済みの遅延refreshはtimer発火時にもgeneration差を再確認し、既にcurrentならno-opにする。
 - open中TaskBoardの内部保存と初回render後は、そのphysical fileのstat/content baselineを即時更新する。focus復帰後のpollでmtime/sizeだけが変わり内容fingerprintが同一なら`view_already_current`としてrefreshしない。内容が異なるrelevant Markdown changeは従来どおりactual invalidationにする。
+- current viewのinvalidation authorityは、open board、そのboardにloadedされたtask definition、Routine historyのexplicit visible dependency baselineとする。baseline recordはexistenceを保持し、mapにないuntracked pathと、作成前のtracked-absent pathを区別する。
+- untracked TaskChute pathのevent、およびtracked-present pathのcontentが同一なduplicate `create`はcurrent viewをinvalidateしない。tracked-absentからpresent、tracked-presentのcontent差、delete / renameはactual visible changeとして最大1回のrefreshへcoalesceできる。
 - window focus / visibility returnでは既存TaskChute view instanceを再利用し、focusだけを理由に`setViewState`やview再生成を行わない。
 - one logical Bridge catch-upはstartup / interval / focus / resume kickoffと複数pending passを1 UI refresh sessionへjoinする。eventのfetch、apply、persist、post-save verify、Ack、cursor merge、安全停止は従来どおり個別・sequence順で行う。
 - session内で成功したvisible mutationが0件ならfinal refreshは0回、1件以上ならopenかつvisibleなTaskBoardを最大1回だけrefreshする。safe-stop前の成功prefixは1回表示し、mutation前safe-stopは0回とする。

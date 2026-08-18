@@ -295,6 +295,13 @@
 - 根拠: `buildTaskchuteContentFingerprint()`、`decideTaskchuteOpenBoardStatChange()`、`updateTaskchutePathExternalBaseline()`、`pollOpenTaskchuteBoardExternalChanges()`、`queueTaskchuteRelevantExternalRefresh()`。
 - 理由: background中はinterval pollが停止・遅延し、9秒のinternal-write markerだけが先に失効し得る。復帰後の古いstat baseline差を外部変更と誤認せず、実際のObsidian Sync変更は取りこぼさないため。
 
+## D-048: current visible dependencyのexplicit existence/content stateをVault invalidation authorityにする
+
+- 判断: open TaskChute viewのboard、Routine history、loaded rowが参照するtask definitionだけをbounded baselineとし、`tracked_present`、`tracked_absent`、`untracked`を区別する。map entryの欠落はfile absenceやcontent changeを意味しない。
+- 判断: untracked pathのeventと、tracked-present pathのcontentが同一なduplicate `create`はcurrent viewをinvalidateしない。tracked-absentからpresent、tracked-presentのcontent差、delete / renameだけをvisible invalidationにする。
+- 理由: v0.6.74実機probeで、focus復帰時に既存の非表示日boardとtask definitionsへduplicate `create` eventがburstし、open-board mapにentryがないことだけでgenerationを繰り返し進めてvisible reloadしたため。
+- 根拠: `collectTaskchuteVisibleDependencyDescriptors()`、`refreshTaskchuteVisibleDependencyBaseline()`、`decideTaskchuteVisibleDependencyInvalidation()`、`queueTaskchuteRelevantExternalRefresh()`、`tests/taskchute-visible-dependency-invalidation-v0675.js`。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。

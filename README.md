@@ -4,12 +4,12 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current implementation and immutable test distribution: `v0.6.74` BRAT Prerelease
+- Current implementation: `v0.6.75` candidate
 - Current branch: `feature/v6.6-routine-sync`
 - Release target: `037975902f5aac1f938c0bf71b167d118815170c`
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
-v0.6.73実機試験では、意図的なTaskChute data changeがなくてもEdgeからObsidianへ戻る際にvisible reloadが1回発生しました。v0.6.74はopen boardの内部保存後baselineを即時更新し、復帰後pollではmtimeだけでなく内容fingerprintも確認します。BRAT試験配布済みですが、実機再試験前で、Verified済み安定版ではありません。
+v0.6.74実機試験で、focus復帰時に既存TaskChute fileへのduplicate `create` eventがburstし、open-board baselineにないpathを一律にvisible invalidationとしていたことを確認しました。v0.6.75候補は、現在viewのboardとloaded task definitionsだけをexplicit present/absent state付きで追跡します。synthetic / structural試験は完了していますが、実機再試験前で、Verified済み安定版ではありません。
 
 ## Canonical Documentation
 

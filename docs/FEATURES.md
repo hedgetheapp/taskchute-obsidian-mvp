@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はimmutable BRAT試験配布済みのv0.6.71を現行feature inventoryとする。v0.6.71はordinary TaskCreatedの実保存後Markdownからexact placementをsnapshot化し、受信側で隣接関係を保存後検証する。syntheticと配布asset integrityはPASSだが実機は未検証で、full matrixは`NOT_VERIFIED`である。
+この一覧はv0.6.75 candidateの現行実装を対象とする。v0.6.75はcurrent viewのvisible dependencyとexplicit existence/content stateをUI invalidation authorityにする。syntheticはPASSだが実機は未検証で、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 
@@ -11,7 +11,7 @@
 - **未実装**: コード上に対象機能の本体がない。
 - **要確認**: コードだけでは運用上の完成判定ができない。
 
-「実装済み」は「v0.6.71で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
+「実装済み」は「v0.6.75で実機試験済み」を意味しない。実機保証状態は`TEST_MATRIX.md`、開発状況は`CURRENT.md`を参照する。
 
 ## TaskBoard
 
@@ -118,7 +118,7 @@
 | TaskMoved Undo / Redo Bridge | 実装済み・対象route実機PASS | D&D専用Undo batchへoperation / batch identityを付け、exact task / entryとbefore / after fingerprintを検証後だけsemantic付き履歴としてcommitする。commit後はexact semantic actionがhistory topに1件だけあることも検証する。復元前後のMarkdown検証後に`task-undo-confirmed-markdown-v4` / `task-redo-confirmed-markdown-v4`をenqueueする。v0.6.70でcross-sectionのsection / row / empty-section target、same-section reorder、duplicate-task-id multi-entryのexact continuation targetingについてforward・Undo・Redoと三端末収束を確認した。未試験範囲はTEST_MATRIXを正とする。 |
 | lifecycle classifier | 実装済み | normal / routine_occurrence / identity_conflict。 |
 | mobile resume drain | 実装済み・v0.6.74実機未試験 | hidden延期、visible recovery、watch window、retryに加え、recoverable Ack / cursor停止のreconcile後復帰を行う。複数pending passは1 logical UI refresh sessionへまとめ、mutationなしは0回、変更ありは最終1回だけTaskBoardをrefreshする。backlog実機試験はfocus no-change FAILで停止中。 |
-| idle / focus / resume UI freshness | 実装済み・v0.6.74実機未試験 | focus / visibilityはtriggerでありinvalidation authorityではない。`data.json` visible subset比較に加え、open boardは内部保存・初回render後にstat/content baselineを更新し、復帰後pollで内容が同じならrefreshしない。v0.6.73のwindow focus no-change実機試験はFAIL。 |
+| idle / focus / resume UI freshness | 実装済み・v0.6.75実機未試験 | focus / visibilityはtriggerでありinvalidation authorityではない。current open board、Routine history、loaded task definitionsだけをexplicit present/absent state付きで追跡する。untracked pathとtracked-presentの同一content duplicate `create`はrefreshしない。v0.6.74実機のfocus-return create stormはFAIL。 |
 | オフライン復帰 | 一部実装 | network error分類と再試行はある。長時間実機試験は要確認。 |
 | D1 schema管理 | 要確認 | clientはHTTP APIのみ利用。Worker / D1 schemaはこのrepoにない。 |
 
