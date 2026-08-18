@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation checkpoint: `v0.6.72` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No). The preceding immutable `v0.6.71` distribution remains tag object `8f5624beed25754e56a4b012a429a1a4436a453d`, peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`.
+- Current implementation and immutable test distribution: `v0.6.72` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No), annotated tag object `bbfbb9aef583a8d4bf09429b3b617d13fe6c2748`, peeled target `1a7a09a7b7d5f2c43a493308fe9166a2d94057d3`.
 - v0.6.72 removes elapsed-idle-time reload authority and coalesces Bridge inbound/mobile resume/external catch-up UI refreshes per logical session. Event apply, persistence, post-save verification, Ack, cursor, identity, and safe-stop semantics remain per-event. Synthetic tests pass; targeted idle/backlog device verification and the plugin full matrix remain `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.

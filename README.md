@@ -6,7 +6,8 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 - Current implementation: `v0.6.72` BRAT Prerelease
 - Current branch: `feature/v6.6-routine-sync`
-- Latest immutable test distribution before this checkpoint: `v0.6.71` BRAT Prerelease
+- Latest immutable test distribution: `v0.6.72` BRAT Prerelease
+- Release target: `1a7a09a7b7d5f2c43a493308fe9166a2d94057d3`
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
 v0.6.72は、elapsed idle time単独のTaskChute reloadを廃止し、Bridge backlog / mobile resume / external Vault catch-upのvisible refreshをactual data change単位で最大1回へcoalesceするBRAT実機試験用Prereleaseです。eventごとの保存・再読込検証・Ack・cursor safetyは維持します。synthetic / structural試験は完了していますが、targeted実Vault / 実mobile試験前で、Verified済み安定版ではありません。

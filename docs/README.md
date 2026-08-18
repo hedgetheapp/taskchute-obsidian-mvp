@@ -1,6 +1,6 @@
 # Documentation Index
 
-Current baseline: v0.6.72 BRAT Prerelease checkpoint. Bridge inbound catch-up and idle/resume freshness checks now refresh TaskChute only for actual relevant data changes, with at most one visible refresh per logical drain. Synthetic and structural checks passed; targeted real Vault verification remains pending.
+Current baseline: immutable v0.6.72 BRAT Prerelease. Bridge inbound catch-up and idle/resume freshness checks now refresh TaskChute only for actual relevant data changes, with at most one visible refresh per logical drain. Synthetic, structural, and published-asset integrity checks passed; targeted real Vault verification remains pending.
 
 ## Current Canonical
 

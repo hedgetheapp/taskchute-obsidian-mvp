@@ -6,7 +6,7 @@
 - manifest version: `0.6.72`
 - branch: `feature/v6.6-routine-sync`
 - canonical docs checkpoint: v0.6.72 Bridge inbound / idle resume UI refresh coalescing BRAT Prerelease
-- latest immutable release tag before this checkpoint: `v0.6.71`（annotated tag object `8f5624beed25754e56a4b012a429a1a4436a453d`、peeled target `24b3a480593a03921bc3bb497842b0a14fc8cae8`。公開済みtag / Release / assetsは固定）
+- latest release tag: `v0.6.72`（immutable BRAT実機試験用Prerelease。annotated tag object `bbfbb9aef583a8d4bf09429b3b617d13fe6c2748`、peeled target `1a7a09a7b7d5f2c43a493308fe9166a2d94057d3`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
 この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。v0.6.71のimmutable assetsではTaskCreated exact placement 2ケースとTaskMoved v4 2ケースに実機PASS証跡がある。v0.6.72はBridge backlog catch-upとidle復帰時のUI refreshをactual data change単位へcoalesceする。focused synthetic / structural試験はPASSしたが、実Vault / 実mobileのtargeted試験とplugin全体 / full matrixは`NOT_VERIFIED`である。

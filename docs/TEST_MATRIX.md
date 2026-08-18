@@ -2,8 +2,8 @@
 
 ## 基準と読み方
 
-- 対象実装: v0.6.72 BRAT Prerelease candidate（Bridge inbound / idle resume UI refresh coalescingを実装。plugin全体 / full matrixは`NOT_VERIFIED`）
-- 直前の配布済みcheckpoint: immutable `v0.6.71` BRAT Prerelease、tag target `24b3a480593a03921bc3bb497842b0a14fc8cae8`
+- 対象実装: v0.6.72 BRAT Prerelease（Bridge inbound / idle resume UI refresh coalescingを実装・試験配布済み。plugin全体 / full matrixは`NOT_VERIFIED`）
+- 配布済みcheckpoint: immutable `v0.6.72` BRAT Prerelease、tag target `1a7a09a7b7d5f2c43a493308fe9166a2d94057d3`
 - v0.6.72はactual data invalidationをrefresh authorityとし、logical inbound drainごとのvisible refreshを0回または最大1回へcoalesceする。synthetic PASSはdevice PASSへ昇格しない。
 - Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
