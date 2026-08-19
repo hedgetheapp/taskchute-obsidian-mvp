@@ -3,13 +3,13 @@
 ## 調査基準
 
 - 調査日: 2026-08-19
-- manifest version: `0.6.76`
+- manifest version: `0.6.77`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.76 backlog final UI convergence BRAT Prerelease
+- canonical docs checkpoint: v0.6.77 initial mobile backlog convergence candidate
 - latest release tag: `v0.6.76`（immutable BRAT実機試験用Prerelease。annotated tag object `1303486def806def2993b40925c12f31d33737db`、peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
-この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。immutable v0.6.75の`WINDOW-FOCUS-NOCHANGE-REFRESH-01`は実機PASSした。一方`UI-REFRESH-BACKLOG-01`は、mobileが6 eventをD1上すべてappliedにした後もvisible UIがAだけとなり、2回以上reloadしたためFAILである。mobile physical Markdownを未取得のため、実機証跡だけではUI staleと物理不整合を区別しきれない。コード調査では個別apply / verify / Ackは直列で物理snapshot上書きを確認せず、authoritativeでないfinal partial patchを先行full refreshが後から上書きできるUI raceを確定した。v0.6.76候補はこの競合とsession分断を修正済みだが、focused syntheticのみで実機は`NOT_VERIFIED`である。
+この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。immutable v0.6.76の`UI-REFRESH-BACKLOG-01`では、seq 2540〜2545がremote / mobileともappliedで三端末の物理MarkdownはA/B/Cだったが、mobileの初回TaskChute表示はAだけで、2回目のfocus後にA/B/Cとなった。これはCase A initial UI convergence staleであり`FAIL`である。コード調査では`patchViews:false`のdisk reloadと古いsnapshotの初回renderが、実際には描画していない最新generationまでrender済みとして進める経路を確定した。v0.6.77候補はno-view dirty generationを保持し、実際に読んだauthoritative Markdown snapshotのgenerationだけをrender済みにする。focused syntheticのみで実機は`NOT_VERIFIED`である。
 
 ## 文書運用
 
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.76 BRAT Prerelease |
+| State | v0.6.77 candidate |
 |---|---|
-| Integrated | Yes |
-| Prereleased / Test-distributed | Yes |
+| Integrated | No |
+| Prereleased / Test-distributed | No |
 | Verified | No |
 | Released | No |
 
@@ -33,6 +33,10 @@
 - **Released**: Verifiedな配布物を安定配布対象として公開済み。
 
 main反映、実装完了、syntax check、BRAT Prerelease公開だけではVerifiedまたはReleasedとしない。BRAT試験ではPrereleaseを先に固定配布し、同一assetsの実機証跡を後からTEST_MATRIXへ記録できる。公開済みtag / Release / assetsは差し替えず、不具合は次versionで修正する。詳細は[`DEVELOPMENT_WORKFLOW.md`](DEVELOPMENT_WORKFLOW.md)を参照する。
+
+v0.6.76実機試験のfresh fixtureはA `T-0693 / E-20260819-0022`、B `T-0694 / E-20260819-0023`、C `T-0695 / E-20260819-0024`で、seq 2540〜2545のTaskCreated / TaskUpdated 6件はremote / mobileともappliedだった。dev / remote / mobileの物理MarkdownはA/B/Cだが、mobileの初回表示はAだけ、app switch後の2回目focusでA/B/Cとなった。`UI-REFRESH-BACKLOG-01`はCase A initial UI convergence staleとして`FAIL`である。
+
+v0.6.77候補では、`reloadTaskchuteSyncDataFromDisk({ patchViews:false })`がrenderなしに`lastRenderedTaskchuteGeneration`を進める処理を廃止した。`TaskchuteView.refresh()`はMarkdown読込直前のgenerationをsnapshotとして保持し、そのrenderがcurrent runとして完了した場合だけ、そのsnapshot generationまでをrender済みにする。terminal時にeligible viewがなければdirty generationを保持し、最初のvisible openでcurrent physical Markdownを読み、必要なfirst-open convergence refreshを最大1回行う。v0.6.77 focused 12 casesと既存refresh regressionsはPASSしたが、実mobileは`NOT_VERIFIED`である。
 
 ## 現在の開発状況
 
@@ -96,7 +100,7 @@ v0.6.73実機試験では、TaskChuteを開いたままEdgeへ切り替え、意
 
 v0.6.75はwhole-Vault scanを行わず、open viewのboard path、Routine history、`latestTasks`が実際に参照するtask definition集合だけをbounded baselineとして保持する。各recordは`tracked` / `exists` / stat / content fingerprint / categoryを持ち、mapにないpathは`untracked`、明示`exists=false`は`tracked_absent`と区別する。untrackedのcreate stormとtracked-presentの同一content duplicate createは世代を進めず、tracked-absentからpresent、content差、delete / renameだけをvisible invalidationにする。
 
-v0.6.75実機では`WINDOW-FOCUS-NOCHANGE-REFRESH-01`がPASSし、EdgeからObsidianへ戻ってもvisible reloadは0回だった。続く`UI-REFRESH-BACKLOG-01`はFAILした。mobile pending 6件（seq 2524 TaskCreated A、2525 TaskUpdated A、2526/2527 B、2528/2529 C）はresume後にD1上すべてmobile appliedとなったが、visible reloadが2回以上発生し、mobile UIはAだけでB/Cが欠落した。dev / remote physicalはA/B/C、mobile physicalは未取得である。v0.6.76候補はoverlap kickoffを同一sessionへjoinし、active apply/save/verify完了後にrefresh generationを進めるauthoritative full refreshを最終1回だけ実行する。per-event apply / verify / Ack / cursor semanticsは変更しない。focused 14 casesと全standalone testsはPASSだが実機は`NOT_VERIFIED`である。
+v0.6.75実機では`WINDOW-FOCUS-NOCHANGE-REFRESH-01`がPASSし、EdgeからObsidianへ戻ってもvisible reloadは0回だった。続く`UI-REFRESH-BACKLOG-01`はFAILした。mobile pending 6件（seq 2524 TaskCreated A、2525 TaskUpdated A、2526/2527 B、2528/2529 C）はresume後にD1上すべてmobile appliedとなったが、visible reloadが2回以上発生し、mobile UIはAだけでB/Cが欠落した。dev / remote physicalはA/B/C、mobile physicalは未取得である。v0.6.76はoverlap kickoffを同一sessionへjoinし、active apply/save/verify完了後にrefresh generationを進めるauthoritative full refreshを最終1回だけ実行した。focused 14 casesと全standalone testsはPASSしたが、後続のv0.6.76実機証跡では初回表示収束が引き続きFAILした。
 
 v0.6.70実機試験では、section / empty-section routeのT-0653 / E-20260816-0029、row routeのT-0654 / E-20260816-0030、empty night routeのT-0655 / E-20260816-0031がtargeted PASSとなった。3件ともCtrl+Z前にexact semantic action、operation ID、batch ID、fingerprint、history topを確認し、forward / Undo / Redo TaskMovedがD1 seq 2404〜2406、2409〜2411、2414〜2416としてremote / mobile appliedになった。Undo / Redo後はdev / remote physical sectionとmobile UIが収束した。これによりv0.6.69 failureは試験した3 routeについて解消したが、plugin全体 / full matrixは`NOT_VERIFIED`、Delivery StateはVerified=Noのままとする。
 

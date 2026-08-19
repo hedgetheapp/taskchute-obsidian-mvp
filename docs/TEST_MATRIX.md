@@ -2,11 +2,11 @@
 
 ## 基準と読み方
 
-- 対象実装・配布済みcheckpoint: immutable `v0.6.76` BRAT Prerelease、tag target `af4a6b1a0893094aba746462be2d0b02d9e3a492`。
-- v0.6.75 device evidenceはwindow-focus no-changeが`PASS`、6-event backlog visible convergenceが`FAIL`。v0.6.76 synthetic PASSはdevice PASSへ昇格しない。
-- Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
+- 対象実装: `v0.6.77` candidate。最新immutable配布は`v0.6.76` BRAT Prerelease、tag target `af4a6b1a0893094aba746462be2d0b02d9e3a492`。
+- v0.6.76 device evidenceはD1 / physical A/B/Cへ収束しても初回mobile表示がAだけで`FAIL`。v0.6.77 synthetic PASSはdevice PASSへ昇格しない。
+- v0.6.77 Delivery state: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
-- dev / remote / mobile列と`Status`列は、いずれもv0.6.76についての判定を示す。
+- dev / remote / mobile列と`Status`列は、いずれもv0.6.77についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。
 - チェックリストに項目が存在するだけ、コードが存在するだけ、構文確認だけではPASSにしない。
 - Codexの実装完了、PRのmain反映、local helper test成功だけではcurrent `PASS`にしない。
@@ -315,9 +315,29 @@ v0.6.69の実TaskBoard D&D routeではhistory-top semantic invariantが成立し
 | UI-REFRESH-STALE-PREFIX-01: older A-only refreshがfinal A/B/Cを上書きしない | `PASS` | `NOT_VERIFIED` |
 | no-change / visible dependency v0.6.75 regressions | `PASS` | `NOT_VERIFIED` |
 
-v0.6.76 focused testは14 cases、repository standalone testsは18 filesすべてPASSした。これは実装証跡であり、`UI-REFRESH-BACKLOG-01`のcurrent device statusは`NOT_VERIFIED`、v0.6.76全体も`NOT_VERIFIED`とする。
+v0.6.76 focused testは14 cases、repository standalone testsは18 filesすべてPASSした。これは実装証跡であり、後続のcurrent device evidenceでは`UI-REFRESH-BACKLOG-01`が`FAIL`、v0.6.76全体は`NOT_VERIFIED`である。
 
-## Current v0.6.76 Matrix
+## v0.6.76 Device Evidence
+
+| Test case | Result | Evidence |
+|---|---|---|
+| UI-REFRESH-BACKLOG-01 | `FAIL` | A `T-0693 / E-20260819-0022`、B `T-0694 / E-20260819-0023`、C `T-0695 / E-20260819-0024`。seq 2540〜2545のTaskCreated / TaskUpdated 6件はremote / mobile applied。dev / remote / mobile physical MarkdownはA/B/C。mobile初回TaskChute表示はAのみで、app switch後の2回目focusでA/B/C。Case A initial UI convergence staleであり、persist / Ack / cursor failureではない。 |
+
+## v0.6.77 Synthetic Evidence
+
+| Scope | Synthetic / static | Device |
+|---|---|---|
+| INITIAL-BACKLOG-OPEN-01: view openで6-event backlogをterminal 1 refreshへ収束 | `PASS` | `NOT_VERIFIED` |
+| INITIAL-BACKLOG-NOVIEW-01: view closed中はrenderせずdirty generation保持 | `PASS` | `NOT_VERIFIED` |
+| INITIAL-BACKLOG-FIRST-OPEN-01: terminal後の最初のopenでauthoritative A/B/C | `PASS` | `NOT_VERIFIED` |
+| INITIAL-BACKLOG-NO-SECOND-FOCUS-01: 2回目focus不要 | `PASS` | `NOT_VERIFIED` |
+| INITIAL-BACKLOG-EXACT-GENERATION-01: 実際に読んだsnapshot generationだけをrender済みにする | `PASS` | `NOT_VERIFIED` |
+| INITIAL-BACKLOG-NO-DUPLICATE-01: overlapping hooks / active sessionで重複renderなし | `PASS` | `NOT_VERIFIED` |
+| no-change / v0.6.75 / v0.6.76 refresh regressions | `PASS` | `NOT_VERIFIED` |
+
+v0.6.77 focused testは12 cases PASS。syntaxと既存refresh regressionsもPASSした。これは実装証跡であり、targeted real-mobile retestとplugin full matrixは`NOT_VERIFIED`である。
+
+## Current v0.6.77 Matrix
 
 | Area | Test case | dev | remote | mobile | Last verified version | Status | Evidence / Notes |
 |---|---|---|---|---|---|---|---|
@@ -331,7 +351,7 @@ v0.6.76 focused testは14 cases、repository standalone testsは18 filesすべ�
 | Inbound Ack / cursor | CURSOR-MERGE-01: latest dataへmonotonic merge | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic PASS。外部reloadを伴う実data.json競合は未確認。 |
 | Mobile rescue | MOBILE-RESCUE-01: recoverable Ack / cursor stopからdrain再開 | `NOT_APPLICABLE` | `NOT_APPLICABLE` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | synthetic / structural PASS。実mobile rescueは未実施。 |
 | UI refresh coalescing | WINDOW-FOCUS-NOCHANGE-REFRESH-01: Edgeからfocus復帰、変更なし | `NOT_VERIFIED` | `NOT_APPLICABLE` | `NOT_APPLICABLE` | none | `NOT_VERIFIED` | v0.6.74 device testはduplicate create stormでFAIL。v0.6.75 focused syntheticはuntracked / tracked-present / tracked-absent分類と20件burst no-opを確認。実機再試験前。 |
-| UI refresh coalescing | UI-REFRESH-BACKLOG-01: backlog multi-pass後にfinal refresh最大1回 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | v0.6.75では6 eventがmobile appliedでもvisible reload 2回以上、最終UIはAのみでFAIL。v0.6.76 focused syntheticはPASSしたがcurrent device retest前。 |
+| UI refresh coalescing | UI-REFRESH-BACKLOG-01: backlog後の初回visible表示でauthoritative stateへ収束 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.76 FAIL | `NOT_VERIFIED` | v0.6.76ではseq 2540〜2545がapplied、三端末physical A/B/Cでもmobile初回表示はAだけ、2回目focusでA/B/CとなりFAIL。v0.6.77 focused 12 casesはPASSしたが実mobile再試験前。 |
 | UI refresh coalescing | UI-REFRESH-EXTERNAL-CHANGE-01: relevant external changeを1回反映 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | relevant change generationとactive inbound session joinのsynthetic PASS。Obsidian Sync実データは未確認。 |
 | TaskCreated | 通常taskを作成し、他2端末のMarkdown/UIとAckを確認 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | `bridge-v6.5-rc1-checklist.md`に三端末起点PASSあり。ただし後続のTaskCreated guard / collision変更を含むv0.6.56回帰は未記録。 |
 | TaskCreated | TASKCREATED-SECTION-TOP-ORDER-01: exact placement v1でsection先頭を再現 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v0.6.71 | `NOT_VERIFIED` | v0.6.71のT-0670 / E-20260818-0004は三端末PASS。v0.6.72 current実機回帰は未実施。 |
@@ -375,7 +395,7 @@ v0.6.76 focused testは14 cases、repository standalone testsは18 filesすべ�
 | offline recovery | 通信断中の操作、復帰後drain、重複なし | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | none | `NOT_VERIFIED` | retry実装はある。長時間・圏外・OS停止を含む実機保証なし。 |
 | mobile hidden / resume drain | hidden中fetch/apply/Ackなし、visible後再開 | `NOT_VERIFIED` | `NOT_VERIFIED` | `NOT_VERIFIED` | v6.5 RC3 | `NOT_VERIFIED` | RC3でPASS記録あり。v0.6.56での長時間hidden / resume回帰は未記録。 |
 
-v0.6.65のtargeted interrupt-continuation scope、v0.6.70のTaskMoved Undo / Redo、v0.6.71のTaskCreated placement / date move / section handoffにはhistorical device PASS evidenceがある。v0.6.75はfocus no-changeをPASSしたがbacklog visible convergenceをFAILした。v0.6.76はfocused synthetic確認のみで、current device rowsとplugin full matrixは`NOT_VERIFIED`を維持する。
+v0.6.65のtargeted interrupt-continuation scope、v0.6.70のTaskMoved Undo / Redo、v0.6.71のTaskCreated placement / date move / section handoffにはhistorical device PASS evidenceがある。v0.6.75はfocus no-changeをPASSしたがbacklog visible convergenceをFAILし、v0.6.76もpersisted stateは正しくても初回mobile表示がAだけでFAILした。v0.6.77はfocused synthetic確認のみで、current device rowsとplugin full matrixは`NOT_VERIFIED`を維持する。
 
 ## Historical Evidence
 

@@ -112,9 +112,11 @@ assert(reloadBody.includes("bridgeInboundRefreshBypass: force"));
 console.log("IDLE-NOCHANGE-08 stale timer no-op and explicit manual reload retained: PASS");
 
 const onOpenBody = source.slice(source.indexOf("  async onOpen()", source.indexOf("class TaskchuteView")), source.indexOf("  isInteractiveTarget(", source.indexOf("class TaskchuteView")));
-assert(onOpenBody.includes('markTaskchuteViewsRendered("bootstrap_render_mark_current")'));
+assert(onOpenBody.includes("decideTaskchuteFirstOpenConvergence"));
+const refreshBody = source.slice(source.indexOf("  async refresh(options = {})", source.indexOf("class TaskchuteView")), source.indexOf("  async applyExternalTaskPatch(", source.indexOf("class TaskchuteView")));
+assert(refreshBody.includes("renderedGeneration: renderedGenerationAtRead"));
 assert(source.includes("lastRenderedTaskchuteVisiblePluginDataSignature"));
-console.log("IDLE-NOCHANGE-09 successful open marks rendered generation current: PASS");
+console.log("IDLE-NOCHANGE-09 successful open marks only consumed generation current: PASS");
 
 for (const field of [
   "data_generation",

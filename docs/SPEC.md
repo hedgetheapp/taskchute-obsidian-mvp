@@ -2,7 +2,7 @@
 
 ## 文書の扱い
 
-この仕様はimmutable `v0.6.76` BRAT Prerelease（peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`）を基準とし、公開済みtag / Release / assetsは固定する。v0.6.76のfocused syntheticはPASSしたが実Vault未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
+この仕様は`v0.6.77`候補を基準とする。最新immutable配布は`v0.6.76` BRAT Prerelease（peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`）で、公開済みtag / Release / assetsは固定する。v0.6.77のfocused syntheticはPASSしたが実Vault未検証であり、plugin全体 / full matrixも`NOT_VERIFIED`で、Verified / Releasedではない。過去文書と食い違う場合でも、ここではコード上の事実を優先する。意図や保証範囲をコードから確定できない箇所は「要確認」とする。
 
 ## 1. アプリ起動
 
@@ -231,14 +231,14 @@ task行はwiki link targetから`task_id`、aliasから表示title、`tc` commen
 - elapsed idle durationはTaskChute UI invalidation authorityではない。30秒以上のfocus / visibility復帰や30分以上後のfirst interactionだけを理由にdisk reload / view refreshしない。
 - focus / visibility / resume / first interactionはfreshness checkを起動できるが、relevant data generationとlast rendered generationが一致し、Bridge-applied dirty stateもない場合のTaskBoard refresh countは0とする。
 - relevant TaskChute Markdown、Routine history、表示に影響するplugin dataのexternal changeはactual invalidationとしてgenerationを進める。`data.json`の通知だけではdirtyにせず、表示対象subsetの変更を比較してからgenerationを進める。cursor、outbox、diagnostics等の非表示系writeとunrelated Vault noteはinvalidation対象にしない。clickごとのVault全体hashは行わない。
-- TaskBoardの初回open / bootstrap renderはその時点のgenerationをrender済みとして記録する。予約済みの遅延refreshはtimer発火時にもgeneration差を再確認し、既にcurrentならno-opにする。
+- TaskBoardのrender済みgenerationは、`TaskchuteView.refresh()`が実際にauthoritative Vault Markdownを読み始めた時点のgenerationまでしか進めない。disk reloadだけ、`patchViews:false`、superseded / failed renderはgenerationをrender済みにしない。予約済みの遅延refreshはtimer発火時にもgeneration差を再確認し、既にcurrentならno-opにする。
 - open中TaskBoardの内部保存と初回render後は、そのphysical fileのstat/content baselineを即時更新する。focus復帰後のpollでmtime/sizeだけが変わり内容fingerprintが同一なら`view_already_current`としてrefreshしない。内容が異なるrelevant Markdown changeは従来どおりactual invalidationにする。
 - current viewのinvalidation authorityは、open board、そのboardにloadedされたtask definition、Routine historyのexplicit visible dependency baselineとする。baseline recordはexistenceを保持し、mapにないuntracked pathと、作成前のtracked-absent pathを区別する。
 - untracked TaskChute pathのevent、およびtracked-present pathのcontentが同一なduplicate `create`はcurrent viewをinvalidateしない。tracked-absentからpresent、tracked-presentのcontent差、delete / renameはactual visible changeとして最大1回のrefreshへcoalesceできる。
 - window focus / visibility returnでは既存TaskChute view instanceを再利用し、focusだけを理由に`setViewState`やview再生成を行わない。
 - one physical Bridge catch-upはstartup / interval / focus / resumeの重複kickoffと複数pending passを1 UI refresh sessionへjoinする。active/queued drainへのkickoffは別follow-up sessionを予約しない。eventのfetch、apply、persist、post-save verify、Ack、cursor merge、安全停止は従来どおり個別・sequence順で行う。
 - session内で成功したvisible mutationが0件ならfinal refreshは0回、1件以上ならopenかつvisibleなTaskBoardを最大1回だけrefreshする。safe-stop前の成功prefixは1回表示し、mutation前safe-stopは0回とする。
-- TaskBoard viewがopenでなければ自動openしない。mobile hidden中はrenderせず、visible復帰後の既存recovery policyを維持する。
+- TaskBoard viewがopenでなければ自動openしない。mobile hidden中はrenderせず、visible mutationのdirty generationを保持する。最初のeligibleなopen / visible renderはcurrent physical Markdownを読み、active inbound sessionが所有していなければ未消費generationを最大1回のfirst-open convergence refreshで消費する。
 - finalizerはactive apply/save/verify operationが0になるまで実行せず、visible mutationがある場合だけauthoritative full refreshを1回行う。このrefreshはviewのrefresh generationを進め、先行refreshの古いsnapshotが後から描画することを防ぐ。
 - final UI refreshの例外はdiagnosticへ記録するが、既にapply / verify / Ack済みのeventやcursorを巻き戻さない。
 - plugin inbound write由来のVault eventはinternal-write guardとactive refresh sessionでcoalesceし、Bridge apply→Vault listener→refreshのfeedback loopを作らない。

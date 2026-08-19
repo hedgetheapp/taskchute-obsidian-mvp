@@ -129,14 +129,16 @@ console.log("UI-REFRESH-12 intermediate suppression and UI failure isolation: PA
 
 const externalFlush = source.slice(source.indexOf("  async flushExternalRefresh("), source.indexOf("  debugKeyLog("));
 assert.strictEqual((externalFlush.match(/await this\.patchTaskchuteViewsFromExternalSync/g) || []).length, 1);
-assert(externalFlush.includes("markTaskchuteViewsRendered"));
+assert(!externalFlush.includes("markTaskchuteViewsRendered"));
+assert(source.includes("renderedGeneration: renderedGenerationAtRead"));
 assert(externalFlush.includes("!mobileHidden"));
 console.log("UI-REFRESH-13 external catch-up one final render: PASS");
 
 assert(source.includes("async reloadTaskchuteSyncDataFromDisk(options = {})"));
 assert(source.includes("const force = !!(options && options.force)"));
 assert(source.includes("bridgeInboundRefreshBypass: force"));
-assert(source.includes("await this.refresh({ initialFocusTopSection: true, skipDisplaySyncReload: true })"));
+assert(source.includes('patchViews: false, showStatus: false'));
+assert(source.includes('renderReason: "taskboard-open-initial"'));
 console.log("UI-REFRESH-14 local/open/manual paths retained: PASS");
 
 console.log("Bridge inbound / idle resume UI refresh coalescing v0.6.72: PASS");

@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: immutable v0.6.76 BRAT Prerelease（peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`）。公開済みtag / Release / assetsは差し替えない。v0.6.76 focused syntheticはPASSしたが実Vault試験とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
+調査基準: v0.6.77候補。最新immutable配布はv0.6.76 BRAT Prerelease（peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`）で、公開済みtag / Release / assetsは差し替えない。v0.6.77 focused syntheticはPASSしたが実Vault試験とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
 
 ## 1. 概要
 
@@ -27,7 +27,7 @@ TaskchutePlugin + ItemViews (main.js)
 |---|---|
 | `main.js` | 全application logic。CommonJSで`TaskchutePlugin`をexport。 |
 | `styles.css` | PC / mobile / views / modal / settingsのstyle。約15,032行。 |
-| `manifest.json` | Obsidian plugin metadata。version `0.6.76`。 |
+| `manifest.json` | Obsidian plugin metadata。version `0.6.77`。 |
 | `README.md` | current releaseと正本文書への入口。 |
 | `AGENTS.md` | versionごとの開発guardと過去判断。現行・旧記述が併存する。 |
 | `docs/` | Bridge仕様、release、regression、運用資料。 |
@@ -36,6 +36,7 @@ TaskchutePlugin + ItemViews (main.js)
 | `tests/taskcreated-placement-v0671.js` | ordinary TaskCreated v1のpost-save neighbor capture、exact inbound placement、legacy/unknown/idempotency/rename preservationを検証するfocused standalone test。 |
 | `tests/taskchute-visible-dependency-invalidation-v0675.js` | current visible dependencyのexplicit present/absent state、duplicate create burst、genuine create/modify/delete/rename、Bridge coalescingを検証するfocused standalone test。 |
 | `tests/bridge-backlog-final-ui-v0676.js` | 6-event / multi-pass backlog、overlap kickoff join、active-operation barrier、authoritative final refresh、stale-prefix overwrite防止を検証するfocused standalone test。 |
+| `tests/initial-mobile-backlog-convergence-v0677.js` | no-view dirty generation保持、first-open authoritative convergence、exact rendered generation、重複refresh防止を12 casesで検証するfocused standalone test。 |
 | `tests/insert-below-order-v0661.js` | explicit insert-belowの物理/visual順、refresh、rename、protected target、task-copy scopeを検証するfocused synthetic test。 |
 | `tests/tmv4-section-handoff-v0662.js` | same-section D&Dの欠落row section meta補完、保存後identity、strict conflict block、TaskMoved 1件を検証するfocused synthetic test。 |
 | `tests/tmv4-physical-context-v0663.js` | reload後runtime section空、exact physical headings、missing meta補完、strict conflict、no-op、generic add metadataを検証するfocused synthetic test。 |
@@ -228,7 +229,7 @@ apply失敗、verification失敗、hard Ack失敗ではcursorを跨がない。s
 
 v0.6.72以降はinbound data pipelineとUI refreshを分離する。v0.6.76では`beginBridgeInboundUiRefreshSession()`がstartup / interval / focus / resumeの重複kickoffと複数pending passを同じphysical catch-up sessionへjoinし、active/queued drainから別follow-up sessionを作らない。各eventは従来どおり個別・sequence順にapply / verify / Ackする。成功したvisible mutationは`requestBridgeInboundUiRefresh()`でdirtyとして集計し、中間の`patchTaskchuteViewsFromExternalSync()`要求はsession内で抑止する。`finalizeBridgeInboundUiRefreshSession()`はactive apply/save/verifyが0でterminal stateになった後、openかつvisibleなviewを最大1回、`externalSync=true`のauthoritative full refreshとして描画する。`TaskchuteView.refresh()`のrun generationを進めるため、以前に開始したprefix refreshはcurrent判定に失敗し最終A/B/Cを上書きできない。refresh例外はdiagnosticに閉じ、data/Ack/cursorをrollbackしない。
 
-`taskchuteDataGeneration`と`lastRenderedTaskchuteGeneration`はactual relevant changeと最後に描画した世代を表すruntime-only counterである。focus / visibility / first interactionはこの差だけをfreshness根拠とし、経過時間をreload authorityにしない。`data.json`は表示対象fieldのfingerprintをload前後で比較する。v0.6.75の`taskchuteVisibleDependencyBaselines`はwhole-Vault scanを行わず、open viewが実際に参照するboard / Routine history / loaded task definition集合だけを収集し、existence、stat key、bounded content fingerprint、categoryを持つ。initial/full/partial render、Bridge final render、manual reload、追跡中pathのinternal write後にbaselineをcurrentにする。Vault eventはこのbaselineに対してだけvisible invalidation authorityを持つ。
+`taskchuteDataGeneration`と`lastRenderedTaskchuteGeneration`はactual relevant changeと最後に実際に描画した世代を表すruntime-only counterである。v0.6.77では`TaskchuteView.refresh()`がMarkdown read直前のgenerationをcaptureし、そのrunがsupersedeされずrender完了した場合だけ`normalizeTaskchuteRenderedGeneration()`でその世代まで進める。`reloadTaskchuteSyncDataFromDisk({ patchViews:false })`やno-view finalizationはrenderではないためdirty差を消さない。`decideTaskchuteFirstOpenConvergence()`はvisible open後に差が残りactive inbound sessionがない場合だけ、authoritative full refreshを追加で最大1回行う。focus / visibility / first interactionはこの差だけをfreshness根拠とし、経過時間をreload authorityにしない。`data.json`は表示対象fieldのfingerprintをload前後で比較する。v0.6.75の`taskchuteVisibleDependencyBaselines`はwhole-Vault scanを行わず、open viewが実際に参照するboard / Routine history / loaded task definition集合だけを収集し、existence、stat key、bounded content fingerprint、categoryを持つ。initial/full/partial render、Bridge final render、manual reload、追跡中pathのinternal write後にbaselineをcurrentにする。Vault eventはこのbaselineに対してだけvisible invalidation authorityを持つ。
 
 ### External Vault change
 

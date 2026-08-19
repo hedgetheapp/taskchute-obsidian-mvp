@@ -11724,6 +11724,25 @@ function decideTaskchuteUiRefreshSessionFinalization(session, context = {}) {
   return { execute: true, reason: String(context.refreshReason || "bridge_inbound_session_final") };
 }
 
+function decideTaskchuteFirstOpenConvergence(input = {}) {
+  const dataGeneration = Math.max(0, Number(input.dataGeneration || 0));
+  const renderedGeneration = Math.max(0, Number(input.renderedGeneration || 0));
+  if (!input.initialRenderCompleted) return { refresh: false, reason: "initial_render_not_completed" };
+  if (dataGeneration <= renderedGeneration) return { refresh: false, reason: "first_open_generation_current" };
+  if (input.activeSession) return { refresh: false, reason: "active_inbound_session_owns_final_refresh" };
+  if (!input.viewVisible) return { refresh: false, reason: "view_not_visible_pending_generation" };
+  return { refresh: true, reason: "first_open_pending_generation" };
+}
+
+function normalizeTaskchuteRenderedGeneration(input = {}) {
+  const current = Math.max(0, Number(input.dataGeneration || 0));
+  const previous = Math.max(0, Number(input.previousRenderedGeneration || 0));
+  const consumed = input.renderedGeneration == null
+    ? current
+    : Math.max(0, Math.min(current, Number(input.renderedGeneration || 0)));
+  return Math.max(previous, consumed);
+}
+
 function decideTaskchuteIdleResumeRefresh(input = {}) {
   const stale = !!input.relevantInvalidationDetected;
   if (stale) return { refresh: true, reason: "actual_data_invalidation" };
@@ -15905,6 +15924,29 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
   }
 
+  inspectTaskchuteViewRenderEligibility() {
+    try {
+      const workspace = this.app && this.app.workspace;
+      const leaves = workspace && typeof workspace.getLeavesOfType === "function"
+        ? (workspace.getLeavesOfType(VIEW_TYPE) || [])
+        : [];
+      const renderableLeaves = leaves.filter(leaf => leaf && leaf.view && typeof leaf.view.refresh === "function");
+      const viewExists = renderableLeaves.length > 0;
+      const viewActive = !!(viewExists && workspace && workspace.activeLeaf && renderableLeaves.includes(workspace.activeLeaf));
+      const hidden = !!(this.isBridgeMobileResumeHidden && this.isBridgeMobileResumeHidden());
+      const connected = renderableLeaves.some(leaf => !!(leaf.view && leaf.view.containerEl && leaf.view.containerEl.isConnected !== false));
+      return {
+        viewExists,
+        viewVisible: !!(viewExists && connected && !hidden),
+        viewActive,
+        viewCount: renderableLeaves.length,
+        hidden
+      };
+    } catch (e) {
+      return { viewExists: false, viewVisible: false, viewActive: false, viewCount: 0, hidden: false };
+    }
+  }
+
   recordTaskchuteUiRefreshDiagnostic(phase, detail = {}) {
     try {
       if (!this.settings) return;
@@ -15974,6 +16016,12 @@ class TaskchutePlugin extends obsidian.Plugin {
         generation_after_refresh: Math.max(0, Math.floor(Number(detail.generation_after_refresh || 0))),
         rendered_generation_before_refresh: Math.max(0, Math.floor(Number(detail.rendered_generation_before_refresh || 0))),
         rendered_generation_after_refresh: Math.max(0, Math.floor(Number(detail.rendered_generation_after_refresh || 0))),
+        view_exists: !!detail.view_exists,
+        view_visible: !!detail.view_visible,
+        view_active: !!detail.view_active,
+        dirty_generation_retained: !!detail.dirty_generation_retained,
+        render_data_source: String(detail.render_data_source || "").trim(),
+        authoritative_full_refresh: !!detail.authoritative_full_refresh,
         ui_refresh_error: sanitizeBridgeSafeMessage(detail.ui_refresh_error || "")
       };
       this.settings.bridgeInboundAutoApplyRuntimeDiagnostics = limitBridgeDiagnosticArrayProtectedAware(
@@ -16018,15 +16066,18 @@ class TaskchutePlugin extends obsidian.Plugin {
     }
   }
 
-  markTaskchuteViewsRendered(source = "render") {
-    this.lastRenderedTaskchuteGeneration = Math.max(
-      Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0)),
-      Math.max(0, Number(this.taskchuteDataGeneration || 0))
-    );
-    this.lastRenderedTaskchuteVisiblePluginDataSignature = this.getTaskchuteVisiblePluginDataSignature();
-    Promise.resolve(this.refreshTaskchuteVisibleDependencyBaseline(source)).catch(error => {
-      console.error("Taskchute visible dependency baseline refresh error", error);
+  markTaskchuteViewsRendered(source = "render", options = {}) {
+    this.lastRenderedTaskchuteGeneration = normalizeTaskchuteRenderedGeneration({
+      dataGeneration: this.taskchuteDataGeneration,
+      previousRenderedGeneration: this.lastRenderedTaskchuteGeneration,
+      renderedGeneration: options && options.renderedGeneration
     });
+    this.lastRenderedTaskchuteVisiblePluginDataSignature = this.getTaskchuteVisiblePluginDataSignature();
+    if (!(options && options.skipDependencyBaselineRefresh)) {
+      Promise.resolve(this.refreshTaskchuteVisibleDependencyBaseline(source)).catch(error => {
+        console.error("Taskchute visible dependency baseline refresh error", error);
+      });
+    }
     if (source === "bootstrap_render_mark_current") {
       this.recordTaskchuteUiRefreshDiagnostic("taskchute_bootstrap_render_mark_current", {
         refresh_decision: "mark_current",
@@ -16152,9 +16203,10 @@ class TaskchutePlugin extends obsidian.Plugin {
     session.endedAt = nowIso();
     const generationBeforeRefresh = Math.max(0, Number(this.taskchuteDataGeneration || 0));
     const renderedGenerationBeforeRefresh = Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0));
+    const eligibility = this.inspectTaskchuteViewRenderEligibility();
     const decision = decideTaskchuteUiRefreshSessionFinalization(session, {
-      viewOpen: this.hasOpenTaskchuteViews(),
-      hidden: this.isBridgeMobileResumeHidden && this.isBridgeMobileResumeHidden(),
+      viewOpen: eligibility.viewExists,
+      hidden: !eligibility.viewVisible,
       noChangeReason: detail.noChangeReason || "pending_zero_no_data_change",
       refreshReason: detail.refreshReason || "bridge_inbound_session_final"
     });
@@ -16171,7 +16223,6 @@ class TaskchutePlugin extends obsidian.Plugin {
           bridgeInboundRefreshSessionId: session.id
         });
         session.finalRefreshExecuted = true;
-        this.markTaskchuteViewsRendered("bridge_visible_mutation");
       } catch (e) {
         error = String(e && e.message || e || "");
         session.finalRefreshExecuted = false;
@@ -16203,6 +16254,12 @@ class TaskchutePlugin extends obsidian.Plugin {
       generation_after_refresh: Math.max(0, Number(this.taskchuteDataGeneration || 0)),
       rendered_generation_before_refresh: renderedGenerationBeforeRefresh,
       rendered_generation_after_refresh: Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0)),
+      view_exists: eligibility.viewExists,
+      view_visible: eligibility.viewVisible,
+      view_active: eligibility.viewActive,
+      dirty_generation_retained: Math.max(0, Number(this.taskchuteDataGeneration || 0)) > Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0)),
+      render_data_source: session.finalRefreshExecuted ? "vault_markdown" : "none",
+      authoritative_full_refresh: session.finalRefreshExecuted,
       ui_refresh_error: error
     });
     this.bridgeInboundUiRefreshSession = null;
@@ -16340,7 +16397,6 @@ class TaskchutePlugin extends obsidian.Plugin {
       }
 
       this.lastTaskchuteDisplayReloadAt = Date.now();
-      this.markTaskchuteViewsRendered(force ? "explicit_manual_reload" : "external_change_rendered");
       this.recordTaskchuteUiRefreshDiagnostic("taskchute_display_reload_executed", {
         idle_reason: reason,
         refresh_decision: "refresh",
@@ -16349,7 +16405,10 @@ class TaskchutePlugin extends obsidian.Plugin {
         reload_method: patchViews ? "reloadTaskchuteSyncDataFromDisk->patchTaskchuteViewsFromExternalSync" : "reloadTaskchuteSyncDataFromDisk",
         view_instance_action: "reused",
         generation_after_render: this.lastRenderedTaskchuteGeneration,
-        terminal_state: "rendered"
+        dirty_generation_retained: Math.max(0, Number(this.taskchuteDataGeneration || 0)) > Math.max(0, Number(this.lastRenderedTaskchuteGeneration || 0)),
+        render_data_source: patchViews ? "vault_markdown" : "none",
+        authoritative_full_refresh: !!(patchViews && this.hasOpenTaskchuteViews()),
+        terminal_state: patchViews ? "rendered" : "reloaded_without_render"
       });
       this.clearWakeSyncGuard();
       if (options && options.notice) new obsidian.Notice("Taskchute同期データを再読み込みしました", 1800);
@@ -16509,7 +16568,6 @@ class TaskchutePlugin extends obsidian.Plugin {
             terminal_state: "joined"
           });
         } else {
-          this.markTaskchuteViewsRendered("external_change_rendered");
           this.recordTaskchuteUiRefreshDiagnostic("taskchute_external_refresh_executed", {
             refresh_decision: "refresh",
             final_refresh_executed: true,
@@ -43389,9 +43447,60 @@ class TaskchuteView extends obsidian.ItemView {
     this.startLiveTimer();
     this.updateViewHeaderTitle();
     await this.plugin.reloadTaskchuteSyncDataFromDisk({ reason: "taskboard-open", date: this.selectedDate, patchViews: false, showStatus: false, preserveScroll: true });
-    await this.refresh({ initialFocusTopSection: true, skipDisplaySyncReload: true });
+    const initialRenderResult = await this.refresh({ initialFocusTopSection: true, skipDisplaySyncReload: true, renderReason: "taskboard-open-initial" });
     if (this.plugin && this.plugin.updateOpenTaskchuteBoardStatBaseline) await this.plugin.updateOpenTaskchuteBoardStatBaseline();
-    if (this.plugin && this.plugin.markTaskchuteViewsRendered) this.plugin.markTaskchuteViewsRendered("bootstrap_render_mark_current");
+    if (this.plugin) {
+      const eligibility = this.plugin.inspectTaskchuteViewRenderEligibility
+        ? this.plugin.inspectTaskchuteViewRenderEligibility()
+        : { viewExists: true, viewVisible: true, viewActive: true };
+      const activeSession = !!(this.plugin.bridgeInboundUiRefreshSession && this.plugin.bridgeInboundUiRefreshSession.active);
+      const convergence = decideTaskchuteFirstOpenConvergence({
+        initialRenderCompleted: !!(initialRenderResult && initialRenderResult.rendered),
+        dataGeneration: this.plugin.taskchuteDataGeneration,
+        renderedGeneration: this.plugin.lastRenderedTaskchuteGeneration,
+        activeSession,
+        viewVisible: eligibility.viewVisible
+      });
+      this.plugin.recordTaskchuteUiRefreshDiagnostic("taskchute_first_open_convergence_checked", {
+        refresh_decision: convergence.refresh ? "refresh" : "no_refresh",
+        no_refresh_reason: convergence.refresh ? "" : convergence.reason,
+        final_refresh_reason: convergence.refresh ? convergence.reason : "",
+        final_refresh_executed: false,
+        generation_before_refresh: this.plugin.taskchuteDataGeneration,
+        rendered_generation_before_refresh: this.plugin.lastRenderedTaskchuteGeneration,
+        view_exists: eligibility.viewExists,
+        view_visible: eligibility.viewVisible,
+        view_active: eligibility.viewActive,
+        dirty_generation_retained: Math.max(0, Number(this.plugin.taskchuteDataGeneration || 0)) > Math.max(0, Number(this.plugin.lastRenderedTaskchuteGeneration || 0)),
+        render_data_source: String(initialRenderResult && initialRenderResult.dataSource || "vault_markdown"),
+        authoritative_full_refresh: false,
+        terminal_state: activeSession ? "joined_active_session" : "first_open_checked"
+      });
+      if (convergence.refresh) {
+        const convergedResult = await this.refresh({
+          initialFocusTopSection: true,
+          skipDisplaySyncReload: true,
+          externalSync: true,
+          preserveScroll: true,
+          firstOpenConvergence: true,
+          renderReason: "first-open-pending-generation"
+        });
+        this.plugin.recordTaskchuteUiRefreshDiagnostic("taskchute_first_open_convergence_finished", {
+          refresh_decision: "refresh",
+          final_refresh_executed: !!(convergedResult && convergedResult.rendered),
+          final_refresh_reason: convergence.reason,
+          generation_after_refresh: this.plugin.taskchuteDataGeneration,
+          rendered_generation_after_refresh: this.plugin.lastRenderedTaskchuteGeneration,
+          view_exists: eligibility.viewExists,
+          view_visible: eligibility.viewVisible,
+          view_active: eligibility.viewActive,
+          dirty_generation_retained: Math.max(0, Number(this.plugin.taskchuteDataGeneration || 0)) > Math.max(0, Number(this.plugin.lastRenderedTaskchuteGeneration || 0)),
+          render_data_source: String(convergedResult && convergedResult.dataSource || "vault_markdown"),
+          authoritative_full_refresh: true,
+          terminal_state: "first_open_converged"
+        });
+      }
+    }
   }
 
   isInteractiveTarget(target) {
@@ -43513,6 +43622,7 @@ class TaskchuteView extends obsidian.ItemView {
     const refreshRunId = (this.refreshRunId || 0) + 1;
     this.refreshRunId = refreshRunId;
     const isCurrentRefresh = () => this.refreshRunId === refreshRunId && !!(this.containerEl && this.containerEl.isConnected !== false);
+    let renderedGenerationAtRead = Math.max(0, Number(this.plugin && this.plugin.taskchuteDataGeneration || 0));
     // Idle duration is not an invalidation source. Bridge/external-change coordinators
     // decide whether persisted TaskChute data requires a view refresh.
     if (!isCurrentRefresh()) return;
@@ -43552,6 +43662,10 @@ class TaskchuteView extends obsidian.ItemView {
     try {
       const notePath = await this.plugin.ensureTaskchuteNote(this.selectedDate);
       await this.plugin.generateRoutinesForDate(this.selectedDate, { externalSync: !!(options && options.externalSync) });
+      // A generation that advances while the Markdown read/enrichment is in flight
+      // must remain pending. The rendered snapshot may predate that mutation even
+      // when enrichment completes after the newer generation was recorded.
+      renderedGenerationAtRead = Math.max(0, Number(this.plugin && this.plugin.taskchuteDataGeneration || 0));
       md = await readFileText(this.app, notePath);
       tasks = await this.plugin.enrichTasks(parseTasks(md), md, this.selectedDate);
       if (!isCurrentRefresh()) return;
@@ -43566,7 +43680,7 @@ class TaskchuteView extends obsidian.ItemView {
         await this.plugin.safeEnsureBaseFolders(true);
         await this.refresh();
       };
-      return;
+      return { rendered: false, reason: "refresh_error", dataSource: "vault_markdown" };
     }
 
     const sections = getBoardSections(this.plugin.settings);
@@ -43674,6 +43788,19 @@ class TaskchuteView extends obsidian.ItemView {
     if (this.plugin && this.plugin.refreshTaskchuteVisibleDependencyBaseline) {
       await this.plugin.refreshTaskchuteVisibleDependencyBaseline("taskchute-view-refresh");
     }
+    if (!isCurrentRefresh()) return { rendered: false, reason: "superseded_after_render", dataSource: "vault_markdown" };
+    if (this.plugin && this.plugin.markTaskchuteViewsRendered) {
+      this.plugin.markTaskchuteViewsRendered(String(options && options.renderReason || "taskchute_view_refresh"), {
+        renderedGeneration: renderedGenerationAtRead,
+        skipDependencyBaselineRefresh: true
+      });
+    }
+    return {
+      rendered: true,
+      renderedGeneration: renderedGenerationAtRead,
+      dataSource: "vault_markdown",
+      authoritativeFullRefresh: !!(options && (options.externalSync || options.firstOpenConvergence || options.bridgeInboundFinalRefresh))
+    };
   }
 
   async applyExternalTaskPatch(options = {}) {

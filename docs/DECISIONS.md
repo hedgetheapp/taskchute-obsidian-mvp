@@ -309,6 +309,13 @@
 - 理由: v0.6.75実機backlogでは6 eventがserver appliedでもvisible UIがAだけとなり、2回以上reloadした。コード上、final partial patchはrefresh generationを進めず、以前に開始したfull refreshが後からAだけを描画できた。また重複kickoffが別sessionを予約でき、1 catch-upを複数final renderへ分断できた。
 - 根拠: `scheduleMobileResumeInboundDrain()`、`runMobileResumeInboundDrain()`、`finalizeBridgeInboundUiRefreshSession()`、`TaskchuteView.refresh()`、`tests/bridge-backlog-final-ui-v0676.js`。
 
+## D-050: render済みgenerationは実際に消費したMarkdown snapshotまでしか進めない
+
+- 判断: disk reload、`patchViews:false`、no-view finalizationはrenderではなく、`lastRenderedTaskchuteGeneration`を進めない。`TaskchuteView.refresh()`がVault Markdownを読み始めた時点のgenerationをcaptureし、そのrunがcurrentのまま描画完了した場合だけ、そのgenerationまで進める。
+- 判断: terminal時にeligible viewがなければdirty generationを保持する。最初のvisible openでdirtyが残り、active inbound sessionがfinal refreshを所有していない場合だけ、authoritative first-open convergence refreshを最大1回行う。
+- 理由: v0.6.76実機ではD1と物理MarkdownがA/B/Cへ収束しても初回mobile表示がAだけだった。コード上、renderなしreloadとA-only snapshotのrenderが、途中で進んだB/C generationまでcurrentとして記録し、次のfocusまで再描画要求を失わせていた。
+- 根拠: `normalizeTaskchuteRenderedGeneration()`、`decideTaskchuteFirstOpenConvergence()`、`TaskchuteView.refresh()`、`reloadTaskchuteSyncDataFromDisk()`、`tests/initial-mobile-backlog-convergence-v0677.js`。
+
 ## Legacy観測（設計判断ではない）
 
 - 観測: 到達不能な旧Routine duplicate guardと参照のない`TaskLinksModal`が残る。
