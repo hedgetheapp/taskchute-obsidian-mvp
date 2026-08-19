@@ -4,10 +4,9 @@ Obsidian上でTaskChute形式のTaskBoardを運用するCommunity Pluginです�
 
 ## Current Development
 
-- Current implementation candidate: `v0.6.77`
-- Latest immutable test distribution: `v0.6.76` BRAT Prerelease
+- Current implementation and immutable test distribution: `v0.6.77` BRAT Prerelease
 - Current branch: `feature/v6.6-routine-sync`
-- Latest immutable target: `af4a6b1a0893094aba746462be2d0b02d9e3a492`
+- Release target: `8e263f14e8b07382c9639add09a9fd052708e826`
 - Distribution files: `main.js` / `manifest.json` / `styles.css`
 
 v0.6.76実機試験では6 eventがD1 appliedとなり三端末の物理MarkdownもA/B/Cへ収束しましたが、mobileの初回表示はAだけで、2回目のfocus後にA/B/Cとなりました。v0.6.77候補は描画していないreloadがdirty generationを消す経路を閉じ、実際に読んだMarkdown snapshotのgenerationだけをrender済みにします。focused syntheticはPASSしていますが実機未検証で、Verified済み安定版ではありません。

@@ -2,9 +2,9 @@
 
 ## 基準と読み方
 
-- 対象実装: `v0.6.77` candidate。最新immutable配布は`v0.6.76` BRAT Prerelease、tag target `af4a6b1a0893094aba746462be2d0b02d9e3a492`。
+- 対象実装・配布済みcheckpoint: immutable `v0.6.77` BRAT Prerelease、tag target `8e263f14e8b07382c9639add09a9fd052708e826`。
 - v0.6.76 device evidenceはD1 / physical A/B/Cへ収束しても初回mobile表示がAだけで`FAIL`。v0.6.77 synthetic PASSはdevice PASSへ昇格しない。
-- v0.6.77 Delivery state: Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No
+- v0.6.77 Delivery state: Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No
 - この表は実装有無ではなく、実Vaultを使った保証状態を記録する。
 - dev / remote / mobile列と`Status`列は、いずれもv0.6.77についての判定を示す。
 - 過去versionのPASSは`Last verified version`と`Historical Evidence`へ記録し、現行列へ自動継承しない。

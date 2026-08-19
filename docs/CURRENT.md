@@ -5,8 +5,8 @@
 - 調査日: 2026-08-19
 - manifest version: `0.6.77`
 - branch: `feature/v6.6-routine-sync`
-- canonical docs checkpoint: v0.6.77 initial mobile backlog convergence candidate
-- latest release tag: `v0.6.76`（immutable BRAT実機試験用Prerelease。annotated tag object `1303486def806def2993b40925c12f31d33737db`、peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`。公開済みtag / Release / assetsは固定）
+- canonical docs checkpoint: v0.6.77 initial mobile backlog convergence BRAT Prerelease
+- latest release tag: `v0.6.77`（immutable BRAT実機試験用Prerelease。annotated tag object `5160967397a9732fad03a1326beec36ee8be8d7f`、peeled target `8e263f14e8b07382c9639add09a9fd052708e826`。公開済みtag / Release / assetsは固定）
 - 構文確認: `node --check .\main.js` 成功
 
 この文書は実ファイル、Git履歴、既存docsから確認した現在地を記録する。実装の存在、試験配布、実機試験済みであることは分けて扱う。immutable v0.6.76の`UI-REFRESH-BACKLOG-01`では、seq 2540〜2545がremote / mobileともappliedで三端末の物理MarkdownはA/B/Cだったが、mobileの初回TaskChute表示はAだけで、2回目のfocus後にA/B/Cとなった。これはCase A initial UI convergence staleであり`FAIL`である。コード調査では`patchViews:false`のdisk reloadと古いsnapshotの初回renderが、実際には描画していない最新generationまでrender済みとして進める経路を確定した。v0.6.77候補はno-view dirty generationを保持し、実際に読んだauthoritative Markdown snapshotのgenerationだけをrender済みにする。focused syntheticのみで実機は`NOT_VERIFIED`である。
@@ -20,10 +20,10 @@
 
 ## Delivery state
 
-| State | v0.6.77 candidate |
+| State | v0.6.77 BRAT Prerelease |
 |---|---|
-| Integrated | No |
-| Prereleased / Test-distributed | No |
+| Integrated | Yes |
+| Prereleased / Test-distributed | Yes |
 | Verified | No |
 | Released | No |
 

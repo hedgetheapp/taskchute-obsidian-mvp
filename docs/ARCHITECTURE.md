@@ -1,6 +1,6 @@
 # Architecture
 
-調査基準: v0.6.77候補。最新immutable配布はv0.6.76 BRAT Prerelease（peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`）で、公開済みtag / Release / assetsは差し替えない。v0.6.77 focused syntheticはPASSしたが実Vault試験とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
+調査基準: immutable v0.6.77 BRAT Prerelease（peeled target `8e263f14e8b07382c9639add09a9fd052708e826`）。公開済みtag / Release / assetsは差し替えない。v0.6.77 focused syntheticはPASSしたが実Vault試験とplugin full matrixは`NOT_VERIFIED`で、Verified / Releasedではない。
 
 ## 1. 概要
 

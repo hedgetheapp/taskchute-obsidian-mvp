@@ -2,7 +2,7 @@
 
 ## 基準
 
-この一覧はv0.6.77候補の現行実装を対象とする。最新immutable配布はv0.6.76 BRAT Prereleaseである。v0.6.76では6-event backlogの物理状態とAckはA/B/Cへ収束したが初回mobile表示がAだけとなりFAILした。v0.6.77 focused syntheticはPASSだが実機未検証で、full matrixは`NOT_VERIFIED`である。
+この一覧はimmutable v0.6.77 BRAT Prereleaseの現行実装を対象とする。v0.6.76では6-event backlogの物理状態とAckはA/B/Cへ収束したが初回mobile表示がAだけとなりFAILした。v0.6.77 focused syntheticはPASSだが実機未検証で、full matrixは`NOT_VERIFIED`である。
 
 ## ステータス定義
 

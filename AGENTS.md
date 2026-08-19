@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current implementation candidate: `v0.6.77` (Integrated=No / Prereleased-Test-distributed=No / Verified=No / Released=No). Latest immutable test distribution: `v0.6.76` BRAT Prerelease, annotated tag object `1303486def806def2993b40925c12f31d33737db`, peeled target `af4a6b1a0893094aba746462be2d0b02d9e3a492`.
+- Current implementation and immutable test distribution: `v0.6.77` BRAT Prerelease (Integrated=Yes / Prereleased-Test-distributed=Yes / Verified=No / Released=No), annotated tag object `5160967397a9732fad03a1326beec36ee8be8d7f`, peeled target `8e263f14e8b07382c9639add09a9fd052708e826`.
 - v0.6.76 device evidence failed initial mobile backlog convergence: D1 and all three physical boards contained A/B/C, but the first mobile TaskChute display showed only A and required a second focus to show A/B/C. v0.6.77 keeps no-view dirty generation pending and advances rendered generation only to the exact persisted Markdown snapshot actually rendered. Focused tests pass while device verification and the plugin full matrix remain `NOT_VERIFIED`.
 - Distribution remains `main.js`, `manifest.json`, and `styles.css`.
 - Keep the single-file `main.js` runtime unless the user explicitly approves a packaging change.
